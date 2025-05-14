@@ -39,15 +39,36 @@ function normalize_M!(u::Vector{Float64}, M::Matrix{Float64})
 end
 
 # 4) Domain decomposition: subdivide into m blocks
-function subspace_indices(N::Int, m::Int)
+function subspace_indices(N::Int, m::Int; overlap::Int=0)
+    """
+    Partition the indices 1..N into m subspaces with an overlap of 'overlap' points
+    between adjacent subdomains.
+    """
+    # Basic size for each block (no overlap)
     size_block = div(N, m)
+
     subs = Vector{Vector{Int}}(undef, m)
     startidx = 1
     for i in 1:m
+        # Normally stopidx would be startidx+size_block-1
+        # but we’ll build the base block, then add overlap.
         stopidx = (i < m) ? (startidx + size_block - 1) : N
-        subs[i] = collect(startidx:stopidx)
+
+        # Now define the block with the overlap region
+        #   - For domain i, we can extend it by 'overlap' points
+        #     at the high end (except maybe for the last subdomain).
+        #   - Similarly, we can shift the start backwards by 'overlap'
+        #     for subdomains after the first.
+        # This is just one possible pattern.
+        actual_start = max(1, startidx - overlap)
+        actual_stop  = min(N, stopidx + overlap)
+
+        subs[i] = collect(actual_start:actual_stop)
+
+        # Move on to the next block’s start
         startidx = stopidx + 1
     end
+    println(subs)
     return subs
 end
 
@@ -135,12 +156,17 @@ function ddm_eigen_solver(;
         local_updates = Vector{Vector{Float64}}(undef, m+1)
         local_updates[1] = u_cur
         for i in 1:m
-            u_next_i = inf_step(local_updates[i], K, M, subspaces[i])
+
+            # ChatGPT mistake:
+            # u_next_i = inf_step(local_updates[i], K, M, subspaces[i])
+
+            u_next_i = inf_step(u_cur, K, M, subspaces[i])
             local_updates[i+1] = u_next_i
         end
 
         # Combine step
         u_new = combine_step(local_updates, K, M)
+        # u_new = u_cur + sum(local_updates)
 
         # --- SIGN FIX to avoid solution flipping from iteration to iteration ---
         if dot(u_new, u_cur) < 0
@@ -243,3 +269,39 @@ display(plt1)
 display(plt2)
 display(plt3)
 display(plt4)
+
+#inverse power method
+function inverse_power_method2(K::Matrix{Float64}, M::Matrix{Float64}, u0::Vector{Float64}, maxiter::Int=100, tol::Float64=1e-10, λ::Float64=0.0)
+    """
+    Inverse power method to find the smallest eigenvalue and corresponding eigenvector
+    of the generalized eigenvalue problem Kx = λMx.
+    """
+    u = copy(u0)
+    normalize_M!(u, M)
+
+    for i in 1:maxiter
+        # Solve the linear system (K - λM)x = 0
+        # Here we use the Rayleigh quotient as an approximation for λ
+
+        A = K - λ * M
+        u_new = A \ u
+
+        # Normalize the new vector
+        normalize_M!(u_new, M)
+
+        λ = R(u, K, M)
+        @info "Iteration $i: λ = $λ"
+
+        # Check convergence
+        dist = M_norm_distance(u_new, u, M)
+        if dist < tol
+            println("Converged at iteration $i with eigenvalue λ ≈ $λ")
+            return u_new, λ
+        end
+
+        u = copy(u_new)
+    end
+
+    println("Reached maxiter=$maxiter with final Rayleigh quotient ≈ $λ")
+    return u, λ
+end
