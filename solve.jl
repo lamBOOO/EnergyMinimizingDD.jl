@@ -39,7 +39,7 @@ function normalize_M!(u::Vector{Float64}, M::Matrix{Float64})
 end
 
 # 4) Domain decomposition: subdivide into m blocks
-function subspace_indices(N::Int, m::Int; overlap::Int=0)
+function subspace_indices(N::Int, m::Int, overlap::Int=1)
     """
     Partition the indices 1..N into m subspaces with an overlap of 'overlap' points
     between adjacent subdomains.
@@ -107,10 +107,14 @@ function combine_step(u_collection::Vector{Vector{Float64}},
                      K::Matrix{Float64}, M::Matrix{Float64})
     B = hcat(u_collection...)
     K_local = B' * (K * B)
+    println("K_local:", eigen(K_local).values)
     M_local = B' * (M * B)
+    println("M_local:", eigen(M_local).values)
     eigvals, eigvecs = eigen(K_local, M_local)
+    println(eigvals)
     i_min = argmin(eigvals)
     α_min = eigvecs[:, i_min]
+    println(α_min)
 
     x_new = B * α_min
     normalize_M!(x_new, M)
@@ -128,7 +132,8 @@ function ddm_eigen_solver(;
     N::Int=50,
     m::Int=2,
     maxiter::Int=50,
-    tol::Float64=1e-8
+    tol::Float64=1e-8,
+    overlap::Int=1
 )
 
     K, M = laplace_eig_matrices(N)
@@ -138,7 +143,7 @@ function ddm_eigen_solver(;
     normalize_M!(u_cur, M)
 
     # Sub-domain index sets
-    subspaces = subspace_indices(N, m)
+    subspaces = subspace_indices(N, m, overlap=overlap)
 
     # Track the Rayleigh quotient each iteration
     lambda_history = Float64[]
@@ -176,7 +181,7 @@ function ddm_eigen_solver(;
         λ_new = R(u_new, K, M)
         push!(lambda_history, λ_new)
         push!(solutions, copy(u_new))
-
+        println(abs(λ_new - λ_cur))
         if abs(λ_new - λ_cur) < tol
             println("Converged at iteration $n with eigenvalue λ = $λ_new")
             return u_new, λ_new, lambda_history, solutions
@@ -194,8 +199,9 @@ end
 ###############################################################################
 # Run the solver
 ###############################################################################
-N       = 30
-m       = 3
+N       = 50
+m       = 9
+ol      = 1
 maxiter = 100
 tol     = 1e-10
 
@@ -203,7 +209,8 @@ u_approx, lambda_approx, lambda_history, solutions = ddm_eigen_solver(
     N=N,
     m=m,
     maxiter=maxiter,
-    tol=tol
+    tol=tol,
+    overlap=ol
 )
 
 println("Final approximate eigenvalue = $lambda_approx")
