@@ -2,7 +2,7 @@ using LinearAlgebra
 using Plots
 
 # 1) Define the 1D mesh and finite difference matrices
-function laplace_eig_matrices(N::Int)
+function laplace_eig_matrices(N::Int; m::Int=9)
     """
     Set up the mass matrix M and stiffness matrix K for the
     1D Laplace operator -u'' on (0,1) with Dirichlet boundary
@@ -18,10 +18,28 @@ function laplace_eig_matrices(N::Int)
     # Scale by 1/h^2
     K .= (1/h^2) .* K
 
+    x = range(h, 1-h, length = N)
+    v = fill(2.0, N)
+    σ = 0.01
+    H = 1/m
+    for i in 0:m-1
+    #   v -= exp.(-(x.-0.5).*(x.-0.5)./(2*σ))
+        v -= exp.(-abs.(x.-(H/2+i*H))./(2*σ))
+    end
+    K += 1000*diagm(0 => v)
+
+    display(plot!(x, v,
+            legend=false,
+            marker=:none))
+            sleep(1)
+
+    
+            # u_plot = vcat(0.0, u_next_i, 0.0)
+
     # Mass matrix: the identity times 1.0 (per your request)
     M = Matrix(I, N, N) .* 1.0
 
-    return K, M
+    return K, M, v
 end
 
 # 2) Rayleigh quotient
@@ -39,7 +57,7 @@ function normalize_M!(u::Vector{Float64}, M::Matrix{Float64})
 end
 
 # 4) Domain decomposition: subdivide into m blocks
-function subspace_indices(N::Int, m::Int; overlap::Int=0)
+function subspace_indices(N::Int, m::Int; overlap::Int=10)
     """
     Partition the indices 1..N into m subspaces with an overlap of 'overlap' points
     between adjacent subdomains.
@@ -106,12 +124,20 @@ end
 function combine_step(u_collection::Vector{Vector{Float64}},
                      K::Matrix{Float64}, M::Matrix{Float64})
     B = hcat(u_collection...)
+    B = Matrix(qr(B).Q)
+
+
     K_local = B' * (K * B)
     M_local = B' * (M * B)
     eigvals, eigvecs = eigen(K_local, M_local)
     i_min = argmin(eigvals)
     α_min = eigvecs[:, i_min]
 
+
+
+    # println("eigen(K_local): ",eigen(K_local).values)
+    # println("eigen(M_local): ",eigen(M_local).values)
+    # println(α_min)
     x_new = B * α_min
     normalize_M!(x_new, M)
     return x_new
@@ -128,7 +154,8 @@ function ddm_eigen_solver(;
     N::Int=50,
     m::Int=2,
     maxiter::Int=50,
-    tol::Float64=1e-8
+    tol::Float64=1e-8,
+    sweep::Bool=true
 )
 
     K, M = laplace_eig_matrices(N)
@@ -151,21 +178,54 @@ function ddm_eigen_solver(;
 
     println("Initial Rayleigh quotient = $λ_cur")
 
+    sub_int = 1:m
     for n in 1:maxiter
         # Local updates
         local_updates = Vector{Vector{Float64}}(undef, m+1)
         local_updates[1] = u_cur
-        for i in 1:m
+        for i in sub_int
+            println(i)
 
-            # ChatGPT mistake:
-            # u_next_i = inf_step(local_updates[i], K, M, subspaces[i])
+            # Additive
+            # u_next_i = inf_step(local_updates[1], K, M, subspaces[i])
 
-            u_next_i = inf_step(u_cur, K, M, subspaces[i])
+            # Multiplicative
+            u_next_i = inf_step(local_updates[i], K, M, subspaces[i])
+
+            # if dot(u_next_i, u_cur) < 0
+            #     u_next_i .*= -1.0
+            # end
+            # normalize_M!(u_next_i, M)
+            # x = range(0, 1, length = N+2)
+            # u_plot = vcat(0.0, u_next_i, 0.0)
+    
+            # display(plot!(x, u_plot,
+            # legend=false,
+            # marker=:none))
+            # sleep(1)
+
             local_updates[i+1] = u_next_i
+        end
+        if sweep
+            sub_int = -sub_int.+(m+1)
         end
 
         # Combine step
         u_new = combine_step(local_updates, K, M)
+
+        # u_new = u_cur
+        # for i in 1:m
+        #     u_new += (local_updates[i+1]-u_cur)
+        # end
+        # normalize_M!(u_cur, M)
+        # x = range(0, 1, length = N+2)
+        # u_plot = vcat(0.0, u_cur, 0.0)
+
+        # display(plot!(x, u_plot,
+        # legend=false,
+        # marker=:none))
+        # sleep(1)
+       
         # u_new = u_cur + sum(local_updates)
 
         # --- SIGN FIX to avoid solution flipping from iteration to iteration ---
@@ -177,6 +237,7 @@ function ddm_eigen_solver(;
         push!(lambda_history, λ_new)
         push!(solutions, copy(u_new))
 
+        println(abs(λ_new - λ_cur))
         if abs(λ_new - λ_cur) < tol
             println("Converged at iteration $n with eigenvalue λ = $λ_new")
             return u_new, λ_new, lambda_history, solutions
@@ -194,8 +255,8 @@ end
 ###############################################################################
 # Run the solver
 ###############################################################################
-N       = 30
-m       = 3
+N       = 1000
+m       = 9
 maxiter = 100
 tol     = 1e-10
 
