@@ -86,7 +86,7 @@ function subspace_indices(N::Int, m::Int; overlap::Int=10)
         # Move on to the next block’s start
         startidx = stopidx + 1
     end
-    println(subs)
+    #println(subs)
     return subs
 end
 
@@ -176,15 +176,15 @@ function ddm_eigen_solver(;
     push!(lambda_history, λ_cur)
     push!(solutions, copy(u_cur))
 
-    println("Initial Rayleigh quotient = $λ_cur")
+    #println("Initial Rayleigh quotient = $λ_cur")
 
-    sub_int = 1:m
+    #sub_int = 1:m
     for n in 1:maxiter
         # Local updates
         local_updates = Vector{Vector{Float64}}(undef, m+1)
         local_updates[1] = u_cur
-        for i in sub_int
-            println(i)
+        for i=1:m
+            #println(i)
 
             # Additive
             # u_next_i = inf_step(local_updates[1], K, M, subspaces[i])
@@ -237,7 +237,7 @@ function ddm_eigen_solver(;
         push!(lambda_history, λ_new)
         push!(solutions, copy(u_new))
 
-        println(abs(λ_new - λ_cur))
+        #println(abs(λ_new - λ_cur))
         if abs(λ_new - λ_cur) < tol
             println("Converged at iteration $n with eigenvalue λ = $λ_new")
             return u_new, λ_new, lambda_history, solutions
@@ -255,10 +255,11 @@ end
 ###############################################################################
 # Run the solver
 ###############################################################################
-N       = 1000
+N=1000
 m       = 9
-maxiter = 100
+maxiter = 200
 tol     = 1e-10
+
 
 u_approx, lambda_approx, lambda_history, solutions = ddm_eigen_solver(
     N=N,
@@ -266,6 +267,7 @@ u_approx, lambda_approx, lambda_history, solutions = ddm_eigen_solver(
     maxiter=maxiter,
     tol=tol
 )
+
 
 println("Final approximate eigenvalue = $lambda_approx")
 
@@ -277,19 +279,20 @@ x = range(0, 1, length = N+2)
 u_plot = vcat(0.0, u_approx, 0.0)
 
 plt1 = plot(
-    x, u_plot,
-    marker    = :o,
+   x, u_plot,
+   marker    = :o,
     xlabel    = "x",
     ylabel    = "u(x)",
     title     = "DDM Approx. Eigenfunction (λ ≈ $lambda_approx)",
-    label     = "Final Eigenfunction"
+    label     = "Final Eigenfunction for N= $N"
 )
 
 #  -- Plot 2: Convergence of the Rayleigh quotient --
 iters = 0:length(lambda_history)-1
+
 plt2 = plot(
-    iters, lambda_history,
-    marker = :o,
+   iters, lambda_history,
+  marker = :o,
     xlabel = "Iteration",
     ylabel = "Rayleigh Quotient",
     title  = "Convergence of Eigenvalue (m=$m, N=$N)"
@@ -303,24 +306,24 @@ exact_sol = eigen(K)
 exact_val = exact_sol.values[1]
 exact_vec = exact_sol.vectors[:, 1]
 distances = [
-    M_norm_distance(solutions[i], exact_vec, M)
+   M_norm_distance(solutions[i], exact_vec, M)
     for i in 1:length(solutions)
 ]
 plt3 = plot(
     iters, distances,
-    marker = :o,
-    xlabel = "Iteration",
+   marker = :o,
+   xlabel = "Iteration",
     ylabel = "||u^(k) - u^(exact)||_M",
     title  = "Convergence of the Eigenvector in M-norm",
-    yaxis = :log
+   yaxis = :log
 )
 
 #  -- Plot 4: Overlay all iteration solutions --
 plt4 = plot(title="All Iteration Solutions (m=$m, N=$N)")
 for i in 1:length(solutions)
-    u_iter_withBC = vcat(0.0, solutions[i], 0.0)
+   u_iter_withBC = vcat(0.0, solutions[i], 0.0)
     plot!(x, u_iter_withBC,
-    # label="Iter $(i-1)",
+     label="Iter $(i-1)",
     legend=false,
     marker=:none)
 end
