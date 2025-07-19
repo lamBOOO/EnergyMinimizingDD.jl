@@ -1,6 +1,7 @@
 using LinearAlgebra
 using Plots
-
+using Gridap
+using Metis
 # 1) Define the 1D mesh and finite difference matrices
 function laplace_eig_matrices(N::Int; m::Int=9)
     """
@@ -39,7 +40,24 @@ function laplace_eig_matrices(N::Int; m::Int=9)
     # Mass matrix: the identity times 1.0 (per your request)
     M = Matrix(I, N, N) .* 1.0
 
-    return K, M, v
+    return K, M, v # why return v if it isn't used?
+end
+
+function Matrix_FEM(N::Int, m::Int=9) # Prototype function for FEM Matrices, The integration of overlap in the matrices unclear (see Slack)
+    P(x)= 0 #TBD
+    domain=(0, 1.0, 0, 1.0)
+    partition = (Lxp * N, Lyp * N) 
+    model = CartesianDiscreteModel(domain, partition; isperiodic=(false, false))
+    reffe = ReferenceFE(lagrangian, Float64, 1) #labels necessary?
+    VV = TestFESpace(model, reffe, dirichlet_tags=["boundary"])
+    Ω = Triangulation(model)
+    dΩ = Measure(Ω, 2)
+    U = TrialFESpace(VV, 0)
+    a1(u, v) = ∫(∇(u) ⋅ ∇(v) + (x -> P(x)) * u * v)dΩ
+    a2(u, v) = ∫(u * v)dΩ
+    K= assemble_matrix(a1, VV, U)
+    M=assemble_matrix(a2, VV, U)
+    return K,M
 end
 
 # 2) Rayleigh quotient
