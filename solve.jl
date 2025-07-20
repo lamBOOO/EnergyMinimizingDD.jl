@@ -173,7 +173,7 @@ function ddm_eigen_solver(;
     m::Int=2,
     maxiter::Int=50,
     tol::Float64=1e-8,
-    sweep::Bool=true
+    #sweep::Bool=true
 )
 
     K, M = laplace_eig_matrices(N)
@@ -224,9 +224,9 @@ function ddm_eigen_solver(;
 
             local_updates[i+1] = u_next_i
         end
-        if sweep
-            sub_int = -sub_int.+(m+1)
-        end
+        #if sweep
+       #     sub_int = -sub_int.+(m+1)
+        #end
 
         # Combine step
         u_new = combine_step(local_updates, K, M)
