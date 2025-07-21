@@ -31,5 +31,5 @@ jobs:
 
     - name: Tests
       run: |
-        julia test/Runtest.jl  
+        julia --project=. test/Runtest.jl  
 
