@@ -68,9 +68,10 @@ for i in 1:length(solutions)
     marker=:none)
 end
 
-# Display them in sequence
+# save them 
 savefig(plt1, "Final_fct.png")
 savefig(plt2, "R_convergence.png")
 savefig(plt3, "Convergence_vec.png")
 savefig(plt4, "all_its.png")
+@test lambda_history[end]≈1633.07 rtol=1e-2
 end
