@@ -49,14 +49,14 @@ end
 end
 
 # 2) Rayleigh quotient
-function R(u::Vector{Float64}, K::Matrix{Float64}, M::Matrix{Float64})
+function R(u::Vector{Float64}, K::AbstractMatrix, M::AbstractMatrix)
     numerator   = dot(u, K*u)
     denominator = dot(u, M*u)
     return numerator / denominator
 end
 
 # 3) Normalization in the M-norm
-function normalize_M!(u::Vector{Float64}, M::Matrix{Float64})
+function normalize_M!(u::Vector{Float64}, M::AbstractMatrix)
     nu = sqrt(dot(u, M*u))
     @assert nu > 1e-14 "Attempting to normalize a near-zero vector."
     u ./= nu
@@ -65,9 +65,10 @@ end
 
 # 5) Inf step on subspace D_i
 function inf_step(u_current::Vector{Float64},
-                  K::Matrix{Float64}, M::Matrix{Float64},
-                  idx_sub::Vector{Int})
+                  K::AbstractMatrix, M::AbstractMatrix,
+                  idx_sub::AbstractVector)
     N = length(u_current)
+    println(idx_sub)
     localdim = 1 + length(idx_sub)
     B = Matrix{Float64}(undef, N, localdim)
 
@@ -95,7 +96,7 @@ end
 
 # 6) Combine step
 function combine_step(u_collection::Vector{Vector{Float64}},
-                     K::Matrix{Float64}, M::Matrix{Float64})
+                     K::AbstractMatrix, M::AbstractMatrix)
     B = hcat(u_collection...)
     B = Matrix(qr(B).Q)
 
@@ -117,7 +118,7 @@ function combine_step(u_collection::Vector{Vector{Float64}},
 end
 
 # A helper function for measuring "distance" in M-norm
-function M_norm_distance(u::Vector{Float64}, v::Vector{Float64}, M::Matrix{Float64})
+function M_norm_distance(u::Vector{Float64}, v::Vector{Float64}, M::AbstractMatrix)
     w = u .- v
     return sqrt(dot(w, M*w))
 end
@@ -132,9 +133,8 @@ function ddm_eigen_solver(;
 )
 
     K, M, subspaces= Setup_FEM(N,m)
-
     # Initial guess
-    u_cur = ones(N)
+    u_cur = ones((N-1)^2)
     normalize_M!(u_cur, M)
 
     # Track the Rayleigh quotient each iteration
@@ -225,7 +225,7 @@ end
 ###############################################################################
 # Run the solver
 ###############################################################################
-N=1000
+N=20
 m       = 9
 maxiter = 200
 tol     = 1e-10
@@ -241,68 +241,7 @@ u_approx, lambda_approx, lambda_history, solutions = ddm_eigen_solver(
 
 println("Final approximate eigenvalue = $lambda_approx")
 
-###############################################################################
-# Make the plots
-###############################################################################
-#  -- Plot 1: Final approximate eigenfunction --
-x = range(0, 1, length = N+2)
-u_plot = vcat(0.0, u_approx, 0.0)
-
-plt1 = plot(
-   x, u_plot,
-   marker    = :o,
-    xlabel    = "x",
-    ylabel    = "u(x)",
-    title     = "DDM Approx. Eigenfunction (λ ≈ $lambda_approx)",
-    label     = "Final Eigenfunction for N= $N"
-)
-
-#  -- Plot 2: Convergence of the Rayleigh quotient --
-iters = 0:length(lambda_history)-1
-
-plt2 = plot(
-   iters, lambda_history,
-  marker = :o,
-    xlabel = "Iteration",
-    ylabel = "Rayleigh Quotient",
-    title  = "Convergence of Eigenvalue (m=$m, N=$N)"
-)
-
-#  -- Plot 3: Convergence in the eigenvector (M-norm) --
-#  We measure the distance of each solution from the final solution
-K, M = laplace_eig_matrices(N)
-final_sol = solutions[end]
-exact_sol = eigen(K)
-exact_val = exact_sol.values[1]
-exact_vec = exact_sol.vectors[:, 1]
-distances = [
-   M_norm_distance(solutions[i], exact_vec, M)
-    for i in 1:length(solutions)
-]
-plt3 = plot(
-    iters, distances,
-   marker = :o,
-   xlabel = "Iteration",
-    ylabel = "||u^(k) - u^(exact)||_M",
-    title  = "Convergence of the Eigenvector in M-norm",
-   yaxis = :log
-)
-
-#  -- Plot 4: Overlay all iteration solutions --
-plt4 = plot(title="All Iteration Solutions (m=$m, N=$N)")
-for i in 1:length(solutions)
-   u_iter_withBC = vcat(0.0, solutions[i], 0.0)
-    plot!(x, u_iter_withBC,
-     label="Iter $(i-1)",
-    legend=false,
-    marker=:none)
-end
-
-# Display them in sequence
-display(plt1)
-display(plt2)
-display(plt3)
-display(plt4)
+#TODO Plots for FEM
 
 #inverse power method
 function inverse_power_method2(K::Matrix{Float64}, M::Matrix{Float64}, u0::Vector{Float64}, maxiter::Int=100, tol::Float64=1e-10, λ::Float64=0.0)
