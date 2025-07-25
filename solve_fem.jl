@@ -2,47 +2,50 @@ using LinearAlgebra
 using Plots
 using Gridap
 using Metis
-# 1) Define the 1D mesh and finite difference matrices
-function laplace_eig_matrices(N::Int; m::Int=9)
-    """
-    Set up the mass matrix M and stiffness matrix K for the
-    1D Laplace operator -u'' on (0,1) with Dirichlet boundary
-    conditions using N interior points.
-    """
-    # Spatial step
-    h = 1.0 / (N+1)
-
-    # Stiffness matrix (K ~ -d^2/dx^2)
-    diag_main = fill(2.0, N)
-    diag_off  = fill(-1.0, N-1)
-    K = diagm(0 => diag_main, 1 => diag_off, -1 => diag_off)
-    # Scale by 1/h^2
-    K .= (1/h^2) .* K
-
-    x = range(h, 1-h, length = N)
-    v = fill(2.0, N)
-    σ = 0.01
-    H = 1/m
-    for i in 0:m-1
-    #   v -= exp.(-(x.-0.5).*(x.-0.5)./(2*σ))
-        v -= exp.(-abs.(x.-(H/2+i*H))./(2*σ))
-    end
-    K += 1000*diagm(0 => v)
-
-    display(plot!(x, v,
-            legend=false,
-            marker=:none))
-            sleep(1)
-
-    
-            # u_plot = vcat(0.0, u_next_i, 0.0)
-
-    # Mass matrix: the identity times 1.0 (per your request)
-    M = Matrix(I, N, N) .* 1.0
-
-    return K, M, v # why return v if it isn't used?
+using GridapDistributed
+  P(x)= 0 #TBD
+function Setup_FEM(N::Int, m::Int=9) # Discretizing the domain, building mass and stiffness matrix, specifying the overlapping domains
+    domain=(0, 1.0, 0, 1.0)
+    partition1 = (1.0 * N, 1.0 * N) 
+    model = CartesianDiscreteModel(domain, partition1; isperiodic=(false, false))
+    reffe = ReferenceFE(lagrangian, Float64, 1) #labels necessary?
+    VV = TestFESpace(model, reffe, dirichlet_tags=["boundary"])
+    Ω = Triangulation(model)
+    dΩ = Measure(Ω, 2)
+    U = TrialFESpace(VV, 0)
+    a1(u, v) = ∫(∇(u) ⋅ ∇(v) + (x -> P(x)) * u * v)dΩ
+    a2(u, v) = ∫(u * v)dΩ
+    K= assemble_matrix(a1, VV, U)
+    M=assemble_matrix(a2, VV, U)
+    g = GridapDistributed.compute_cell_graph(model)
+    par = Metis.partition(g, m)
+    elpar = create_elements_partition(par, m)
+    create_overlapping_elements_partition!(elpar, g, m, 10)
+    return K,M, elpar
 end
 
+function create_elements_partition(partition::Vector{Int32}, npars::Integer) # Helper function from DDEigenlab
+  nelems = length(partition)
+  @debug nelems, length(partition)
+  @assert nelems == length(partition)
+  elemsp = [Vector{Int32}() for _ in 1:npars]
+  for iel = 1:nelems
+    push!(elemsp[partition[iel]], iel)
+  end
+  @debug nelems, sum(length.(elemsp))
+  @assert nelems == sum(length.(elemsp))
+  return elemsp
+end
+
+ function create_overlapping_elements_partition!(elemsp, g, npars::Integer, ol) # Helper function from DDEigenlab
+  for iol = 1:ol
+    @debug "overlap" iol
+     for ipar = 1:npars
+      tmp = copy(elemsp)
+      elemsp[ipar] = sort(unique(vcat([g[:, i].nzind for i in tmp[ipar]]...)))
+    end
+  end
+end
 
 # 2) Rayleigh quotient
 function R(u::Vector{Float64}, K::Matrix{Float64}, M::Matrix{Float64})
@@ -58,39 +61,6 @@ function normalize_M!(u::Vector{Float64}, M::Matrix{Float64})
     u ./= nu
 end
 
-# 4) Domain decomposition: subdivide into m blocks
-function subspace_indices(N::Int, m::Int; overlap::Int=10)
-    """
-    Partition the indices 1..N into m subspaces with an overlap of 'overlap' points
-    between adjacent subdomains.
-    """
-    # Basic size for each block (no overlap)
-    size_block = div(N, m)
-
-    subs = Vector{Vector{Int}}(undef, m)
-    startidx = 1
-    for i in 1:m
-        # Normally stopidx would be startidx+size_block-1
-        # but we’ll build the base block, then add overlap.
-        stopidx = (i < m) ? (startidx + size_block - 1) : N
-
-        # Now define the block with the overlap region
-        #   - For domain i, we can extend it by 'overlap' points
-        #     at the high end (except maybe for the last subdomain).
-        #   - Similarly, we can shift the start backwards by 'overlap'
-        #     for subdomains after the first.
-        # This is just one possible pattern.
-        actual_start = max(1, startidx - overlap)
-        actual_stop  = min(N, stopidx + overlap)
-
-        subs[i] = collect(actual_start:actual_stop)
-
-        # Move on to the next block’s start
-        startidx = stopidx + 1
-    end
-    #println(subs)
-    return subs
-end
 
 # 5) Inf step on subspace D_i
 function inf_step(u_current::Vector{Float64},
@@ -160,14 +130,11 @@ function ddm_eigen_solver(;
     #sweep::Bool=true
 )
 
-    K, M = laplace_eig_matrices(N)
+    K, M, subspaces= Setup_FEM(N,m)
 
     # Initial guess
     u_cur = ones(N)
     normalize_M!(u_cur, M)
-
-    # Sub-domain index sets
-    subspaces = subspace_indices(N, m)
 
     # Track the Rayleigh quotient each iteration
     lambda_history = Float64[]
