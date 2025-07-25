@@ -3,6 +3,7 @@ using Plots
 using Gridap
 using Metis
 using GridapDistributed
+using ThreadsX
   P(x)= 0 #TBD
 function Setup_FEM(N::Int, m::Int=9) # Discretizing the domain, building mass and stiffness matrix, specifying the overlapping domains
     domain=(0, 1.0, 0, 1.0)
@@ -20,7 +21,7 @@ function Setup_FEM(N::Int, m::Int=9) # Discretizing the domain, building mass an
     g = GridapDistributed.compute_cell_graph(model)
     par = Metis.partition(g, m)
     elpar = create_elements_partition(par, m)
-    create_overlapping_elements_partition!(elpar, g, m, 10)
+    create_overlapping_elements_partition!(elpar, g, m, 2)
     return K,M, elpar
 end
 
@@ -40,7 +41,7 @@ end
  function create_overlapping_elements_partition!(elemsp, g, npars::Integer, ol) # Helper function from DDEigenlab
   for iol = 1:ol
     @debug "overlap" iol
-     for ipar = 1:npars
+      Threads.@threads for ipar = 1:npars
       tmp = copy(elemsp)
       elemsp[ipar] = sort(unique(vcat([g[:, i].nzind for i in tmp[ipar]]...)))
     end
