@@ -7,7 +7,7 @@ using ThreadsX
   P(x)= 0 #TBD
 function Setup_FEM(N::Int, m::Int=9) # Discretizing the domain, building mass and stiffness matrix, specifying the overlapping domains
     domain=(0, 1.0, 0, 1.0)
-    partition1 = (1.0 * N, 1.0 * N) 
+    partition1 = (1.0 * N, 1.0 * N)
     model = CartesianDiscreteModel(domain, partition1; isperiodic=(false, false))
     reffe = ReferenceFE(lagrangian, Float64, 1) #labels necessary?
     VV = TestFESpace(model, reffe, dirichlet_tags=["boundary"])
@@ -22,7 +22,36 @@ function Setup_FEM(N::Int, m::Int=9) # Discretizing the domain, building mass an
     par = Metis.partition(g, m)
     elpar = create_elements_partition(par, m)
     create_overlapping_elements_partition!(elpar, g, m, 2)
-    return K,M, elpar
+    dofspar = create_dofs_partition(elpar, VV)
+    create_dofs_partition
+    return K,M, dofspar
+end
+
+function create_dofs_partition(
+  elemsp::Vector{Vector{Int32}}, sp::Gridap.FESpaces.UnconstrainedFESpace
+)
+  m = sp.fe_basis.trian.model
+  dim = size(m.grid_topology.n_m_to_nface_to_mfaces,2) - 1
+  npars = length(elemsp)
+  @debug "create nodesp"
+  nodesp = [Vector{Int32}() for _ in 1:npars]
+  Threads.@threads for ipar = 1:npars
+    nodesp[ipar] = sort(unique(vcat([m.grid_topology.n_m_to_nface_to_mfaces[dim+1][el] for el in elemsp[ipar]]...)))
+  end
+
+  @debug "create freenodesp"
+  freenodesp = copy(nodesp)
+  Threads.@threads for ipar = 1:npars
+    filter!(e -> e in sp.metadata.free_dof_to_node, nodesp[ipar])
+  end
+
+  @debug "create dofsp"
+  reverse_map = zeros(Int32, maximum(sp.metadata.free_dof_to_node))
+  for (node, freenode) in enumerate(sp.metadata.free_dof_to_node)
+    reverse_map[freenode] = node
+  end
+  dofsp = [reverse_map[freenodesp[ipar]] for ipar = 1:npars]
+  return dofsp
 end
 
 function create_elements_partition(partition::Vector{Int32}, npars::Integer) # Helper function from DDEigenlab
@@ -168,7 +197,7 @@ function ddm_eigen_solver(;
             # normalize_M!(u_next_i, M)
             # x = range(0, 1, length = N+2)
             # u_plot = vcat(0.0, u_next_i, 0.0)
-    
+
             # display(plot!(x, u_plot,
             # legend=false,
             # marker=:none))
@@ -195,7 +224,7 @@ function ddm_eigen_solver(;
         # legend=false,
         # marker=:none))
         # sleep(1)
-       
+
         # u_new = u_cur + sum(local_updates)
 
         # --- SIGN FIX to avoid solution flipping from iteration to iteration ---
