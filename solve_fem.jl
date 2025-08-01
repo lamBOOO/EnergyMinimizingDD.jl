@@ -4,12 +4,13 @@ using Gridap
 using Metis
 using GridapDistributed
 using ThreadsX
+using Arpack
   P(x)= 0 #TBD
 function Setup_FEM(N::Int, m::Int=9) # Discretizing the domain, building mass and stiffness matrix, specifying the overlapping domains
     domain=(0, 1.0, 0, 1.0)
     partition1 = (1.0 * N, 1.0 * N)
     model = CartesianDiscreteModel(domain, partition1; isperiodic=(false, false))
-    reffe = ReferenceFE(lagrangian, Float64, 1) #labels necessary?
+    reffe = ReferenceFE(lagrangian, Float64, 1) 
     VV = TestFESpace(model, reffe, dirichlet_tags=["boundary"])
     Ω = Triangulation(model)
     dΩ = Measure(Ω, 2)
@@ -23,7 +24,6 @@ function Setup_FEM(N::Int, m::Int=9) # Discretizing the domain, building mass an
     elpar = create_elements_partition(par, m)
     create_overlapping_elements_partition!(elpar, g, m, 2)
     dofspar = create_dofs_partition(elpar, VV)
-    create_dofs_partition
     return K,M, dofspar
 end
 
@@ -97,7 +97,6 @@ function inf_step(u_current::Vector{Float64},
                   K::AbstractMatrix, M::AbstractMatrix,
                   idx_sub::AbstractVector)
     N = length(u_current)
-    println(idx_sub)
     localdim = 1 + length(idx_sub)
     B = Matrix{Float64}(undef, N, localdim)
 
@@ -266,12 +265,39 @@ u_approx, lambda_approx, lambda_history, solutions = ddm_eigen_solver(
     maxiter=maxiter,
     tol=tol
 )
-
+K,M,part=Setup_FEM(N,m)
 
 println("Final approximate eigenvalue = $lambda_approx")
 
-#TODO Plots for FEM
+#  -- Plot 1: Convergence of the Rayleigh quotient --
+iters = 0:length(lambda_history)-1
 
+plt1 = plot(
+   iters, lambda_history,
+  marker = :o,
+    xlabel = "Iteration",
+    ylabel = "Rayleigh Quotient",
+    title  = "Convergence of Eigenvalue (m=$m, N=$N)"
+)
+#  -- Plot 2: Convergence in the eigenvector (M-norm) --
+final_sol = solutions[end]
+exact_sol = eigs(K, nev=1, which=:LM)
+println(typeof(exact_sol))
+exact_val= exact_sol[1]
+println(exact_val)
+exact_vec=exact_sol[end]
+distances = [
+   M_norm_distance(solutions[i], exact_vec, M)
+    for i in 1:length(solutions)
+]
+plt2 = plot(
+    iters, distances,
+   marker = :o,
+   xlabel = "Iteration",
+    ylabel = "||u^(k) - u^(exact)||_M",
+    title  = "Convergence of the Eigenvector in M-norm",
+   yaxis = :log
+)
 #inverse power method
 function inverse_power_method2(K::Matrix{Float64}, M::Matrix{Float64}, u0::Vector{Float64}, maxiter::Int=100, tol::Float64=1e-10, λ::Float64=0.0)
     """
