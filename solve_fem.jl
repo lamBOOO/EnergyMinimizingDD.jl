@@ -92,7 +92,7 @@ function normalize_M!(u::Vector{Float64}, M::AbstractMatrix)
     u ./= nu
 end
 
-function pu_matrices(dofsp::Vector{Vector{Int32}}, sp::Gridap.FESpaces.UnconstrainedFESpace)
+function pu_matrices(dofsp::Vector{Vector{Int32}}, sp::Gridap.FESpaces.UnconstrainedFESpace) #pu as in Eigenlab
   npars = length(dofsp)
   Ri = Vector{SparseMatrixCSC}(undef, npars)
   Di = Vector{SparseMatrixCSC}(undef, npars)
@@ -109,10 +109,11 @@ end
 
 function coarse_space_corr(dofsp::Vector{Vector{Int32}}, sp::Gridap.FESpaces.UnconstrainedFESpace)
   Ri,Di=pu_matrices(dofsp,sp)
-  n=size(Di,1)
-  Z=zeros(Float64,n,n)
+  n=size(Di,1) # no. subdomains
+  m=size(Ri[1],2) # no. of DOFS
+  Z=zeros(Float64,m,n)
   for i=1:n
-  Z[i,i]=(Di[i]*Ri[i])*ones(size(Di[i],1))
+  Z[:,i]=(Ri[i]'*Di[i]*Ri[i])*ones(m) #Z as in Nicolaides in DD Book
   end
   return Z
 end
