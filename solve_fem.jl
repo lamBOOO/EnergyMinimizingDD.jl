@@ -5,7 +5,8 @@ using Metis
 using GridapDistributed
 using ThreadsX
 using Arpack
-  P(x)= 0 #TBD
+using SparseArrays
+  P(x)= exp(sqrt(x.data[1])^2+(x.data[2])^2)
 function Setup_FEM(N::Int, m::Int=9) # Discretizing the domain, building mass and stiffness matrix, specifying the overlapping domains
     domain=(0, 1.0, 0, 1.0)
     partition1 = (1.0 * N, 1.0 * N)
@@ -24,7 +25,7 @@ function Setup_FEM(N::Int, m::Int=9) # Discretizing the domain, building mass an
     elpar = create_elements_partition(par, m)
     create_overlapping_elements_partition!(elpar, g, m, 2)
     dofspar = create_dofs_partition(elpar, VV)
-    return K,M, dofspar
+    return K,M, dofspar, VV
 end
 
 function create_dofs_partition(
@@ -91,6 +92,30 @@ function normalize_M!(u::Vector{Float64}, M::AbstractMatrix)
     u ./= nu
 end
 
+function pu_matrices(dofsp::Vector{Vector{Int32}}, sp::Gridap.FESpaces.UnconstrainedFESpace)
+  npars = length(dofsp)
+  Ri = Vector{SparseMatrixCSC}(undef, npars)
+  Di = Vector{SparseMatrixCSC}(undef, npars)
+  Threads.@threads for ipar = 1:npars
+    Ri[ipar] = spzeros(length(dofsp[ipar]), sp.nfree)
+    Di[ipar] = spzeros(length(dofsp[ipar]), length(dofsp[ipar]))
+    for idof = 1:length(dofsp[ipar])
+      Ri[ipar][idof, dofsp[ipar][idof]] = 1
+      Di[ipar][idof, idof] = 1 / sum(map(p -> dofsp[ipar][idof] in p, dofsp))
+    end
+  end
+  return Ri, Di
+end
+
+function coarse_space_corr(dofsp::Vector{Vector{Int32}}, sp::Gridap.FESpaces.UnconstrainedFESpace)
+  Ri,Di=pu_matrices(dofsp,sp)
+  n=size(Di,1)
+  Z=zeros(Float64,n,n)
+  for i=1:n
+  Z[i,i]=(Di[i]*Ri[i])*ones(size(Di[i],1))
+  end
+  return Z
+end
 
 # 5) Inf step on subspace D_i
 function inf_step(u_current::Vector{Float64},
@@ -160,7 +185,7 @@ function ddm_eigen_solver(;
     #sweep::Bool=true
 )
 
-    K, M, subspaces= Setup_FEM(N,m)
+    K, M, subspaces,fesp= Setup_FEM(N,m)
     # Initial guess
     u_cur = ones((N-1)^2)
     normalize_M!(u_cur, M)
@@ -207,9 +232,9 @@ function ddm_eigen_solver(;
         #if sweep
        #     sub_int = -sub_int.+(m+1)
         #end
-
+        coarse_basis= coarse_space_corr(subspaces,fesp)
         # Combine step
-        u_new = combine_step(local_updates, K, M)
+        u_new = combine_step([coarse_basis,local_updates], K, M)
 
         # u_new = u_cur
         # for i in 1:m
