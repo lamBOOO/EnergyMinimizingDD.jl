@@ -6,7 +6,7 @@ using GridapDistributed
 using ThreadsX
 using Arpack
 using SparseArrays
-  P(x)= exp(sqrt(x.data[1])^2+(x.data[2])^2)
+  P(x)= exp(sqrt((x.data[1])^2+(x.data[2])^2))
 function Setup_FEM(N::Int, m::Int=9) # Discretizing the domain, building mass and stiffness matrix, specifying the overlapping domains
     domain=(0, 1.0, 0, 1.0)
     partition1 = (1.0 * N, 1.0 * N)
@@ -111,9 +111,9 @@ function coarse_space_corr(dofsp::Vector{Vector{Int32}}, sp::Gridap.FESpaces.Unc
   Ri,Di=pu_matrices(dofsp,sp)
   n=size(Di,1) # no. subdomains
   m=size(Ri[1],2) # no. of DOFS
-  Z=zeros(Float64,m,n)
+  Z=Vector{Vector{Float64}}(undef,n)
   for i=1:n
-  Z[:,i]=(Ri[i]'*Di[i]*Ri[i])*ones(m) #Z as in Nicolaides in DD Book
+  Z[i]=(Ri[i]'*Di[i]*Ri[i])*ones(m) #Z as in Nicolaides in DD Book
   end
   return Z
 end
@@ -234,8 +234,8 @@ function ddm_eigen_solver(;
        #     sub_int = -sub_int.+(m+1)
         #end
         coarse_basis= coarse_space_corr(subspaces,fesp)
-        # Combine step
-        u_new = combine_step([coarse_basis,local_updates], K, M)
+        # Combine step with coarse correction
+        u_new = combine_step([local_updates; coarse_basis], K, M)
 
         # u_new = u_cur
         # for i in 1:m
@@ -279,7 +279,7 @@ end
 ###############################################################################
 # Run the solver
 ###############################################################################
-N=20
+N=200
 m       = 9
 maxiter = 200
 tol     = 1e-10
