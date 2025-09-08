@@ -24,7 +24,10 @@ function Setup_FEM(N::Int, m::Int=9) # Discretizing the domain, building mass an
     par = Metis.partition(g, m)
     elpar = create_elements_partition(par, m)
     create_overlapping_elements_partition!(elpar, g, m, 2)
+    t1=time()
     dofspar = create_dofs_partition(elpar, VV)
+    elapsed=time()-t1
+    println("dofspar needs $elapsed seconds ")
     return K,M, dofspar, VV
 end
 
@@ -185,8 +188,11 @@ function ddm_eigen_solver(;
     tol::Float64=1e-8,
     #sweep::Bool=true
 )
-
+    setup_time=time()
     K, M, subspaces,fesp= Setup_FEM(N,m)
+    elapsed_setup=time()-setup_time
+    println("$elapsed_setup seconds needed for setup")
+    coarse_basis= coarse_space_corr(subspaces,fesp)
     # Initial guess
     u_cur = ones((N-1)^2)
     normalize_M!(u_cur, M)
@@ -201,9 +207,10 @@ function ddm_eigen_solver(;
     push!(solutions, copy(u_cur))
 
     #println("Initial Rayleigh quotient = $λ_cur")
-
+    elapsedtot=0
     #sub_int = 1:m
     for n in 1:maxiter
+      t3= time()
         # Local updates
         local_updates = Vector{Vector{Float64}}(undef, m+1)
         local_updates[1] = u_cur
@@ -233,7 +240,7 @@ function ddm_eigen_solver(;
         #if sweep
        #     sub_int = -sub_int.+(m+1)
         #end
-        coarse_basis= coarse_space_corr(subspaces,fesp)
+        
         # Combine step with coarse correction
         u_new = combine_step([local_updates; coarse_basis], K, M)
 
@@ -260,10 +267,14 @@ function ddm_eigen_solver(;
         λ_new = R(u_new, K, M)
         push!(lambda_history, λ_new)
         push!(solutions, copy(u_new))
-
+        time_it=time()-t3
+        println("Needed $time_it seconds for iteration $n")
+        elapsedtot= elapsedtot+(time()-t3)
         #println(abs(λ_new - λ_cur))
         if abs(λ_new - λ_cur) < tol
             println("Converged at iteration $n with eigenvalue λ = $λ_new")
+            av_time=elapsedtot/n
+            println("Average time pro iteration is $av_time seconds")
             return u_new, λ_new, lambda_history, solutions
         end
 
@@ -279,7 +290,7 @@ end
 ###############################################################################
 # Run the solver
 ###############################################################################
-N=200
+N=100
 m       = 9
 maxiter = 200
 tol     = 1e-10
