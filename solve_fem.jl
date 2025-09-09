@@ -6,12 +6,14 @@ using GridapDistributed
 using ThreadsX
 using Arpack
 using SparseArrays
+using Base.Threads
   P(x)= exp(sqrt((x.data[1])^2+(x.data[2])^2))
 function Setup_FEM(N::Int, m::Int=9) # Discretizing the domain, building mass and stiffness matrix, specifying the overlapping domains
+    @debug "Setup_FEM"
     domain=(0, 1.0, 0, 1.0)
     partition1 = (1.0 * N, 1.0 * N)
     model = CartesianDiscreteModel(domain, partition1; isperiodic=(false, false))
-    reffe = ReferenceFE(lagrangian, Float64, 1) 
+    reffe = ReferenceFE(lagrangian, Float64, 1)
     VV = TestFESpace(model, reffe, dirichlet_tags=["boundary"])
     Ω = Triangulation(model)
     dΩ = Measure(Ω, 2)
@@ -26,6 +28,110 @@ function Setup_FEM(N::Int, m::Int=9) # Discretizing the domain, building mass an
     create_overlapping_elements_partition!(elpar, g, m, 2)
     dofspar = create_dofs_partition(elpar, VV)
     return K,M, dofspar, VV
+end
+
+function create_dofs_partition_stamp(
+  elemsp::Vector{Vector{Int32}}, sp::Gridap.FESpaces.UnconstrainedFESpace
+)
+  m    = sp.fe_basis.trian.model
+  dim  = size(m.grid_topology.n_m_to_nface_to_mfaces, 2) - 1
+  conn = m.grid_topology.n_m_to_nface_to_mfaces[dim + 1]   # element -> nodes
+  npars = length(elemsp)
+
+  # node -> dof (0 if node is not free)
+  free_nodes = sp.metadata.free_dof_to_node
+  ndofs = length(free_nodes)
+  maxnode = maximum(free_nodes)
+  reverse_map = zeros(Int32, maxnode)
+  @inbounds for (dof, nd) in pairs(free_nodes)
+    reverse_map[nd] = Int32(dof)
+  end
+
+  @show "Creating dof partitions..."
+
+  # Per-thread stamp over DOF ids (size = ndofs, usually << maxnode)
+  nt = nthreads()
+  stamps = [zeros(UInt32, ndofs) for _ in 1:nt]
+  epochs = zeros(UInt32, nt)
+
+  dofsp = Vector{Vector{Int32}}(undef, npars)
+
+  @threads for ipar in 1:npars
+    tid   = threadid()
+    epoch = (epochs[tid] += 1)
+    stamp = stamps[tid]
+
+    out = Vector{Int32}()
+    @inbounds for el in elemsp[ipar]
+      nodes = conn[el]
+      for j = 1:length(nodes)
+        nd = nodes[j]
+        if nd <= maxnode
+          dof = reverse_map[nd]       # 0 if not free
+          if dof != 0 && stamp[dof] != epoch
+            stamp[dof] = epoch
+            push!(out, dof)           # already unique within this partition
+          end
+        end
+      end
+    end
+
+    # Optional for determinism (remove if you don't care about order)
+    sort!(out)
+    dofsp[ipar] = out
+  end
+
+  return dofsp
+end
+
+function create_dofs_partition_new(
+  elemsp::Vector{Vector{Int32}}, sp::Gridap.FESpaces.UnconstrainedFESpace
+)
+  m   = sp.fe_basis.trian.model
+  dim = size(m.grid_topology.n_m_to_nface_to_mfaces, 2) - 1
+  conn = m.grid_topology.n_m_to_nface_to_mfaces[dim + 1]  # element → nodes
+  npars = length(elemsp)
+
+  # Precompute free-node mask and reverse map (node → free dof id)
+  free_nodes = sp.metadata.free_dof_to_node
+  maxnode = maximum(free_nodes)
+
+  isfree = falses(maxnode)
+  @inbounds for nd in free_nodes
+    isfree[nd] = true
+  end
+
+  reverse_map = zeros(Int32, maxnode)
+  @inbounds for (dof, nd) in pairs(free_nodes)
+    reverse_map[nd] = Int32(dof)
+  end
+
+  dofsp = Vector{Vector{Int32}}(undef, npars)
+
+  @show "Creating dof partitions..."
+
+  @threads for ipar in 1:npars
+    # Thread-local bitset: mark free nodes touched by this partition
+    seen = falses(maxnode)
+    @inbounds for el in elemsp[ipar]
+      nodes = conn[el]
+      @inbounds for j = 1:length(nodes)
+        nd = nodes[j]
+        if nd <= maxnode && isfree[nd]
+          seen[nd] = true
+        end
+      end
+    end
+    # findall(seen) returns nodes in ascending order already
+    idxs = findall(seen)
+    v = Vector{Int32}(undef, length(idxs))
+    @inbounds @simd for i = 1:length(idxs)
+      v[i] = reverse_map[idxs[i]]
+    end
+    dofsp[ipar] = v
+  end
+
+  return dofsp
 end
 
 function create_dofs_partition(
@@ -279,8 +385,8 @@ end
 ###############################################################################
 # Run the solver
 ###############################################################################
-N=200
-m       = 9
+N=10
+m       = 2
 maxiter = 200
 tol     = 1e-10
 
