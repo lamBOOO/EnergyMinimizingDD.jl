@@ -8,3 +8,13 @@ Metis = "2679e427-3c69-5b7f-982b-ece356f1e94b"
 Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 ThreadsX = "ac1d9e8a-700a-412c-b207-f0111f4b6c0d"
+
+[compat]
+Arpack = "0.5"
+Gridap = "0.19"
+GridapDistributed = "0.4"
+IterativeSolvers = "0.9"
+Metis = "1.5"
+Plots = "1.40"
+ThreadsX = "0.1"
+julia = "1.10"
