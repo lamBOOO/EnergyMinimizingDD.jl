@@ -6,12 +6,15 @@ using GridapDistributed
 using ThreadsX
 using Arpack
 using SparseArrays
-  P(x)= exp(sqrt((x.data[1])^2+(x.data[2])^2))
+using IterativeSolvers
+
+P(x)= exp(sqrt((x.data[1])^2+(x.data[2])^2))
+
 function Setup_FEM(N::Int, m::Int=9) # Discretizing the domain, building mass and stiffness matrix, specifying the overlapping domains
     domain=(0, 1.0, 0, 1.0)
     partition1 = (1.0 * N, 1.0 * N)
     model = CartesianDiscreteModel(domain, partition1; isperiodic=(false, false))
-    reffe = ReferenceFE(lagrangian, Float64, 1) 
+    reffe = ReferenceFE(lagrangian, Float64, 1)
     VV = TestFESpace(model, reffe, dirichlet_tags=["boundary"])
     Ω = Triangulation(model)
     dΩ = Measure(Ω, 2)
@@ -125,52 +128,132 @@ end
 function inf_step(u_current::Vector{Float64},
                   K::AbstractMatrix, M::AbstractMatrix,
                   idx_sub::AbstractVector)
+    t_build_start = time()
     N = length(u_current)
     localdim = 1 + length(idx_sub)
-    B = Matrix{Float64}(undef, N, localdim)
 
-    # First column = current global vector
-    B[:, 1] = u_current
+    # More efficient: avoid creating standard basis vectors explicitly
+    # Instead, extract submatrix directly from K and M
+    t_build = time() - t_build_start
 
-    # Next columns = standard basis restricted to idx_sub
-    for (k, j) in pairs(idx_sub)
-        e = zeros(N)
-        e[j] = 1.0
-        B[:, 1 + k] = e
+    t_local_matrices_start = time()
+    # Efficient approach: work directly with submatrices instead of building B
+    extended_idx = [1:N; idx_sub]  # Current solution + subdomain indices
+
+    # Extract relevant rows/columns from K and M
+    if length(idx_sub) > 0
+        # Build the local matrices more efficiently
+        K_local = zeros(localdim, localdim)
+        M_local = zeros(localdim, localdim)
+
+        # First row/column: u_current' * K/M * [u_current, e_j1, e_j2, ...]
+        K_u = K * u_current
+        M_u = M * u_current
+
+        K_local[1, 1] = dot(u_current, K_u)  # u' * K * u
+        M_local[1, 1] = dot(u_current, M_u)  # u' * M * u
+
+        # First row/column: u_current' * K/M * e_j
+        for (k, j) in pairs(idx_sub)
+            K_local[1, k+1] = K_u[j]  # u' * K * e_j = (K * u)[j]
+            K_local[k+1, 1] = K_u[j]  # e_j' * K * u = (K * u)[j] (symmetric)
+            M_local[1, k+1] = M_u[j]  # u' * M * e_j = (M * u)[j]
+            M_local[k+1, 1] = M_u[j]  # e_j' * M * u = (M * u)[j] (symmetric)
+        end
+
+        # Remaining entries: e_i' * K/M * e_j = K[i,j] and M[i,j]
+        for (k1, j1) in pairs(idx_sub)
+            for (k2, j2) in pairs(idx_sub)
+                K_local[k1+1, k2+1] = K[j1, j2]
+                M_local[k1+1, k2+1] = M[j1, j2]
+            end
+        end
+    else
+        # Degenerate case: only current solution
+        K_local = reshape([dot(u_current, K * u_current)], 1, 1)
+        M_local = reshape([dot(u_current, M * u_current)], 1, 1)
     end
 
-    K_local = B' * (K * B)
-    M_local = B' * (M * B)
+    t_local_matrices = time() - t_local_matrices_start
 
-    eigvals, eigvecs = eigen(K_local, M_local)
-    i_min = argmin(eigvals)
-    α_min = eigvecs[:, i_min]
+    t_eigen_start = time()
+    @debug "Size of K_local: $(size(K_local))"
+    @debug "Size of M_local: $(size(M_local))"
+    K_local_sym = Symmetric(K_local);  M_local_sym = Symmetric(M_local)         # if applicable
+    F = cholesky(K_local_sym)                              # ≈ A^{-1} preconditioner
+    X0 = ones(size(K_local,1), 1)                 # initial guess (one vector)
+    res = lobpcg(K_local_sym, M_local_sym, false, X0; P=F, tol=1e-8, maxiter=500)  # false = search smallest
+    λmin = res.λ[1]
+    vmin = res.X[:, 1]                       # already B-orthonormal
+    α_min = vmin
+    # eigvals, eigvecs = eigen(K_local, M_local)
+    # i_min = argmin(eigvals)
+    # α_min = eigvecs[:, i_min]
+    t_eigen = time() - t_eigen_start
 
-    x_new = B * α_min
+    t_finalize_start = time()
+    # Reconstruct the solution without explicit B matrix
+    x_new = α_min[1] * u_current  # Coefficient for current solution
+
+    # Add contributions from standard basis vectors
+    for (k, j) in pairs(idx_sub)
+        x_new[j] += α_min[k+1]  # Add coefficient for e_j
+    end
+
     normalize_M!(x_new, M)
+    t_finalize = time() - t_finalize_start
+
+    # Only print detailed timing for slow operations (> 0.01 seconds)
+    if t_build + t_local_matrices + t_eigen + t_finalize > 0.01
+        @debug "inf_step breakdown: build=$t_build, matrices=$t_local_matrices, eigen=$t_eigen, finalize=$t_finalize"
+    end
+
     return x_new
 end
 
 # 6) Combine step
 function combine_step(u_collection::Vector{Vector{Float64}},
                      K::AbstractMatrix, M::AbstractMatrix)
+    t_qr_start = time()
     B = hcat(u_collection...)
     B = Matrix(qr(B).Q)
+    t_qr = time() - t_qr_start
 
+    t_matrices_start = time()
+    # Optimized matrix multiplications using temporary arrays and mul!
+    localdim = size(B, 2)
+    N = size(B, 1)
 
-    K_local = B' * (K * B)
-    M_local = B' * (M * B)
+    # Pre-allocate temporary matrices
+    temp_K = Matrix{Float64}(undef, N, localdim)
+    temp_M = Matrix{Float64}(undef, N, localdim)
+    K_local = Matrix{Float64}(undef, localdim, localdim)
+    M_local = Matrix{Float64}(undef, localdim, localdim)
+
+    # Use mul! for in-place operations
+    mul!(temp_K, K, B)
+    mul!(temp_M, M, B)
+    mul!(K_local, B', temp_K)
+    mul!(M_local, B', temp_M)
+
+    t_matrices = time() - t_matrices_start
+
+    t_eigen_start = time()
     eigvals, eigvecs = eigen(K_local, M_local)
     i_min = argmin(eigvals)
     α_min = eigvecs[:, i_min]
-
-
+    t_eigen = time() - t_eigen_start
 
     # println("eigen(K_local): ",eigen(K_local).values)
     # println("eigen(M_local): ",eigen(M_local).values)
     # println(α_min)
+
+    t_finalize_start = time()
     x_new = B * α_min
     normalize_M!(x_new, M)
+    t_finalize = time() - t_finalize_start
+
+    @debug "combine_step breakdown: QR=$t_qr, matrices=$t_matrices, eigen=$t_eigen, finalize=$t_finalize"
     return x_new
 end
 
@@ -193,6 +276,7 @@ function ddm_eigen_solver(;
     elapsed_setup=time()-setup_time
     println("$elapsed_setup seconds needed for setup")
     coarse_basis= coarse_space_corr(subspaces,fesp)
+
     # Initial guess
     u_cur = ones((N-1)^2)
     normalize_M!(u_cur, M)
@@ -212,18 +296,18 @@ function ddm_eigen_solver(;
     for n in 1:maxiter
       t3= time()
         # Local updates
+        t_local_start = time()
         local_updates = Vector{Vector{Float64}}(undef, m+1)
         local_updates[1] = u_cur
         for i=1:m
+            t_inf_step_start = time()
             #println(i)
 
             # Additive
             # u_next_i = inf_step(local_updates[1], K, M, subspaces[i])
 
             # Multiplicative
-            u_next_i = inf_step(local_updates[i], K, M, subspaces[i])
-
-            # if dot(u_next_i, u_cur) < 0
+            u_next_i = inf_step(local_updates[i], K, M, subspaces[i])            # if dot(u_next_i, u_cur) < 0
             #     u_next_i .*= -1.0
             # end
             # normalize_M!(u_next_i, M)
@@ -236,13 +320,22 @@ function ddm_eigen_solver(;
             # sleep(1)
 
             local_updates[i+1] = u_next_i
+            t_inf_step = time() - t_inf_step_start
+            @debug "inf_step for subdomain $i took $t_inf_step seconds"
         end
+        t_local_updates = time() - t_local_start
+        @debug "All local updates took $t_local_updates seconds"
         #if sweep
        #     sub_int = -sub_int.+(m+1)
         #end
-        
+
         # Combine step with coarse correction
+        t_combine_start = time()
+        @debug "size of local updates is $(length(local_updates))"
+        @debug "size of coarse basis is $(length(coarse_basis))"
         u_new = combine_step([local_updates; coarse_basis], K, M)
+        t_combine = time() - t_combine_start
+        @debug "combine_step took $t_combine seconds"
 
         # u_new = u_cur
         # for i in 1:m
