@@ -125,6 +125,65 @@ function coarse_space_corr(dofsp::Vector{Vector{Int32}}, sp::Gridap.FESpaces.Unc
 end
 
 # 5) Inf step on subspace D_i
+"""
+  inf_step(u_current, K, M, idx_sub)
+
+Mathematical description
+------------------------
+Given symmetric positive definite matrices `K, M ∈ R^{N×N}` (stiffness and mass)
+and the current M-normalized iterate `u_current ∈ R^N` (i.e. `u_current' * M * u_current = 1`),
+let `S = span{ u_current, e_j : j ∈ idx_sub } ⊂ R^N`, where `e_j` are the Euclidean coordinate vectors.
+
+This routine computes the (M-orthonormal) vector
+
+  x_new = argmin_{ x ∈ S, x ≠ 0 }  R(x),   where   R(x) = (x' K x)/(x' M x),
+
+restricted to the subspace `S`. Equivalently, writing any `x ∈ S` as
+
+  x = α₀ u_current + ∑_{j ∈ idx_sub} α_j e_j  =  B α,   with   B = [u_current  |  E_sub],
+
+and collecting coefficients `α = (α₀, (α_j)_{j∈idx_sub}) ∈ R^{1+|idx_sub|}`, the Rayleigh quotient on `S` becomes
+
+  R(B α) = (α' (B' K B) α)/(α' (B' M B) α)  = (α' K_local α)/(α' M_local α).
+
+Thus `α_min` is the generalized eigenvector corresponding to the smallest eigenvalue λ_min solving
+
+  K_local α = λ M_local α,
+
+with the normalization convention imposed afterwards by scaling `x_new` to satisfy `x_new' * M * x_new = 1`.
+
+Implementation details
+----------------------
+Instead of explicitly forming the basis matrix `B`, the small dense matrices
+
+  K_local = B' K B,   M_local = B' M B ∈ R^{(1+|idx_sub|)×(1+|idx_sub|)}
+
+are assembled by exploiting the structure of the basis vectors (one dense vector plus coordinate vectors).
+The smallest generalized eigenpair is approximated with a single-vector LOBPCG call (preconditioner `chol(K_local)`).
+The resulting coefficients `α_min` yield
+
+  x_new = α_min[1] * u_current + ∑_{k=1}^{|idx_sub|} α_min[k+1] * e_{idx_sub[k]},
+
+followed by in-place M-normalization. Returned `x_new` satisfies
+
+  x_new' * M * x_new = 1,    R(x_new) = λ_min = min_{x∈S \\ {0}} R(x).
+
+Arguments
+---------
+* `u_current::Vector{Float64}` : Current M-normalized iterate (length N).
+* `K::AbstractMatrix`          : SPD stiffness matrix.
+* `M::AbstractMatrix`          : SPD mass matrix.
+* `idx_sub::AbstractVector`    : Indices of degrees of freedom defining the local augmentation subspace.
+
+Returns
+-------
+* `x_new::Vector{Float64}` : Updated vector in `S` minimizing the Rayleigh quotient (M-normalized).
+
+Notes
+-----
+* If `idx_sub` is empty, the subspace reduces to `span{u_current}` and the function returns `u_current`.
+* The step is an exact (within solver tolerance) subspace minimization of the Rayleigh quotient; it never increases the minimal value over `S`.
+"""
 function inf_step(u_current::Vector{Float64},
                   K::AbstractMatrix, M::AbstractMatrix,
                   idx_sub::AbstractVector)
@@ -212,6 +271,25 @@ function inf_step(u_current::Vector{Float64},
 end
 
 # 6) Combine step
+"""
+  combine_step(u_collection, K, M)
+
+Given a collection of M-normalized (not necessarily mutually orthogonal) vectors
+`{u_i}` this forms the matrix `B = [u_1 ... u_p]`, computes an orthonormal (in
+the Euclidean sense) basis `Q` of its column space via QR, and then solves the
+reduced generalized eigenproblem
+
+  (Q' K Q) α = λ (Q' M Q) α
+
+returning the vector `x_new = Q α_min` associated with the smallest Rayleigh
+quotient restricted to span(B). The output is re-normalized in the M-norm.
+
+Mathematically this performs the exact minimization
+
+  x_new = argmin_{x ∈ span(u_collection) \\ {0}} (x' K x)/(x' M x).
+
+Returns the updated vector `x_new` with `x_new' * M * x_new = 1`.
+"""
 function combine_step(u_collection::Vector{Vector{Float64}},
                      K::AbstractMatrix, M::AbstractMatrix)
     t_qr_start = time()
@@ -264,6 +342,28 @@ function M_norm_distance(u::Vector{Float64}, v::Vector{Float64}, M::AbstractMatr
 end
 
 # 7) Main iteration: store solutions & keep sign consistency
+"""
+   ddm_eigen_solver(; N=50, m=2, maxiter=50, tol=1e-8)
+
+High-level driver performing a domain decomposition enhanced iterative
+minimization of the Rayleigh quotient for the generalized eigenproblem
+
+   K u = λ M u.
+
+Workflow per iteration k:
+1. Local ("infinite") steps: For each subdomain i build the augmented subspace
+  `span{u^{(k)}_{i}, e_j (j in subspace i)}` and apply `inf_step`, either
+  additively or (current code) multiplicatively chained.
+2. Coarse correction: Append a coarse partition of unity based basis and call
+  `combine_step` to perform a global small eigen solve restricted to the span
+  of all local updates plus coarse vectors.
+3. Sign stabilization: Flip sign if necessary to keep consecutive iterates
+  aligned (to avoid oscillations due to eigenvector indeterminacy).
+4. Convergence test: stop when |λ_{k+1} - λ_k| < tol.
+
+Returns `(u, λ, lambda_history, solutions)` where `solutions` stores all
+intermediate iterates and `lambda_history` the Rayleigh quotients.
+"""
 function ddm_eigen_solver(;
     N::Int=50,
     m::Int=2,
@@ -380,54 +480,60 @@ function ddm_eigen_solver(;
 end
 
 
-###############################################################################
-# Run the solver
-###############################################################################
-N=100
-m       = 9
-maxiter = 200
-tol     = 1e-10
+# Auto-run block:
+# Runs when (a) the file is executed as a script, or (b) we are in an interactive
+# session (e.g. VSCode Cmd+R / REPL include) unless explicitly disabled by
+# setting ENV["DDEIGEN_SKIP_AUTORUN"] = "1".
+# It still skips during Documenter builds (non-interactive include).
+if (abspath(PROGRAM_FILE) == @__FILE__) || (isinteractive() && get(ENV, "DDEIGEN_SKIP_AUTORUN", "0") != "1")
+  ###############################################################################
+  # Run the solver (only when executed as a script)
+  ###############################################################################
+  N=100
+  m       = 9
+  maxiter = 200
+  tol     = 1e-10
 
+  u_approx, lambda_approx, lambda_history, solutions = ddm_eigen_solver(
+      N=N,
+      m=m,
+      maxiter=maxiter,
+      tol=tol
+  )
+  K,M,part=Setup_FEM(N,m)
 
-u_approx, lambda_approx, lambda_history, solutions = ddm_eigen_solver(
-    N=N,
-    m=m,
-    maxiter=maxiter,
-    tol=tol
-)
-K,M,part=Setup_FEM(N,m)
+  println("Final approximate eigenvalue = $lambda_approx")
 
-println("Final approximate eigenvalue = $lambda_approx")
+  #  -- Plot 1: Convergence of the Rayleigh quotient --
+  iters = 0:length(lambda_history)-1
 
-#  -- Plot 1: Convergence of the Rayleigh quotient --
-iters = 0:length(lambda_history)-1
-
-plt1 = plot(
-   iters, lambda_history,
-  marker = :o,
-    xlabel = "Iteration",
-    ylabel = "Rayleigh Quotient",
-    title  = "Convergence of Eigenvalue (m=$m, N=$N)"
-)
-#  -- Plot 2: Convergence in the eigenvector (M-norm) --
-final_sol = solutions[end]
-exact_sol = eigs(K, nev=1, which=:LM)
-println(typeof(exact_sol))
-exact_val= exact_sol[1]
-println(exact_val)
-exact_vec=exact_sol[end]
-distances = [
-   M_norm_distance(solutions[i], exact_vec, M)
-    for i in 1:length(solutions)
-]
-plt2 = plot(
-    iters, distances,
-   marker = :o,
-   xlabel = "Iteration",
-    ylabel = "||u^(k) - u^(exact)||_M",
-    title  = "Convergence of the Eigenvector in M-norm",
-   yaxis = :log
-)
+  plt1 = plot(
+     iters, lambda_history,
+    marker = :o,
+      xlabel = "Iteration",
+      ylabel = "Rayleigh Quotient",
+      title  = "Convergence of Eigenvalue (m=$m, N=$N)"
+  )
+  #  -- Plot 2: Convergence in the eigenvector (M-norm) --
+  final_sol = solutions[end]
+  exact_sol = eigs(K, nev=1, which=:LM)
+  println(typeof(exact_sol))
+  exact_val= exact_sol[1]
+  println(exact_val)
+  exact_vec=exact_sol[end]
+  distances = [
+     M_norm_distance(solutions[i], exact_vec, M)
+      for i in 1:length(solutions)
+  ]
+  plt2 = plot(
+      iters, distances,
+     marker = :o,
+     xlabel = "Iteration",
+      ylabel = "||u^(k) - u^(exact)||_M",
+      title  = "Convergence of the Eigenvector in M-norm",
+     yaxis = :log
+  )
+end
 #inverse power method
 function inverse_power_method2(K::Matrix{Float64}, M::Matrix{Float64}, u0::Vector{Float64}, maxiter::Int=100, tol::Float64=1e-10, λ::Float64=0.0)
     """
