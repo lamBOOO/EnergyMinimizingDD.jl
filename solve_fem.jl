@@ -402,20 +402,21 @@ function ddm_eigen_solver(;
     #sub_int = 1:m
     for n in 1:maxiter
       t3= time()
-        nev=3
+        nev=1
         # Local updates
         t_local_start = time()
         local_updates = zeros(size(u_cur,1), (nev*m)+1)
         local_updates[:,1] = u_cur
         for i=1:m
             t_inf_step_start = time()
+            l=1
             #println(i)
 
             # Additive
             # u_next_i = inf_step(local_updates[1], K, M, subspaces[i])
 
             # Multiplicative
-            u_next_i = inf_step(local_updates[:,i], K, M, subspaces[i], nev)            # if dot(u_next_i, u_cur) < 0
+            u_next_i = inf_step(local_updates[:,i+(l-1)*(nev-1)], K, M, subspaces[i], nev)            # if dot(u_next_i, u_cur) < 0
             #     u_next_i .*= -1.0
             # end
             # normalize_M!(u_next_i, M)
@@ -427,11 +428,12 @@ function ddm_eigen_solver(;
             # marker=:none))
             # sleep(1)
 
-            for j=0:nev-1
-              local_updates[:,i*nev-1+j]=u_next_i[j+1]
+            for j=1:nev
+              local_updates[:,(i-1)*nev+j+1]=u_next_i[j]
             end
             t_inf_step = time() - t_inf_step_start
             @debug "inf_step for subdomain $i took $t_inf_step seconds"
+            l=l+1
         end
         t_local_updates = time() - t_local_start
         @debug "All local updates took $t_local_updates seconds"
