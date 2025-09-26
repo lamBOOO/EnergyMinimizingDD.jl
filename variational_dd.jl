@@ -389,75 +389,17 @@ end
 """
   inf_step(u_current, K, M, idx_sub)
 
-Mathematical description
-------------------------
-Given symmetric positive definite matrices `K, M ∈ R^{N×N}` (stiffness and mass)
-and the current M-normalized iterate `u_current ∈ R^N` (i.e. `u_current' * M * u_current = 1`),
-let `S = span{ u_current, e_j : j ∈ idx_sub } ⊂ R^N`, where `e_j` are the Euclidean coordinate vectors.
-
-This routine computes the (M-orthonormal) vector
-
-  x_new = argmin_{ x ∈ S, x ≠ 0 }  R(x),   where   R(x) = (x' K x)/(x' M x),
-
-restricted to the subspace `S`. Equivalently, writing any `x ∈ S` as
-
-  x = α₀ u_current + ∑_{j ∈ idx_sub} α_j e_j  =  B α,   with   B = [u_current  |  E_sub],
-
-and collecting coefficients `α = (α₀, (α_j)_{j∈idx_sub}) ∈ R^{1+|idx_sub|}`, the Rayleigh quotient on `S` becomes
-
-  R(B α) = (α' (B' K B) α)/(α' (B' M B) α)  = (α' K_local α)/(α' M_local α).
-
-Thus `α_min` is the generalized eigenvector corresponding to the smallest eigenvalue λ_min solving
-
-  K_local α = λ M_local α,
-
-with the normalization convention imposed afterwards by scaling `x_new` to satisfy `x_new' * M * x_new = 1`.
-
-Implementation details
-----------------------
-Instead of explicitly forming the basis matrix `B`, the small dense matrices
-
-  K_local = B' K B,   M_local = B' M B ∈ R^{(1+|idx_sub|)×(1+|idx_sub|)}
-
-are assembled by exploiting the structure of the basis vectors (one dense vector plus coordinate vectors).
-The smallest generalized eigenpair is approximated with a single-vector LOBPCG call (preconditioner `chol(K_local)`).
-The resulting coefficients `α_min` yield
-
-  x_new = α_min[1] * u_current + ∑_{k=1}^{|idx_sub|} α_min[k+1] * e_{idx_sub[k]},
-
-followed by in-place M-normalization. Returned `x_new` satisfies
-
-  x_new' * M * x_new = 1,    R(x_new) = λ_min = min_{x∈S \\ {0}} R(x).
-
-Arguments
----------
-* `u_current::Vector{Float64}` : Current M-normalized iterate (length N).
-* `K::AbstractMatrix`          : SPD stiffness matrix.
-* `M::AbstractMatrix`          : SPD mass matrix.
-* `idx_sub::AbstractVector`    : Indices of degrees of freedom defining the local augmentation subspace.
-
-Returns
--------
-* `x_new::Vector{Float64}` : Updated vector in `S` minimizing the Rayleigh quotient (M-normalized).
-
-Notes
------
-* If `idx_sub` is empty, the subspace reduces to `span{u_current}` and the function returns `u_current`.
-* The step is an exact (within solver tolerance) subspace minimization of the Rayleigh quotient; it never increases the minimal value over `S`.
+Calcualted x_new = argmin_{x ∈ span{u_current, e_j, j ∈ idx_sub} \\ {0}} (x' K x)/(x' M x)
+where {e_j} are standard basis vectors. The output is re-normalized in the M-norm.
 """
-function inf_step(u_current::Vector{Float64},
-  K::AbstractMatrix, M::AbstractMatrix,
-  idx_sub::AbstractVector, nev::Int64)
-  t_build_start = time()
+function inf_step(
+  e::Energies.GeneralizedRayleighQuotient{Float64},
+  u_current::Vector{Float64},
+  idx_sub::AbstractVector
+)
   localdim = 1 + length(idx_sub)
 
-  # More efficient: avoid creating standard basis vectors explicitly
-  # Instead, extract submatrix directly from K and M
-  t_build = time() - t_build_start
-
-  t_local_matrices_start = time()
-  # Efficient approach: work directly with submatrices instead of building B
-  # Current solution + subdomain indices
+  K, M = e.A, e.B
 
   # Extract relevant rows/columns from K and M
   if length(idx_sub) > 0
@@ -493,48 +435,27 @@ function inf_step(u_current::Vector{Float64},
     M_local = reshape([dot(u_current, M * u_current)], 1, 1)
   end
 
-  t_local_matrices = time() - t_local_matrices_start
-
-  t_eigen_start = time()
   @debug "Size of K_local: $(size(K_local))"
   @debug "Size of M_local: $(size(M_local))"
   K_local_sym = Symmetric(K_local)
-  M_local_sym = Symmetric(M_local)         # if applicable
-  F = cholesky(K_local_sym)                              # ≈ A^{-1} preconditioner
-  α_min = Vector{Vector{Float64}}(undef, nev)
-  x_new = Vector{Vector{Float64}}(undef, nev)
-  res = lobpcg(K_local_sym, M_local_sym, false, nev; P=F, tol=1e-8, maxiter=500)  # false = search smallest
-  λmin = res.λ[1]
+  M_local_sym = Symmetric(M_local)
+  F = cholesky(K_local_sym)  # ≈ A^{-1} preconditioner
+  res = lobpcg(K_local_sym, M_local_sym, false, 1; P=F, tol=1e-8, maxiter=500)
 
-  for i = 1:nev
-    α_min[i] = res.X[:, i]      # already B-orthonormal
-  end
-  # eigvals, eigvecs = eigen(K_local, M_local)
-  # i_min = argmin(eigvals)
-  # α_min = eigvecs[:, i_min]
-  t_eigen = time() - t_eigen_start
-
-  t_finalize_start = time()
-  # Reconstruct the solution without explicit B matrix
-  for i = 1:nev
-    x_new[i] = α_min[i][1] * u_current # Coefficient for current solution
-  end
-
+  # The following is equivelant to Rayleigh Ritz procedure
+  # x_new = [u_current e_j1 e_j2 ...] * α_min
+  # where α_min is the eigenvector associated with the smallest eigenvalue
+  # of the generalized eigenvalue problem in the subspace
+  # (B' K B) α = λ (B' M B) α
+  # with B = [u_current e_j1 e_j2 ...]
+  # but avoids constructing e_j explicitly
+  x_new = res.X[:, 1][1] * u_current  # Coefficient for current solution
   # Add contributions from standard basis vectors
-  for i = 1:nev
-    for (k, j) in pairs(idx_sub)
-      x_new[i][j] += α_min[i][k+1]  # Add coefficient for e_j
-    end
+  for (k, j) in pairs(idx_sub)
+    x_new[j] += res.X[:, 1][k+1]  # Add coefficient for e_j
   end
-  for i = 1:nev
-    normalize_M!(x_new[i], M)
-  end
-  t_finalize = time() - t_finalize_start
 
-  # Only print detailed timing for slow operations (> 0.01 seconds)
-  if t_build + t_local_matrices + t_eigen + t_finalize > 0.01
-    @debug "inf_step breakdown: build=$t_build, matrices=$t_local_matrices, eigen=$t_eigen, finalize=$t_finalize"
-  end
+  normalize_M!(x_new, M)
 
   return x_new
 end
@@ -618,7 +539,7 @@ function ddm_eigen_solver(;
   #sweep::Bool=true
 )
 
-  # TODO: Add sweep
+  # TODO: Add sweep option
   setup_time = time()
   # K, M, subspaces, fesp = Setup_FEM(N, m)
   K = e.A
@@ -640,8 +561,8 @@ function ddm_eigen_solver(;
   for n in 1:maxiter
     local_updates = zeros(size(u_cur, 1), m + 1)
     for i = 1:m
-      u_next_i = inf_step(u_cur, K, M, subspaces[i], 1)
-      local_updates[:, i+1] = u_next_i[1]
+      u_next_i = inf_step(e, u_cur, subspaces[i])
+      local_updates[:, i+1] = u_next_i
     end
 
     combined_matrix = hcat(u_cur, local_updates)
