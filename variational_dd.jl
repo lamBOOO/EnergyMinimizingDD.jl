@@ -580,23 +580,22 @@ function ddm_eigen_solver(
     combined_matrix = hcat(u_cur, local_updates)
     u_new = combine_step(combined_matrix, K, M)
 
-    @printf("Iteration %3d: Residual norm ≈ %12.6e energy = %12.6e\n", n, norm(K * u_new - e_cur * M * u_new), e(u_new))
+    resnorm = norm(K * u_new - e_cur * M * u_new)
+    @printf(
+      "Iteration %3d: Residual norm ≈ %12.6e energy = %12.6e\n",
+      n, resnorm, e(u_new)
+    )
 
-    # TODO: Needed?
-    # if dot(u_new, u_cur) < 0
-    #   u_new .*= -1.0
-    # end
-
-    λ_new = R(u_new, K, M)
-    push!(e_hist, λ_new)
+    e_new = e(u_new)
+    push!(e_hist, e_new)
     push!(sol_hist, copy(u_new))
-    if abs(λ_new - e_cur) < tol
-      println("Converged at iteration $n with eigenvalue λ = $λ_new")
-      return u_new, λ_new, e_hist, sol_hist
+    if abs(e_new - e_cur) < tol  # TODO: Change to resnorm < tol?
+      println("Converged at iteration $n with eigenvalue λ = $e_new")
+      return u_new, e_new, e_hist, sol_hist
     end
 
     u_cur = u_new
-    e_cur = λ_new
+    e_cur = e_new
   end
 
   println("Reached maxiter=$maxiter with final Rayleigh quotient ≈ $e_cur")
