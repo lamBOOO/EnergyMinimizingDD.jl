@@ -385,6 +385,14 @@ function coarse_space_corr(dofsp::Vector{Vector{Int32}}, sp::Gridap.FESpaces.Unc
   return Z
 end
 
+function inf_step(
+  e::Energies.AbstractEnergy{Float64},
+  u_current::Vector{Float64},
+  idx_sub::AbstractVector
+)
+  throw(ErrorException("inf_step not implemented for $(typeof(e))"))
+end
+
 # 5) Inf step on subspace D_i
 """
   inf_step(u_current, K, M, idx_sub)
@@ -531,12 +539,20 @@ function M_norm_distance(u::Vector{Float64}, v::Vector{Float64}, M::AbstractMatr
   return sqrt(dot(w, M * w))
 end
 
-function ddm_eigen_solver(;
+# not implemented for abstract energy
+function ddm_eigen_solver(
   e::Energies.AbstractEnergy{Float64},
-  subspaces::Vector{Vector{Int32}},
+  subspaces::Vector{Vector{Int32}};
+  kwargs...
+)
+  throw(ErrorException("ddm_eigen_solver not implemented for $(typeof(e))"))
+end
+
+function ddm_eigen_solver(
+  e::Energies.GeneralizedRayleighQuotient{Float64},
+  subspaces::Vector{Vector{Int32}};
   maxiter::Int=50,
-  tol::Float64=1e-8,
-  #sweep::Bool=true
+  tol::Float64=1e-8
 )
 
   # TODO: Add sweep option
@@ -600,10 +616,11 @@ tol = 1e-10
 K, M, part = Setup_FEM(N, m)
 
 energy_eigen_fem = Energies.GeneralizedRayleighQuotient(K, M)
+# energy_eigen_fem = Energies.RayleighQuotient(K)
 
 u_approx, lambda_approx, lambda_history, solutions = ddm_eigen_solver(
-  e=energy_eigen_fem,
-  subspaces=part,
+  energy_eigen_fem,
+  part,
   maxiter=maxiter,
   tol=tol
 )
