@@ -296,9 +296,15 @@ Energies.hessian(GRQ, x)   # Hessian implemented
 
 
 
-P(x) = exp(sqrt((x.data[1])^2 + (x.data[2])^2))
 
-function Setup_FEM(N::Int, m::Int=9) # Discretizing the domain, building mass and stiffness matrix, specifying the overlapping domains
+function FEM_Schroedinger(
+  N::Int,
+  m::Int=9,
+  P::F1=(x -> exp(sqrt((x.data[1])^2 + (x.data[2])^2))),
+  # also return RHS to solve source problem
+  f::F2=(x -> 1.0)
+) where {F1<:Function, F2<:Function}
+
   domain = (0, 1.0, 0, 1.0)
   partition1 = (1.0 * N, 1.0 * N)
   model = CartesianDiscreteModel(domain, partition1; isperiodic=(false, false))
@@ -309,8 +315,10 @@ function Setup_FEM(N::Int, m::Int=9) # Discretizing the domain, building mass an
   U = TrialFESpace(VV, 0)
   a1(u, v) = ∫(∇(u) ⋅ ∇(v) + (x -> P(x)) * u * v)dΩ
   a2(u, v) = ∫(u * v)dΩ
+  b(v) = ∫( (x -> f(x)) * v )dΩ
   K = assemble_matrix(a1, VV, U)
   M = assemble_matrix(a2, VV, U)
+  b = assemble_vector(b, VV)
   g = GridapDistributed.compute_cell_graph(model)
   par = Metis.partition(g, m)
   elpar = create_elements_partition(par, m)
@@ -319,7 +327,7 @@ function Setup_FEM(N::Int, m::Int=9) # Discretizing the domain, building mass an
   dofspar = create_dofs_partition(elpar, VV)
   elapsed = time() - t1
   println("dofspar needs $elapsed seconds ")
-  return K, M, dofspar, VV
+  return K, M, b, dofspar, U
 end
 
 function create_dofs_partition(
@@ -574,7 +582,9 @@ N = 20
 m = 9
 maxiter = 200
 tol = 1e-10
-K, M, part = Setup_FEM(N, m)
+
+# Schroedinger EVP FEM
+K, M, b, part, U = FEM_Schroedinger(N, m)
 
 energy_eigen_fem = Energies.GeneralizedRayleighQuotient(K, M)
 # energy_eigen_fem = Energies.RayleighQuotient(K)
@@ -589,3 +599,28 @@ println("Final approximate eigenvalue = $lambda_approx")
 exact_sol = eigs(K, M, nev=1, which=:SM)
 println("Exact eigenvalue = $(exact_sol[1][1])")
 @assert abs(lambda_approx - exact_sol[1][1]) < 1e-6
+# write to vtk file using U info
+writevtk(
+  U.fe_basis.trian,
+  "eigen_solution",
+  cellfields = ["u_approx" => FEFunction(U, u_approx)]
+)
+
+# Poisson problem FEM
+K, M, b, part, U = FEM_Schroedinger(N, m, (x -> 0.0), (x -> 1.0))
+energy_poisson_fem = Energies.QuadraticEnergy(K, b, 0.0)
+
+# direct solve
+u_poisson = K \ b
+
+# ddm_eigen_solver solve
+# u_poisson, E_poisson, E_hist, sols = ddm_eigen_solver(energy_poisson_fem, part, maxiter=maxiter, tol=tol)
+
+E_poisson = Energies.energy(energy_poisson_fem, u_poisson)
+println("Poisson energy = $E_poisson")
+# write to vtk file using U info
+writevtk(
+  U.fe_basis.trian,
+  "poisson_solution",
+  cellfields = ["u_poisson" => FEFunction(U, u_poisson)]
+)
