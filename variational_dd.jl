@@ -470,13 +470,8 @@ function inf_step(
   # where α is the coefficient vector in the basis [u_cur, e_j1, e_j2, ...]
   α_new = A_local \ b_local
 
-  # The following is equivelant to x_new = [u_cur e_j1 e_j2 ...] * α_new
-  # but avoids constructing e_j explicitly
-  x_new = α_new[1] * u_cur  # Coefficient for current solution
-  # Add contributions from standard basis vectors
-  for (k, j) in pairs(idx_sub)
-    x_new[j] += α_new[k+1]  # Add coefficient for e_j
-  end
+  # Use helper function to reconstruct (no normalization needed for QuadraticEnergy)
+  x_new = reconstruct_implicit!(α_new, u_cur, idx_sub)
   return x_new
 end
 
@@ -536,19 +531,8 @@ function inf_step(
   F = cholesky(K_local_sym)  # ≈ A^{-1} preconditioner
   res = lobpcg(K_local_sym, M_local_sym, false, 1; P=F, tol=1e-8, maxiter=500)
 
-  # The following is equivelant to Rayleigh Ritz procedure
-  # x_new = [u_cur e_j1 e_j2 ...] * α_min
-  # where α_min is the eigenvector associated with the smallest eigenvalue
-  # of the generalized eigenvalue problem in the subspace
-  # (B' K B) α = λ (B' M B) α
-  # with B = [u_cur e_j1 e_j2 ...]
-  # but avoids constructing e_j explicitly
-  x_new = res.X[:, 1][1] * u_cur  # Coefficient for current solution
-  # Add contributions from standard basis vectors
-  for (k, j) in pairs(idx_sub)
-    x_new[j] += res.X[:, 1][k+1]  # Add coefficient for e_j
-  end
-
+  # Use helper function to reconstruct, then normalize
+  x_new = reconstruct_implicit!(res.X[:, 1], u_cur, idx_sub)
   Energies.normalize_M!(x_new, M)
 
   return x_new
@@ -653,7 +637,22 @@ function M_norm_distance(u::Vector{Float64}, v::Vector{Float64}, M::AbstractMatr
   return sqrt(dot(w, M * w))
 end
 
-# not implemented for abstract energy
+"""
+  reconstruct_implicit!(α::Vector{Float64}, u_cur::Vector{Float64}, idx_sub::AbstractVector)
+
+Reconstruct x_new from implicit basis [u_cur, e_j1, e_j2, ...] where e_j are standard
+basis vectors, without normalization. This avoids explicitly constructing the basis matrix.
+"""
+function reconstruct_implicit!(α::Vector{Float64}, u_cur::Vector{Float64}, idx_sub::AbstractVector)
+  # The following is equivalent to x_new = [u_cur e_j1 e_j2 ...] * α
+  # but avoids constructing e_j explicitly
+  x_new = α[1] * u_cur  # Coefficient for current solution
+  # Add contributions from standard basis vectors
+  for (k, j) in pairs(idx_sub)
+    x_new[j] += α[k+1]  # Add coefficient for e_j
+  end
+  return x_new
+end# not implemented for abstract energy
 function ddm_eigen_solver(
   e::Energies.AbstractEnergy{Float64},
   subspaces::Vector{Vector{Int32}};
