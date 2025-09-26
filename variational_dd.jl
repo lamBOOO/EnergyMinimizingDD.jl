@@ -6,6 +6,7 @@ using Metis
 using IterativeSolvers
 using Arpack
 using Printf
+using Random
 
 
 module Energies
@@ -253,6 +254,39 @@ function residual_norm(e::GeneralizedRayleighQuotient, x::AbstractVector)
   return norm(r)
 end
 
+# 4) Linear Regression Energy: E(x) = ||Ax - b||² for least squares problems
+#    Minimizing this energy leads to solving the normal equations A'Ax = A'b
+struct LinearRegressionEnergy{T,M<:AbstractMatrix{T},V<:AbstractVector{T}} <: AbstractEnergy{T}
+  A::M           # Design matrix (m × n where m ≥ n typically)
+  b::V           # Observation vector (length m)
+end
+
+LinearRegressionEnergy(A::AbstractMatrix{T}, b::AbstractVector{T}) where {T} =
+  LinearRegressionEnergy{T,typeof(A),typeof(b)}(A, b)
+
+# E(x) = ||Ax - b||² = (Ax - b)ᵀ(Ax - b)
+energy(e::LinearRegressionEnergy{T}, x::AbstractVector{T}) where {T} = begin
+  residual = e.A * x .- e.b
+  return dot(residual, residual)
+end
+
+# dimension (number of parameters to fit)
+dimension(e::LinearRegressionEnergy) = size(e.A, 2)
+
+# ∇E(x) = 2AᵀAx - 2Aᵀb = 2Aᵀ(Ax - b)
+gradient(e::LinearRegressionEnergy{T}, x::AbstractVector{T}) where {T} = begin
+  residual = e.A * x .- e.b
+  return 2 * (e.A' * residual)
+end
+
+# ∇²E(x) = 2AᵀA (constant Hessian)
+hessian(e::LinearRegressionEnergy{T}) where {T} = 2 * (e.A' * e.A)
+hessian(e::LinearRegressionEnergy{T}, x::AbstractVector{T}) where {T} = hessian(e)
+
+function residual_norm(e::LinearRegressionEnergy{T}, x::AbstractVector{T}) where {T}
+  return e.A * x .- e.b |> norm
+end
+
 
 # ---------- Utilities ----------
 # Promote to Symmetric if you know A is symmetric to avoid accidental double work.
@@ -475,6 +509,63 @@ function inf_step(
   return x_new
 end
 
+function inf_step(
+  e::Energies.LinearRegressionEnergy{Float64},
+  u_cur::Vector{Float64},
+  idx_sub::AbstractVector
+)
+  localdim = 1 + length(idx_sub)
+
+  A, b = e.A, e.b
+
+  # For linear regression energy ||Ax - b||², the optimal solution in any subspace
+  # is found by solving the normal equations for that subspace
+
+  if length(idx_sub) > 0
+    # Build local system: minimize ||A*[u_cur, e_j1, e_j2, ...]*α - b||²
+    # This gives normal equations: (A'A)_local α = (A'b)_local
+
+    A_local = zeros(localdim, localdim)
+    b_local = zeros(localdim)
+
+    # Compute A*u_cur once for efficiency
+    A_u_cur = A * u_cur
+    AtA_u_cur = A' * A_u_cur  # A'A * u_cur
+    Atb = A' * b              # A' * b
+
+    # First entry: (A*u_cur)' * (A*u_cur) = u_cur' * A' * A * u_cur
+    A_local[1, 1] = dot(A_u_cur, A_u_cur)
+    b_local[1] = dot(A_u_cur, b)  # (A*u_cur)' * b
+
+    # Cross terms: u_cur' * A' * A * e_j = (A'A * u_cur)[j]
+    for (k, j) in pairs(idx_sub)
+      A_local[1, k+1] = AtA_u_cur[j]  # u_cur' * A' * A * e_j
+      A_local[k+1, 1] = AtA_u_cur[j]  # e_j' * A' * A * u_cur (symmetric)
+      b_local[k+1] = Atb[j]           # e_j' * A' * b = (A' * b)[j]
+    end
+
+    # Diagonal entries: e_i' * A' * A * e_j = (A' * A)[i,j]
+    AtA = A' * A
+    for (k1, j1) in pairs(idx_sub)
+      for (k2, j2) in pairs(idx_sub)
+        A_local[k1+1, k2+1] = AtA[j1, j2]
+      end
+    end
+  else
+    # Degenerate case: only current solution
+    A_u_cur = A * u_cur
+    A_local = reshape([dot(A_u_cur, A_u_cur)], 1, 1)
+    b_local = reshape([dot(A_u_cur, b)], 1)
+  end
+
+  # Solve normal equations: A_local * α = b_local
+  α_new = A_local \ b_local
+
+  # Reconstruct solution in original space
+  x_new = reconstruct_implicit!(α_new, u_cur, idx_sub)
+  return x_new
+end
+
 """
   inf_step(u_cur, K, M, idx_sub)
 
@@ -631,6 +722,36 @@ function combine_step(
   return x_new
 end
 
+function combine_step(
+  e::Energies.LinearRegressionEnergy{Float64},
+  sspace::Matrix{Float64},
+)
+  # For linear regression, the combine step solves the least squares problem
+  # in the subspace spanned by the columns of sspace: min ||A*B*α - b||²
+  # where B = QR factorization of sspace
+
+  A, b = e.A, e.b
+
+  B = Matrix(qr(sspace).Q)
+
+  localdim = size(B, 2)
+  N = size(B, 1)
+
+  # Pre-allocate temporary matrices for efficiency
+  temp_A = Matrix{Float64}(undef, size(A, 1), localdim)
+  A_local = Matrix{Float64}(undef, localdim, localdim)
+
+  mul!(temp_A, A, B)        # temp_A = A * B
+  mul!(A_local, temp_A', temp_A)  # A_local = B' * A' * A * B = (A*B)' * (A*B)
+
+  b_local = temp_A' * b     # b_local = B' * A' * b = (A*B)' * b
+
+  # Solve the normal equations: A_local α = b_local
+  α_new = A_local \ b_local
+  x_new = B * α_new
+  return x_new
+end
+
 # A helper function for measuring "distance" in M-norm
 function M_norm_distance(u::Vector{Float64}, v::Vector{Float64}, M::AbstractMatrix)
   w = u .- v
@@ -722,6 +843,7 @@ tol = 1e-10
 
 
 # Schroedinger EVP FEM
+println("\n=== Schrödinger EVP FEM Example ===")
 K, M, b, part, U = FEM_Schroedinger(N, m)
 energy_eigen_fem = Energies.GeneralizedRayleighQuotient(K, M)
 # energy_eigen_fem = Energies.RayleighQuotient(K)
@@ -741,10 +863,12 @@ writevtk(
   "eigen_solution",
   cellfields = ["u_approx" => FEFunction(U, u_approx)]
 )
+println("✓ passed.")
 
 
 
 # Poisson problem FEM
+println("\n=== Poisson Linear FEM Example ===")
 K, M, b, part, U = FEM_Schroedinger(N, m, (x -> 0.0), (x -> 1.0))
 energy_poisson_fem = Energies.QuadraticEnergy(K, b, 0.0)
 # direct solve
@@ -764,3 +888,49 @@ writevtk(
     "u_poisson_direct" => FEFunction(U, u_poisson_direct)
   ]
 )
+println("✓ passed.")
+
+# Linear Regression problem example
+println("\n=== Linear Regression Example ===")
+# Create a synthetic linear regression problem: y = Ax + ε
+n_params = 20    # number of parameters to estimate
+n_obs = 100      # number of observations (overdetermined system)
+Random.seed!(42) # for reproducibility
+
+# Generate random design matrix and true parameters
+A_lr = randn(n_obs, n_params)
+x_true = randn(n_params)
+b_lr = A_lr * x_true + 0.1 * randn(n_obs)  # add some noise
+
+# Create linear regression energy functional
+energy_lr = Energies.LinearRegressionEnergy(A_lr, b_lr)
+
+# Create simple uniform partition for demonstration
+# In practice, this would be more sophisticated domain decomposition
+part_lr = [Vector{Int32}() for _ in 1:m]
+for i in 1:n_params
+  push!(part_lr[((i-1) % m) + 1], i)
+end
+
+# Direct solution via normal equations
+x_direct = (A_lr' * A_lr) \ (A_lr' * b_lr)
+
+# Domain decomposition solution
+x_dd, E_lr, E_hist_lr, sols_lr = var_dd(energy_lr, part_lr, maxiter=maxiter, tol=tol)
+
+# Compare solutions
+println("Direct least squares energy: $(Energies.energy(energy_lr, x_direct))")
+println("DD least squares energy: $E_lr")
+println("Relative error in solution: $(norm(x_dd - x_direct) / norm(x_direct))")
+println("Residual norm (direct): $(norm(A_lr * x_direct - b_lr))")
+println("Residual norm (DD): $(norm(A_lr * x_dd - b_lr))")
+
+# Verify that we're solving the normal equations
+normal_residual_direct = (A_lr' * A_lr) * x_direct - (A_lr' * b_lr)
+normal_residual_dd = (A_lr' * A_lr) * x_dd - (A_lr' * b_lr)
+println("Normal equation residual (direct): $(norm(normal_residual_direct))")
+println("Normal equation residual (DD): $(norm(normal_residual_dd))")
+
+@assert norm(x_dd - x_direct) / norm(x_direct) < 1e-3
+@assert abs(E_lr - Energies.energy(energy_lr, x_direct)) < 1e-6
+println("✓ passed.")
