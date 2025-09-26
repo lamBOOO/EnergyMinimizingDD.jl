@@ -583,9 +583,9 @@ function ddm_eigen_solver(
     @printf("Iteration %3d: Residual norm ≈ %12.6e energy = %12.6e\n", n, norm(K * u_new - e_cur * M * u_new), e(u_new))
 
     # TODO: Needed?
-    if dot(u_new, u_cur) < 0
-      u_new .*= -1.0
-    end
+    # if dot(u_new, u_cur) < 0
+    #   u_new .*= -1.0
+    # end
 
     λ_new = R(u_new, K, M)
     push!(e_hist, λ_new)
