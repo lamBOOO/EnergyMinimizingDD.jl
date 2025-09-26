@@ -84,6 +84,10 @@ gradient(e::QuadraticEnergy{T}, x::AbstractVector{T}) where {T} =
 hessian(e::QuadraticEnergy{T}) where {T} = e.A
 hessian(e::QuadraticEnergy{T}, x::AbstractVector{T}) where {T} = hessian(e)
 
+function residual_norm(e::QuadraticEnergy{T}, x::AbstractVector{T}) where {T}
+  return e.A * x .- e.b |> norm
+end
+
 
 # 2) Rayleigh quotient:  ρ(x) = (x'Ax) / (x'x), scale-invariant in x ≠ 0
 struct RayleighQuotient{T,M<:AbstractMatrix{T}} <: AbstractEnergy{T}
@@ -339,7 +343,7 @@ function FEM_Schroedinger(
   t1 = time()
   dofspar = create_dofs_partition(elpar, VV)
   elapsed = time() - t1
-  println("dofspar needs $elapsed seconds ")
+  println("create_dofs_partition finished in $elapsed seconds")
   return K, M, b, dofspar, U
 end
 
@@ -394,6 +398,25 @@ function create_overlapping_elements_partition!(elemsp, g, npars::Integer, ol) #
 end
 
 
+"""
+  inf_step(e::Energies.AbstractEnergy{Float64}, u_current::Vector{Float64}, idx_sub::AbstractVector)
+
+Perform a local optimization step in the subdomain for variational domain decomposition.
+
+This is an abstract method that must be implemented by concrete subtypes of `AbstractEnergy`.
+
+# Arguments
+- `e::Energies.AbstractEnergy{Float64}`: The energy functional object
+- `u_current::Vector{Float64}`: Current solution vector
+- `idx_sub::AbstractVector`: Indices defining the subdomain
+
+# Throws
+- `ErrorException`: Always throws since this is not implemented for the abstract type
+
+# Notes
+Concrete implementations should override this method to provide specific behavior
+for different energy types in the variational domain decomposition framework.
+"""
 function inf_step(
   e::Energies.AbstractEnergy{Float64},
   u_current::Vector{Float64},
@@ -402,7 +425,61 @@ function inf_step(
   throw(ErrorException("inf_step not implemented for $(typeof(e))"))
 end
 
-# 5) Inf step on subspace D_i
+function inf_step(
+  e::Energies.QuadraticEnergy{Float64},
+  u_cur::Vector{Float64},
+  idx_sub::AbstractVector
+)
+  localdim = 1 + length(idx_sub)
+
+  A, b = e.A, e.b
+
+  # Extract relevant rows/columns from A and b
+  if length(idx_sub) > 0
+    # Build the local matrix more efficiently
+    A_local = zeros(localdim, localdim)
+    b_local = zeros(localdim)
+
+    # First row/column: u_cur' * A * [u_cur, e_j1, e_j2, ...]
+    Au = A * u_cur
+    A_local[1, 1] = dot(u_cur, Au)  # u' * A * u
+    b_local[1] = dot(b, u_cur)      # b' * u
+
+    # First row/column: u_cur' * A * e_j
+    for (k, j) in pairs(idx_sub)
+      A_local[1, k+1] = Au[j]  # u' * A * e_j = (A * u)[j]
+      A_local[k+1, 1] = Au[j]  # e_j' * A * u = (A * u)[j] (symmetric)
+      b_local[k+1] = b[j]      # b' * e_j = b[j]
+    end
+
+    # Remaining entries: e_i' * A * e_j = A[i,j]
+    for (k1, j1) in pairs(idx_sub)
+      for (k2, j2) in pairs(idx_sub)
+        A_local[k1+1, k2+1] = A[j1, j2]
+      end
+    end
+  else
+    # Degenerate case: only current solution
+    A_local = reshape([dot(u_cur, A * u_cur)], 1, 1)
+    b_local = reshape([dot(b, u_cur)], 1)
+  end
+
+  @debug "Size of A_local: $(size(A_local))"
+  # Solve the local quadratic minimization problem
+  # min_{α} ½ α' A_local α - b_local' α
+  # where α is the coefficient vector in the basis [u_cur, e_j1, e_j2, ...]
+  α_new = A_local \ b_local
+
+  # The following is equivelant to x_new = [u_cur e_j1 e_j2 ...] * α_new
+  # but avoids constructing e_j explicitly
+  x_new = α_new[1] * u_cur  # Coefficient for current solution
+  # Add contributions from standard basis vectors
+  for (k, j) in pairs(idx_sub)
+    x_new[j] += α_new[k+1]  # Add coefficient for e_j
+  end
+  return x_new
+end
+
 """
   inf_step(u_cur, K, M, idx_sub)
 
@@ -477,12 +554,63 @@ function inf_step(
   return x_new
 end
 
-# Combine step
+
+"""
+  combine_step(e::Energies.AbstractEnergy{Float64}, sspace::Matrix{Float64})
+
+Combine step function for variational domain decomposition methods.
+
+This is an abstract interface that must be implemented by concrete energy types.
+The function is intended to perform a combination step in the variational domain
+decomposition algorithm, typically involving operations on the given subspace.
+
+# Arguments
+- `e::Energies.AbstractEnergy{Float64}`: Energy functional or operator
+- `sspace::Matrix{Float64}`: Subspace matrix, typically containing basis vectors
+  or coefficients for the current iteration
+
+# Throws
+- `ErrorException`: Always throws an error indicating that the method must be
+  implemented for the specific energy type
+
+# Notes
+This is a fallback method that serves as a template. Concrete implementations
+should override this method for specific energy types to provide the actual
+combination step logic.
+"""
 function combine_step(
   e::Energies.AbstractEnergy{Float64},
   sspace::Matrix{Float64},
 )
   throw(ErrorException("combine_step not implemented for $(typeof(e))"))
+end
+
+function combine_step(
+  e::Energies.QuadraticEnergy{Float64},
+  sspace::Matrix{Float64},
+)
+  # TODO: Is combine step the same as inf step in general?
+  # => Just 1st order optimality in subspace?
+  A, b = e.A, e.b
+
+  B = Matrix(qr(sspace).Q)
+
+  localdim = size(B, 2)
+  N = size(B, 1)
+
+  # Pre-allocate temporary matrices for efficiency
+  temp_A = Matrix{Float64}(undef, N, localdim)
+  A_local = Matrix{Float64}(undef, localdim, localdim)
+
+  mul!(temp_A, A, B)
+  mul!(A_local, B', temp_A)  # => A_local = B' A B
+
+  b_local = B' * b  # => b_local = B' b
+
+  # Solve the linear system A_local α = b_local to minimize the quadratic energy
+  α_new = A_local \ b_local
+  x_new = B * α_new
+  return x_new
 end
 
 """
@@ -535,7 +663,7 @@ function ddm_eigen_solver(
 end
 
 function ddm_eigen_solver(
-  e::Energies.GeneralizedRayleighQuotient{Float64},
+  e::Energies.AbstractEnergy{Float64},
   subdomain_dofs::Vector{Vector{Int32}};
   maxiter::Int=50,
   tol::Float64=1e-8
@@ -573,7 +701,7 @@ function ddm_eigen_solver(
     push!(sol_hist, copy(u_new))
     if abs(e_new - e_cur) < tol
       # TODO: Change to resnorm < tol or M-norm distance of u_new, u_cur < tol
-      println("Converged at iteration $n with eigenvalue λ = $e_new")
+      println("Converged at iteration $n with energy e = $e_new")
       return u_new, e_new, e_hist, sol_hist
     end
 
@@ -594,10 +722,8 @@ tol = 1e-10
 
 # Schroedinger EVP FEM
 K, M, b, part, U = FEM_Schroedinger(N, m)
-
 energy_eigen_fem = Energies.GeneralizedRayleighQuotient(K, M)
 # energy_eigen_fem = Energies.RayleighQuotient(K)
-
 u_approx, lambda_approx, lambda_history, solutions = ddm_eigen_solver(
   energy_eigen_fem,
   part,
@@ -615,21 +741,27 @@ writevtk(
   cellfields = ["u_approx" => FEFunction(U, u_approx)]
 )
 
-# # Poisson problem FEM
-# K, M, b, part, U = FEM_Schroedinger(N, m, (x -> 0.0), (x -> 1.0))
-# energy_poisson_fem = Energies.QuadraticEnergy(K, b, 0.0)
+# Poisson problem FEM
+K, M, b, part, U = FEM_Schroedinger(N, m, (x -> 0.0), (x -> 1.0))
+energy_poisson_fem = Energies.QuadraticEnergy(K, b, 0.0)
 
-# # direct solve
-# u_poisson = K \ b
+# direct solve
+u_poisson_direct = K \ b
 
-# # ddm_eigen_solver solve
-# # u_poisson, E_poisson, E_hist, sols = ddm_eigen_solver(energy_poisson_fem, part, maxiter=maxiter, tol=tol)
+# ddm_eigen_solver solve
+u_poisson, E_poisson, E_hist, sols = ddm_eigen_solver(energy_poisson_fem, part, maxiter=maxiter, tol=tol)
 
-# E_poisson = Energies.energy(energy_poisson_fem, u_poisson)
-# println("Poisson energy = $E_poisson")
-# # write to vtk file using U info
-# writevtk(
-#   U.fe_basis.trian,
-#   "poisson_solution",
-#   cellfields = ["u_poisson" => FEFunction(U, u_poisson)]
-# )
+# difference
+@assert norm(u_poisson - u_poisson_direct) < 1e-4
+
+E_poisson = Energies.energy(energy_poisson_fem, u_poisson)
+println("Poisson energy = $E_poisson")
+# write to vtk file using U info
+writevtk(
+  U.space.fe_basis.trian,
+  "poisson_solution",
+  cellfields = [
+    "u_poisson" => FEFunction(U, u_poisson),
+    "u_poisson_direct" => FEFunction(U, u_poisson_direct)
+  ]
+)
