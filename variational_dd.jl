@@ -24,6 +24,9 @@ abstract type AbstractEnergy{T} end
 # Generic fallbacks (you can AD these later if you want)
 energy(e::AbstractEnergy, x) = error("energy not implemented for $(typeof(e))")
 
+# Underlying dimension
+dimension(e::AbstractEnergy) = error("dimension not implemented for $(typeof(e))")
+
 # Optionally provide defaults via AD; otherwise keep them abstract.
 gradient(e::AbstractEnergy, x) = error("gradient not implemented for $(typeof(e))")
 hessian(e::AbstractEnergy, x) = error("hessian not implemented for $(typeof(e))")
@@ -70,6 +73,9 @@ QuadraticEnergy(A::AbstractMatrix{T}, b::AbstractVector{T}; c::T=zero(T)) where 
 energy(e::QuadraticEnergy{T}, x::AbstractVector{T}) where {T} =
   T(0.5) * dot(x, e.A * x) - dot(e.b, x) + e.c
 
+# dimension
+dimension(e::QuadraticEnergy) = size(e.A, 1)
+
 # ∇E(x) = Ax - b  (if A symmetric; if not, this is gradient of 1/2 x'(A+A')x - b'x)
 gradient(e::QuadraticEnergy{T}, x::AbstractVector{T}) where {T} =
   e.A * x .- e.b
@@ -94,6 +100,9 @@ energy(e::RayleighQuotient{T}, x::AbstractVector{T}) where {T} = begin
   @assert den != zero(T) "Rayleigh quotient undefined at x=0"
   num / den
 end
+
+# dimension
+dimension(e::RayleighQuotient) = size(e.A, 1)
 
 # ∇ρ(x) = 2 * ( (Ax)(x⋅x) - x(x⋅Ax) ) / (x⋅x)^2
 gradient(e::RayleighQuotient{T}, x::AbstractVector{T}) where {T} = begin
@@ -187,6 +196,10 @@ energy(e::GeneralizedRayleighQuotient{T}, x::AbstractVector{T
   @assert den != zero(T) "Generalized Rayleigh quotient undefined at x with x'Bx=0"
   num / den
 end
+
+# dimension
+dimension(e::GeneralizedRayleighQuotient) = size(e.A, 1)
+
 # ∇ρ(x) = 2 * ( (Ax)(x'Bx) - (Bx)(x'Ax) ) / (x'Bx)^2
 gradient(e::GeneralizedRayleighQuotient{T}, x::AbstractVector{T
 }) where {T} = begin
@@ -459,7 +472,7 @@ function inf_step(
     x_new[j] += res.X[:, 1][k+1]  # Add coefficient for e_j
   end
 
-  normalize_M!(x_new, M)
+  Energies.normalize_M!(x_new, M)
 
   return x_new
 end
@@ -502,7 +515,7 @@ function combine_step(
 
   _, eigvecs = eigen(K_local, M_local)
   x_new = B * eigvecs[:, 1]
-  normalize_M!(x_new, M)
+  Energies.normalize_M!(x_new, M)
   return x_new
 end
 
@@ -529,12 +542,8 @@ function ddm_eigen_solver(
 )
   # TODO: Add sweep option, multiplicative version
 
-  K = e.A
-  M = e.B
-
-  # Initial guess
-  u_cur = ones((N - 1)^2)
-  normalize_M!(u_cur, M)
+  # Initial guess, no need to normalize apparently
+  u_cur = ones(Energies.dimension(e))
 
   e_hist = Float64[]
   sol_hist = Vector{Vector{Float64}}()
@@ -601,26 +610,26 @@ println("Exact eigenvalue = $(exact_sol[1][1])")
 @assert abs(lambda_approx - exact_sol[1][1]) < 1e-6
 # write to vtk file using U info
 writevtk(
-  U.fe_basis.trian,
+  U.space.fe_basis.trian,
   "eigen_solution",
   cellfields = ["u_approx" => FEFunction(U, u_approx)]
 )
 
-# Poisson problem FEM
-K, M, b, part, U = FEM_Schroedinger(N, m, (x -> 0.0), (x -> 1.0))
-energy_poisson_fem = Energies.QuadraticEnergy(K, b, 0.0)
+# # Poisson problem FEM
+# K, M, b, part, U = FEM_Schroedinger(N, m, (x -> 0.0), (x -> 1.0))
+# energy_poisson_fem = Energies.QuadraticEnergy(K, b, 0.0)
 
-# direct solve
-u_poisson = K \ b
+# # direct solve
+# u_poisson = K \ b
 
-# ddm_eigen_solver solve
-# u_poisson, E_poisson, E_hist, sols = ddm_eigen_solver(energy_poisson_fem, part, maxiter=maxiter, tol=tol)
+# # ddm_eigen_solver solve
+# # u_poisson, E_poisson, E_hist, sols = ddm_eigen_solver(energy_poisson_fem, part, maxiter=maxiter, tol=tol)
 
-E_poisson = Energies.energy(energy_poisson_fem, u_poisson)
-println("Poisson energy = $E_poisson")
-# write to vtk file using U info
-writevtk(
-  U.fe_basis.trian,
-  "poisson_solution",
-  cellfields = ["u_poisson" => FEFunction(U, u_poisson)]
-)
+# E_poisson = Energies.energy(energy_poisson_fem, u_poisson)
+# println("Poisson energy = $E_poisson")
+# # write to vtk file using U info
+# writevtk(
+#   U.fe_basis.trian,
+#   "poisson_solution",
+#   cellfields = ["u_poisson" => FEFunction(U, u_poisson)]
+# )
