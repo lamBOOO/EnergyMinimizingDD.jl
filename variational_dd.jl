@@ -653,15 +653,15 @@ function reconstruct_implicit!(α::Vector{Float64}, u_cur::Vector{Float64}, idx_
   end
   return x_new
 end# not implemented for abstract energy
-function ddm_eigen_solver(
+function var_dd(
   e::Energies.AbstractEnergy{Float64},
   subspaces::Vector{Vector{Int32}};
   kwargs...
 )
-  throw(ErrorException("ddm_eigen_solver not implemented for $(typeof(e))"))
+  throw(ErrorException("var_dd not implemented for $(typeof(e))"))
 end
 
-function ddm_eigen_solver(
+function var_dd(
   e::Energies.AbstractEnergy{Float64},
   subdomain_dofs::Vector{Vector{Int32}};
   maxiter::Int=50,
@@ -719,11 +719,13 @@ m = 9
 maxiter = 200
 tol = 1e-10
 
+
+
 # Schroedinger EVP FEM
 K, M, b, part, U = FEM_Schroedinger(N, m)
 energy_eigen_fem = Energies.GeneralizedRayleighQuotient(K, M)
 # energy_eigen_fem = Energies.RayleighQuotient(K)
-u_approx, lambda_approx, lambda_history, solutions = ddm_eigen_solver(
+u_approx, lambda_approx, lambda_history, solutions = var_dd(
   energy_eigen_fem,
   part,
   maxiter=maxiter,
@@ -740,19 +742,17 @@ writevtk(
   cellfields = ["u_approx" => FEFunction(U, u_approx)]
 )
 
+
+
 # Poisson problem FEM
 K, M, b, part, U = FEM_Schroedinger(N, m, (x -> 0.0), (x -> 1.0))
 energy_poisson_fem = Energies.QuadraticEnergy(K, b, 0.0)
-
 # direct solve
 u_poisson_direct = K \ b
-
-# ddm_eigen_solver solve
-u_poisson, E_poisson, E_hist, sols = ddm_eigen_solver(energy_poisson_fem, part, maxiter=maxiter, tol=tol)
-
+# var_dd solve
+u_poisson, E_poisson, E_hist, sols = var_dd(energy_poisson_fem, part, maxiter=maxiter, tol=tol)
 # difference
 @assert norm(u_poisson - u_poisson_direct) < 1e-4
-
 E_poisson = Energies.energy(energy_poisson_fem, u_poisson)
 println("Poisson energy = $E_poisson")
 # write to vtk file using U info
