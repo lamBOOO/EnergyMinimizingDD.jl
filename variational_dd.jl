@@ -550,41 +550,37 @@ end
 
 function ddm_eigen_solver(
   e::Energies.GeneralizedRayleighQuotient{Float64},
-  subspaces::Vector{Vector{Int32}};
+  subdomain_dofs::Vector{Vector{Int32}};
   maxiter::Int=50,
   tol::Float64=1e-8
 )
 
   # TODO: Add sweep option
-  setup_time = time()
-  # K, M, subspaces, fesp = Setup_FEM(N, m)
   K = e.A
   M = e.B
-  elapsed_setup = time() - setup_time
-  println("$elapsed_setup seconds needed for setup")
 
   # Initial guess
   u_cur = ones((N - 1)^2)
   normalize_M!(u_cur, M)
 
-  lambda_history = Float64[]
-  solutions = Vector{Vector{Float64}}()
+  e_hist = Float64[]
+  sol_hist = Vector{Vector{Float64}}()
 
-  λ_cur = R(u_cur, K, M)
-  push!(lambda_history, λ_cur)
-  push!(solutions, copy(u_cur))
+  e_cur = e(u_cur)
+  push!(e_hist, e_cur)
+  push!(sol_hist, copy(u_cur))
 
   for n in 1:maxiter
-    local_updates = zeros(size(u_cur, 1), m + 1)
+    local_updates = zeros(size(u_cur, 1), m)
     for i = 1:m
-      u_next_i = inf_step(e, u_cur, subspaces[i])
-      local_updates[:, i+1] = u_next_i
+      u_next_i = inf_step(e, u_cur, subdomain_dofs[i])
+      local_updates[:, i] = u_next_i
     end
 
     combined_matrix = hcat(u_cur, local_updates)
     u_new = combine_step(combined_matrix, K, M)
 
-    @printf("Iteration %3d: Residual norm ≈ %12.6e energy = %12.6e\n", n, norm(K * u_new - λ_cur * M * u_new), e(u_new))
+    @printf("Iteration %3d: Residual norm ≈ %12.6e energy = %12.6e\n", n, norm(K * u_new - e_cur * M * u_new), e(u_new))
 
     # TODO: Needed?
     if dot(u_new, u_cur) < 0
@@ -592,19 +588,19 @@ function ddm_eigen_solver(
     end
 
     λ_new = R(u_new, K, M)
-    push!(lambda_history, λ_new)
-    push!(solutions, copy(u_new))
-    if abs(λ_new - λ_cur) < tol
+    push!(e_hist, λ_new)
+    push!(sol_hist, copy(u_new))
+    if abs(λ_new - e_cur) < tol
       println("Converged at iteration $n with eigenvalue λ = $λ_new")
-      return u_new, λ_new, lambda_history, solutions
+      return u_new, λ_new, e_hist, sol_hist
     end
 
     u_cur = u_new
-    λ_cur = λ_new
+    e_cur = λ_new
   end
 
-  println("Reached maxiter=$maxiter with final Rayleigh quotient ≈ $λ_cur")
-  return u_cur, λ_cur, lambda_history, solutions
+  println("Reached maxiter=$maxiter with final Rayleigh quotient ≈ $e_cur")
+  return u_cur, e_cur, e_hist, sol_hist
 end
 
 
