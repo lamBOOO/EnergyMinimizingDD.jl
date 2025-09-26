@@ -38,10 +38,24 @@ function hessian!(H, e::AbstractEnergy, x)
   return H
 end
 
-# ---------- Concrete energies ----------
+residual_norm(e::AbstractEnergy, x) = error("residual_norm not implemented for $(typeof(e))")
 
-# 1) Quadratic energy:  E(x) = 1/2 x'Ax - b'x + c
-#    (covers linear systems and least-squares normal equations)
+"""
+  QuadraticEnergy{T,M<:AbstractMatrix{T},V<:AbstractVector{T}}
+    <: AbstractEnergy{T}
+
+A concrete implementation of `AbstractEnergy` representing a quadratic energy
+function.
+
+This structure is parameterized by:
+- `T`: The numeric type (e.g., Float64, Float32)
+- `M`: The matrix type that must be a subtype of `AbstractMatrix{T}`
+- `V`: The vector type that must be a subtype of `AbstractVector{T}`
+
+Quadratic energy functions typically have the form
+E(x) = ½xᵀAx + bᵀx + c, where A is a matrix,
+b is a vector, and c is a scalar constant.
+"""
 struct QuadraticEnergy{T,M<:AbstractMatrix{T},V<:AbstractVector{T}} <: AbstractEnergy{T}
   A::M           # can be Dense, Sparse, or Symmetric wrapper
   b::V
@@ -63,6 +77,7 @@ gradient(e::QuadraticEnergy{T}, x::AbstractVector{T}) where {T} =
 # ∇²E(x) = A (constant)
 hessian(e::QuadraticEnergy{T}) where {T} = e.A
 hessian(e::QuadraticEnergy{T}, x::AbstractVector{T}) where {T} = hessian(e)
+
 
 # 2) Rayleigh quotient:  ρ(x) = (x'Ax) / (x'x), scale-invariant in x ≠ 0
 struct RayleighQuotient{T,M<:AbstractMatrix{T}} <: AbstractEnergy{T}
@@ -214,11 +229,23 @@ function hessian!(H::AbstractMatrix, e::GeneralizedRayleighQuotient,
   ))
 end
 
+# A helper function to compute the residual norm ||Ax - ρ(x)Bx||
+function residual_norm(e::GeneralizedRayleighQuotient, x::AbstractVector)
+  rho = energy(e, x)
+  r = e.A * x .- rho * (e.B * x)
+  return norm(r)
+end
 
 
 # ---------- Utilities ----------
 # Promote to Symmetric if you know A is symmetric to avoid accidental double work.
 as_symmetric(A) = Symmetric(A)  # no-op if already Symmetric
+
+function normalize_M!(u::Vector{Float64}, M::AbstractMatrix)
+  nu = sqrt(dot(u, M * u))
+  @assert nu > 1e-14 "Attempting to normalize a near-zero vector."
+  u ./= nu
+end
 end # module
 
 # Example usage:
@@ -345,45 +372,6 @@ function create_overlapping_elements_partition!(elemsp, g, npars::Integer, ol) #
   end
 end
 
-# 2) Rayleigh quotient
-function R(u::Vector{Float64}, K::AbstractMatrix, M::AbstractMatrix)
-  numerator = dot(u, K * u)
-  denominator = dot(u, M * u)
-  return numerator / denominator
-end
-
-# 3) Normalization in the M-norm
-function normalize_M!(u::Vector{Float64}, M::AbstractMatrix)
-  nu = sqrt(dot(u, M * u))
-  @assert nu > 1e-14 "Attempting to normalize a near-zero vector."
-  u ./= nu
-end
-
-function pu_matrices(dofsp::Vector{Vector{Int32}}, sp::Gridap.FESpaces.UnconstrainedFESpace) #pu as in Eigenlab
-  npars = length(dofsp)
-  Ri = Vector{SparseMatrixCSC}(undef, npars)
-  Di = Vector{SparseMatrixCSC}(undef, npars)
-  Threads.@threads for ipar = 1:npars
-    Ri[ipar] = spzeros(length(dofsp[ipar]), sp.nfree)
-    Di[ipar] = spzeros(length(dofsp[ipar]), length(dofsp[ipar]))
-    for idof = 1:length(dofsp[ipar])
-      Ri[ipar][idof, dofsp[ipar][idof]] = 1
-      Di[ipar][idof, idof] = 1 / sum(map(p -> dofsp[ipar][idof] in p, dofsp))
-    end
-  end
-  return Ri, Di
-end
-
-function coarse_space_corr(dofsp::Vector{Vector{Int32}}, sp::Gridap.FESpaces.UnconstrainedFESpace)
-  Ri, Di = pu_matrices(dofsp, sp)
-  n = size(Di, 1) # no. subdomains
-  m = size(Ri[1], 2) # no. of DOFS
-  Z = zeros(m, n)
-  for i = 1:n
-    Z[:, i] = (Ri[i]' * Di[i] * Ri[i]) * ones(m) #Z as in Nicolaides in DD Book
-  end
-  return Z
-end
 
 function inf_step(
   e::Energies.AbstractEnergy{Float64},
@@ -395,14 +383,14 @@ end
 
 # 5) Inf step on subspace D_i
 """
-  inf_step(u_current, K, M, idx_sub)
+  inf_step(u_cur, K, M, idx_sub)
 
-Calcualted x_new = argmin_{x ∈ span{u_current, e_j, j ∈ idx_sub} \\ {0}} (x' K x)/(x' M x)
+Calcualted x_new = argmin_{x ∈ span{u_cur, e_j, j ∈ idx_sub} \\ {0}} (x' K x)/(x' M x)
 where {e_j} are standard basis vectors. The output is re-normalized in the M-norm.
 """
 function inf_step(
   e::Energies.GeneralizedRayleighQuotient{Float64},
-  u_current::Vector{Float64},
+  u_cur::Vector{Float64},
   idx_sub::AbstractVector
 )
   localdim = 1 + length(idx_sub)
@@ -415,14 +403,14 @@ function inf_step(
     K_local = zeros(localdim, localdim)
     M_local = zeros(localdim, localdim)
 
-    # First row/column: u_current' * K/M * [u_current, e_j1, e_j2, ...]
-    K_u = K * u_current
-    M_u = M * u_current
+    # First row/column: u_cur' * K/M * [u_cur, e_j1, e_j2, ...]
+    K_u = K * u_cur
+    M_u = M * u_cur
 
-    K_local[1, 1] = dot(u_current, K_u)  # u' * K * u
-    M_local[1, 1] = dot(u_current, M_u)  # u' * M * u
+    K_local[1, 1] = dot(u_cur, K_u)  # u' * K * u
+    M_local[1, 1] = dot(u_cur, M_u)  # u' * M * u
 
-    # First row/column: u_current' * K/M * e_j
+    # First row/column: u_cur' * K/M * e_j
     for (k, j) in pairs(idx_sub)
       K_local[1, k+1] = K_u[j]  # u' * K * e_j = (K * u)[j]
       K_local[k+1, 1] = K_u[j]  # e_j' * K * u = (K * u)[j] (symmetric)
@@ -439,8 +427,8 @@ function inf_step(
     end
   else
     # Degenerate case: only current solution
-    K_local = reshape([dot(u_current, K * u_current)], 1, 1)
-    M_local = reshape([dot(u_current, M * u_current)], 1, 1)
+    K_local = reshape([dot(u_cur, K * u_cur)], 1, 1)
+    M_local = reshape([dot(u_cur, M * u_cur)], 1, 1)
   end
 
   @debug "Size of K_local: $(size(K_local))"
@@ -451,13 +439,13 @@ function inf_step(
   res = lobpcg(K_local_sym, M_local_sym, false, 1; P=F, tol=1e-8, maxiter=500)
 
   # The following is equivelant to Rayleigh Ritz procedure
-  # x_new = [u_current e_j1 e_j2 ...] * α_min
+  # x_new = [u_cur e_j1 e_j2 ...] * α_min
   # where α_min is the eigenvector associated with the smallest eigenvalue
   # of the generalized eigenvalue problem in the subspace
   # (B' K B) α = λ (B' M B) α
-  # with B = [u_current e_j1 e_j2 ...]
+  # with B = [u_cur e_j1 e_j2 ...]
   # but avoids constructing e_j explicitly
-  x_new = res.X[:, 1][1] * u_current  # Coefficient for current solution
+  x_new = res.X[:, 1][1] * u_cur  # Coefficient for current solution
   # Add contributions from standard basis vectors
   for (k, j) in pairs(idx_sub)
     x_new[j] += res.X[:, 1][k+1]  # Add coefficient for e_j
@@ -468,68 +456,45 @@ function inf_step(
   return x_new
 end
 
-# 6) Combine step
+# Combine step
+function combine_step(
+  e::Energies.AbstractEnergy{Float64},
+  sspace::Matrix{Float64},
+)
+  throw(ErrorException("combine_step not implemented for $(typeof(e))"))
+end
+
 """
-  combine_step(u_collection, K, M)
+  combine_step(e::Energies.GeneralizedRayleighQuotient, u_collection::Matrix)
 
-Given a collection of M-normalized (not necessarily mutually orthogonal) vectors
-`{u_i}` this forms the matrix `B = [u_1 ... u_p]`, computes an orthonormal (in
-the Euclidean sense) basis `Q` of its column space via QR, and then solves the
-reduced generalized eigenproblem
-
-  (Q' K Q) α = λ (Q' M Q) α
-
-returning the vector `x_new = Q α_min` associated with the smallest Rayleigh
-quotient restricted to span(B). The output is re-normalized in the M-norm.
-
-Mathematically this performs the exact minimization
-
-  x_new = argmin_{x ∈ span(u_collection) \\ {0}} (x' K x)/(x' M x).
-
-Returns the updated vector `x_new` with `x_new' * M * x_new = 1`.
+Perform a Rayleigh-Ritz procedure in the span of the columns of sspace.
+The output is re-normalized in the M-norm.
 """
-function combine_step(u_collection::Matrix{Float64},
-  K::AbstractMatrix, M::AbstractMatrix)
-  t_qr_start = time()
+function combine_step(
+  e::Energies.GeneralizedRayleighQuotient{Float64},
+  sspace::Matrix{Float64},
+)
+  K, M = e.A, e.B
 
-  B = Matrix(qr(u_collection).Q)
-  t_qr = time() - t_qr_start
+  B = Matrix(qr(sspace).Q)
 
-  t_matrices_start = time()
-  # Optimized matrix multiplications using temporary arrays and mul!
   localdim = size(B, 2)
   N = size(B, 1)
 
-  # Pre-allocate temporary matrices
+  # Pre-allocate temporary matrices for efficiency
   temp_K = Matrix{Float64}(undef, N, localdim)
   temp_M = Matrix{Float64}(undef, N, localdim)
   K_local = Matrix{Float64}(undef, localdim, localdim)
   M_local = Matrix{Float64}(undef, localdim, localdim)
 
-  # Use mul! for in-place operations
   mul!(temp_K, K, B)
   mul!(temp_M, M, B)
-  mul!(K_local, B', temp_K)
-  mul!(M_local, B', temp_M)
+  mul!(K_local, B', temp_K)  # => K_local = B' K B
+  mul!(M_local, B', temp_M)  # => M_local = B' M B
 
-  t_matrices = time() - t_matrices_start
-
-  t_eigen_start = time()
-  eigvals, eigvecs = eigen(K_local, M_local)
-  i_min = argmin(eigvals)
-  α_min = eigvecs[:, i_min]
-  t_eigen = time() - t_eigen_start
-
-  # println("eigen(K_local): ",eigen(K_local).values)
-  # println("eigen(M_local): ",eigen(M_local).values)
-  # println(α_min)
-
-  t_finalize_start = time()
-  x_new = B * α_min
+  _, eigvecs = eigen(K_local, M_local)
+  x_new = B * eigvecs[:, 1]
   normalize_M!(x_new, M)
-  t_finalize = time() - t_finalize_start
-
-  @debug "combine_step breakdown: QR=$t_qr, matrices=$t_matrices, eigen=$t_eigen, finalize=$t_finalize"
   return x_new
 end
 
@@ -554,8 +519,8 @@ function ddm_eigen_solver(
   maxiter::Int=50,
   tol::Float64=1e-8
 )
+  # TODO: Add sweep option, multiplicative version
 
-  # TODO: Add sweep option
   K = e.A
   M = e.B
 
@@ -570,17 +535,17 @@ function ddm_eigen_solver(
   push!(e_hist, e_cur)
   push!(sol_hist, copy(u_cur))
 
+  local_updates = zeros(size(u_cur, 1), m)  # preallocate for efficiency
   for n in 1:maxiter
-    local_updates = zeros(size(u_cur, 1), m)
     for i = 1:m
       u_next_i = inf_step(e, u_cur, subdomain_dofs[i])
       local_updates[:, i] = u_next_i
     end
 
     combined_matrix = hcat(u_cur, local_updates)
-    u_new = combine_step(combined_matrix, K, M)
+    u_new = combine_step(e, combined_matrix)
 
-    resnorm = norm(K * u_new - e_cur * M * u_new)
+    resnorm = Energies.residual_norm(e, u_new)
     @printf(
       "Iteration %3d: Residual norm ≈ %12.6e energy = %12.6e\n",
       n, resnorm, e(u_new)
@@ -589,7 +554,8 @@ function ddm_eigen_solver(
     e_new = e(u_new)
     push!(e_hist, e_new)
     push!(sol_hist, copy(u_new))
-    if abs(e_new - e_cur) < tol  # TODO: Change to resnorm < tol?
+    if abs(e_new - e_cur) < tol
+      # TODO: Change to resnorm < tol or M-norm distance of u_new, u_cur < tol
       println("Converged at iteration $n with eigenvalue λ = $e_new")
       return u_new, e_new, e_hist, sol_hist
     end
