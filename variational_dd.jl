@@ -7,6 +7,7 @@ using IterativeSolvers
 using Arpack
 using Printf
 using Random
+using LineSearches
 
 
 module Energies
@@ -254,7 +255,36 @@ function residual_norm(e::GeneralizedRayleighQuotient, x::AbstractVector)
   return norm(r)
 end
 
-# 4) Linear Regression Energy: E(x) = ||Ax - b||² for least squares problems
+# 4) Generic Nonlinear Energy: E(u) for general nonlinear problems
+#    Can represent PDE problems like p-Laplacian: E(u) = ∫(|∇u|^p/p)dΩ - ∫f*u dΩ
+#    Or simple algebraic systems: E(x) = ½||F(x)||² where F(x) = 0 is the root problem
+struct NonlinearEnergy{T,F1<:Function,F2<:Function} <: AbstractEnergy{T}
+  name::String   # Descriptive name (e.g., "p-Laplacian", "Circle-Cubic System")
+  assembler::F1  # Function that assembles the energy given u: (u) -> energy_value
+  grad_assembler::F2  # Function that assembles the gradient: (u) -> gradient_vector
+  N::Int        # Problem dimension
+  params::Dict{String,Any}  # Additional parameters (e.g., p for p-Laplacian, etc.)
+end
+
+NonlinearEnergy(name::String, assembler::F1, grad_assembler::F2, N::Int;
+               params::Dict{String,Any}=Dict{String,Any}()) where {F1,F2} =
+  NonlinearEnergy{Float64,F1,F2}(name, assembler, grad_assembler, N, params)
+
+# E(u) - energy evaluation
+energy(e::NonlinearEnergy{T}, u::AbstractVector{T}) where {T} = e.assembler(u)
+
+# dimension
+dimension(e::NonlinearEnergy) = e.N
+
+# ∇E(u) - gradient evaluation
+gradient(e::NonlinearEnergy{T}, u::AbstractVector{T}) where {T} = e.grad_assembler(u)
+
+# For nonlinear problems, residual norm is the gradient norm (∇E = 0 at solution)
+function residual_norm(e::NonlinearEnergy{T}, u::AbstractVector{T}) where {T}
+  return norm(gradient(e, u))
+end
+
+# 6) Linear Regression Energy: E(x) = ||Ax - b||² for least squares problems
 #    Minimizing this energy leads to solving the normal equations A'Ax = A'b
 struct LinearRegressionEnergy{T,M<:AbstractMatrix{T},V<:AbstractVector{T}} <: AbstractEnergy{T}
   A::M           # Design matrix (m × n where m ≥ n typically)
@@ -379,6 +409,177 @@ function FEM_Schroedinger(
   elapsed = time() - t1
   println("create_dofs_partition finished in $elapsed seconds")
   return K, M, b, dofspar, U
+end
+
+"""
+  FEM_PLaplacian(N::Int, m::Int, p::Float64)
+
+Set up a p-Laplacian problem using Gridap FEM on a unit square domain.
+Returns the necessary components for domain decomposition including
+optimized energy and gradient assemblers using cached FEFunction pattern.
+"""
+function FEM_PLaplacian(
+  N::Int,
+  m::Int=9,
+  p::Float64=3.0,
+  f::F=(x -> 1.0)
+) where {F<:Function}
+
+  domain = (0, 1.0, 0, 1.0)
+  partition1 = (1.0 * N, 1.0 * N)
+  model = CartesianDiscreteModel(domain, partition1; isperiodic=(false, false))
+  reffe = ReferenceFE(lagrangian, Float64, 1)
+  VV = TestFESpace(model, reffe, dirichlet_tags=["boundary"])
+  Ω = Triangulation(model)
+  dΩ = Measure(Ω, 2)
+  U = TrialFESpace(VV, 0)
+
+  # Domain decomposition setup
+  g = GridapDistributed.compute_cell_graph(model)
+  par = Metis.partition(g, m)
+  elpar = create_elements_partition(par, m)
+  create_overlapping_elements_partition!(elpar, g, m, 2)
+  dofspar = create_dofs_partition(elpar, VV)
+
+  # Cache setup for zero-allocation energy/gradient evaluation
+  ndofs = num_free_dofs(U)
+
+  # Cache FEFunction that we will reuse by mutating its DOF array
+  ufe_cache = FEFunction(U, zeros(ndofs), get_dirichlet_dof_values(U))
+
+  # Use smooth, branch-free ε-regularization
+  eps2 = 1e-24
+  half_p = p/2
+
+  # Prebuild load pieces: ∫ f u = b_free⋅u_free + c_dirichlet
+  rhs_form(v) = ∫( v * (x -> f(x)) )dΩ
+  b_free = assemble_vector(rhs_form, VV)
+  c_dirichlet = sum( ∫( FEFunction(U, zero(b_free),
+                                        get_dirichlet_dof_values(U)) * (x -> f(x)) )dΩ )
+
+  # Energy density: (|∇u|^2 + eps2)^(p/2) / p
+  e_density = (∇u) -> ((∇u ⊙ ∇u + eps2)^half_p) / p
+
+  # Optimized energy assembler using cached FEFunction
+  function energy_assembler(u_vec::Vector{Float64})
+    # Mutate the cached FEFunction instead of constructing a new one
+    copyto!(get_free_dof_values(ufe_cache), u_vec)
+
+    E_grad = sum( ∫( e_density ∘ ∇(ufe_cache) )dΩ )
+    # ∫ f u = b_free⋅u_free + c_dirichlet
+    return E_grad - (dot(b_free, u_vec) + c_dirichlet)
+  end
+
+  # Set up algebraic operator for gradient evaluation
+  # p-Laplacian weak form following Gridap tutorial
+  flux(∇u) = begin
+    gnorm_sq = ∇u ⊙ ∇u + eps2
+    return gnorm_sq^((p-2)/2) * ∇u
+  end
+
+  # Jacobian for Newton method
+  dflux(∇du, ∇u) = begin
+    gnorm_sq = ∇u ⊙ ∇u + eps2
+    gnorm = sqrt(gnorm_sq)
+    if gnorm < 1e-12  # Additional safety
+      return zero(∇du)
+    end
+    return (p-2) * gnorm^(p-4) * (∇u ⊙ ∇du) * ∇u + gnorm^(p-2) * ∇du
+  end
+
+  # Weak residual and Jacobian
+  res(u, v) = ∫(∇(v) ⊙ (flux ∘ ∇(u)) - v * (x -> f(x)))dΩ
+  jac(u, du, v) = ∫(∇(v) ⊙ (dflux ∘ (∇(du), ∇(u))))dΩ
+
+  # Create FE operator and get algebraic view
+  feop = FEOperator(res, jac, U, VV)
+  alg_op = Gridap.FESpaces.get_algebraic_operator(feop)
+
+  # Pre-allocate vectors for efficiency
+  r_temp = zeros(Float64, ndofs)
+
+  # Optimized gradient assembler using algebraic operator (avoids FEFunction creation)
+  function gradient_assembler(u_vec::Vector{Float64})
+    # Use pre-allocated residual vector
+    Gridap.Algebra.residual!(r_temp, alg_op, u_vec)
+    return copy(r_temp)  # Return a copy to avoid mutation issues
+  end
+
+  return energy_assembler, gradient_assembler, dofspar, U, ndofs
+end
+
+"""
+  solve_p_laplacian_gridap(N::Int, p::Float64)
+
+Solve the p-Laplacian problem using standard Gridap approach following
+the tutorial https://gridap.github.io/Tutorials/dev/pages/t004_p_laplacian/
+Returns the solution for comparison with domain decomposition method.
+Uses consistent smooth ε-regularization matching the DD version.
+"""
+function solve_p_laplacian_gridap(
+  N::Int,
+  p::Float64=3.0,
+  f::F=(x -> 1.0)
+) where {F<:Function}
+
+  # Setup domain and FE space (same as DD version for consistency)
+  domain = (0, 1.0, 0, 1.0)
+  partition1 = (1.0 * N, 1.0 * N)
+  model = CartesianDiscreteModel(domain, partition1; isperiodic=(false, false))
+  reffe = ReferenceFE(lagrangian, Float64, 1)
+  V0 = TestFESpace(model, reffe, dirichlet_tags=["boundary"])
+  Ug = TrialFESpace(V0, 0)
+
+  # Numerical integration setup
+  degree = 2
+  Ω = Triangulation(model)
+  dΩ = Measure(Ω, degree)
+
+  # p-Laplacian weak form with consistent regularization
+  # Use same smooth, branch-free ε-regularization as DD version
+  eps2 = 1e-24
+
+  flux(∇u) = begin
+    gnorm_sq = ∇u ⊙ ∇u + eps2
+    return gnorm_sq^((p-2)/2) * ∇u
+  end
+
+  # Jacobian for Newton method
+  dflux(∇du, ∇u) = begin
+    gnorm_sq = ∇u ⊙ ∇u + eps2
+    gnorm = sqrt(gnorm_sq)
+    if gnorm < 1e-12  # Additional safety
+      return zero(∇du)
+    end
+    return (p-2) * gnorm^(p-4) * (∇u ⊙ ∇du) * ∇u + gnorm^(p-2) * ∇du
+  end
+
+  # Weak residual and Jacobian
+  res(u, v) = ∫(∇(v) ⊙ (flux ∘ ∇(u)) - v * (x -> f(x)))dΩ
+  jac(u, du, v) = ∫(∇(v) ⊙ (dflux ∘ (∇(du), ∇(u))))dΩ
+
+  # Create FE operator
+  op = FEOperator(res, jac, Ug, V0)
+
+  # Setup nonlinear solver using NLsolve with optimized tolerance
+  nls = NLSolver(
+    show_trace=false,
+    method=:newton,
+    linesearch=LineSearches.BackTracking(),
+    ftol=1e-8,
+    iterations=50
+  )
+  solver = FESolver(nls)
+
+  # Initial guess - small random perturbation
+  Random.seed!(123)
+  x0 = 0.01 * randn(Float64, num_free_dofs(Ug))
+  uh0 = FEFunction(Ug, x0)
+
+  # Solve the nonlinear problem
+  uh, = solve!(uh0, solver, op)
+
+  return uh, Ug
 end
 
 function create_dofs_partition(
@@ -629,6 +830,103 @@ function inf_step(
   return x_new
 end
 
+"""
+  inf_step(e::NonlinearEnergy, u_cur, idx_sub)
+
+Perform local minimization step for nonlinear energy using Newton's method
+in the subdomain spanned by {u_cur, e_j for j ∈ idx_sub}.
+Works for any nonlinear problem: PDEs, algebraic systems, etc.
+"""
+function inf_step(
+  e::Energies.NonlinearEnergy{Float64},
+  u_cur::Vector{Float64},
+  idx_sub::AbstractVector
+)
+  localdim = 1 + length(idx_sub)
+
+  if length(idx_sub) == 0
+    # Degenerate case: return current solution
+    return copy(u_cur)
+  end
+
+  # Newton iteration for local minimization in subspace
+  # We minimize E(u_cur + α₁*u_cur + ∑αⱼ*eⱼ) = E(∑βₖ*basis_k)
+  # where basis = [u_cur, e_j1, e_j2, ...]
+
+  α = zeros(localdim)
+  α[1] = 1.0  # Initial guess: α = [1, 0, 0, ...]
+
+  max_newton_iter = 100
+  newton_tol = 1e-6
+
+  for iter = 1:max_newton_iter
+    # Reconstruct current iterate
+    u_current = reconstruct_implicit!(α, u_cur, idx_sub)
+
+    # Compute gradient and approximate Hessian in subspace
+    grad_full = Energies.gradient(e, u_current)
+
+    # Project gradient to subspace: g_local[k] = ∂E/∂αₖ
+    g_local = zeros(localdim)
+    g_local[1] = dot(grad_full, u_cur)  # ∂E/∂α₁
+    for (k, j) in pairs(idx_sub)
+      g_local[k+1] = grad_full[j]  # ∂E/∂αₖ = grad_full[j]
+    end
+
+    # Check convergence
+    if norm(g_local) < newton_tol
+      break
+    end
+
+    # Approximate Hessian using finite differences (could be improved with analytical Hessian)
+    H_local = zeros(localdim, localdim)
+    eps_fd = 1e-6
+
+    for i = 1:localdim
+      α_plus = copy(α)
+      α_plus[i] += eps_fd
+      u_plus = reconstruct_implicit!(α_plus, u_cur, idx_sub)
+      grad_plus = Energies.gradient(e, u_plus)
+
+      # Project gradient difference
+      g_plus = zeros(localdim)
+      g_plus[1] = dot(grad_plus, u_cur)
+      for (k, j) in pairs(idx_sub)
+        g_plus[k+1] = grad_plus[j]
+      end
+
+      H_local[:, i] = (g_plus .- g_local) / eps_fd
+    end
+
+    # Newton step with regularization for stability
+    H_reg = H_local + 1e-8 * I
+    try
+      Δα = H_reg \ (-g_local)
+
+      # Line search for stability
+      step_size = 1.0
+      α_new = α + step_size * Δα
+      u_new = reconstruct_implicit!(α_new, u_cur, idx_sub)
+
+      # Simple backtracking
+      while step_size > 1e-4
+        u_test = reconstruct_implicit!(α + step_size * Δα, u_cur, idx_sub)
+        if Energies.energy(e, u_test) <= Energies.energy(e, u_current)
+          break
+        end
+        step_size *= 0.5
+      end
+
+      α += step_size * Δα
+    catch
+      # If Hessian is singular, use steepest descent
+      α -= 0.01 * g_local / (norm(g_local) + 1e-12)
+    end
+  end
+
+  return reconstruct_implicit!(α, u_cur, idx_sub)
+end
+
 
 """
   combine_step(e::Energies.AbstractEnergy{Float64}, sspace::Matrix{Float64})
@@ -752,6 +1050,78 @@ function combine_step(
   return x_new
 end
 
+"""
+  combine_step(e::NonlinearEnergy, sspace)
+
+Perform combine step for nonlinear energy by minimizing energy in the subspace
+spanned by the columns of sspace using Newton's method.
+Works for any nonlinear problem: PDEs, algebraic systems, etc.
+"""
+function combine_step(
+  e::Energies.NonlinearEnergy{Float64},
+  sspace::Matrix{Float64},
+)
+  B = Matrix(qr(sspace).Q)
+  localdim = size(B, 2)
+
+  # Newton iteration in subspace
+  α = zeros(localdim)
+  α[1] = 1.0  # Initial guess: mostly first component
+
+  max_newton_iter = 10
+  newton_tol = 1e-6
+
+  for iter = 1:max_newton_iter
+    u_current = B * α
+
+    # Compute gradient and project to subspace
+    grad_full = Energies.gradient(e, u_current)
+    g_local = B' * grad_full
+
+    # Check convergence
+    if norm(g_local) < newton_tol
+      break
+    end
+
+    # Approximate Hessian in subspace using finite differences
+    H_local = zeros(localdim, localdim)
+    eps_fd = 1e-6
+
+    for i = 1:localdim
+      α_plus = copy(α)
+      α_plus[i] += eps_fd
+      u_plus = B * α_plus
+      grad_plus = Energies.gradient(e, u_plus)
+      g_plus = B' * grad_plus
+      H_local[:, i] = (g_plus .- g_local) / eps_fd
+    end
+
+    # Newton step with regularization
+    H_reg = H_local + 1e-8 * I
+    try
+      Δα = H_reg \ (-g_local)
+
+      # Simple line search
+      step_size = 1.0
+      while step_size > 1e-4
+        α_test = α + step_size * Δα
+        u_test = B * α_test
+        if Energies.energy(e, u_test) <= Energies.energy(e, u_current)
+          break
+        end
+        step_size *= 0.5
+      end
+
+      α += step_size * Δα
+    catch
+      # Fallback to steepest descent
+      α -= 0.01 * g_local / (norm(g_local) + 1e-12)
+    end
+  end
+
+  return B * α
+end
+
 # A helper function for measuring "distance" in M-norm
 function M_norm_distance(u::Vector{Float64}, v::Vector{Float64}, M::AbstractMatrix)
   w = u .- v
@@ -799,6 +1169,16 @@ function var_dd(
   e_cur = e(u_cur)
   push!(e_hist, e_cur)
   push!(sol_hist, copy(u_cur))
+
+  # Filter subdomain DOFs to ensure they're within bounds
+  m = length(subdomain_dofs)  # Number of subdomains
+  # n_dofs = Energies.dimension(e)
+  # filtered_subdomain_dofs = Vector{Vector{Int32}}()
+
+  # for i = 1:m
+  #   filtered_dofs = filter(dof -> dof >= 1 && dof <= n_dofs, subdomain_dofs[i])
+  #   push!(filtered_subdomain_dofs, filtered_dofs)
+  # end
 
   local_updates = zeros(size(u_cur, 1), m)  # preallocate for efficiency
   for n in 1:maxiter
@@ -934,3 +1314,164 @@ println("Normal equation residual (DD): $(norm(normal_residual_dd))")
 @assert norm(x_dd - x_direct) / norm(x_direct) < 1e-3
 @assert abs(E_lr - Energies.energy(energy_lr, x_direct)) < 1e-6
 println("✓ passed.")
+
+
+# p-Laplacian nonlinear problem example
+println("\n=== p-Laplacian Nonlinear FEM Example ===")
+p_val = 3.0
+N_small = 20  # Use smaller problem size for testing
+m_small = 9   # Fewer subdomains
+energy_assembler, grad_assembler, part_pl, U_pl, n_dofs = FEM_PLaplacian(N_small, m_small, p_val)
+
+# Create p-Laplacian energy functional using the generic NonlinearEnergy
+energy_pl = Energies.NonlinearEnergy("p-Laplacian", energy_assembler, grad_assembler, n_dofs,
+                                    params=Dict{String,Any}("p" => p_val))
+
+# Test energy and gradient evaluation with better initial guess
+Random.seed!(123)  # For reproducibility
+u_test = 0.01 * randn(n_dofs)  # Small random initial guess to break symmetry
+try
+  E_test = Energies.energy(energy_pl, u_test)
+  grad_test = Energies.gradient(energy_pl, u_test)
+  println("Initial energy: $E_test")
+  println("Initial gradient norm: $(norm(grad_test))")
+
+  # Domain decomposition solution with more relaxed tolerance
+  u_pl, E_pl, E_hist_pl, sols_pl = var_dd(energy_pl, part_pl, maxiter=30, tol=1e-8)
+
+  println("Final p-Laplacian energy: $E_pl")
+  println("Final gradient norm: $(Energies.residual_norm(energy_pl, u_pl))")
+
+  # Write to VTK file for visualization
+  writevtk(
+    U_pl.space.fe_basis.trian,
+    "p_laplacian_solution",
+    cellfields = ["u_pl" => FEFunction(U_pl, u_pl)]
+  )
+
+  # Verify that we've found a critical point (gradient should be small)
+  final_grad_norm = Energies.residual_norm(energy_pl, u_pl)
+  if final_grad_norm < 1e-2
+    println("✓ p-Laplacian converged successfully!")
+  else
+    println("⚠ p-Laplacian converged but with larger residual: $final_grad_norm")
+  end
+
+  # Compare with Gridap reference solution
+  println("\n--- Comparison with Gridap Reference ---")
+  uh_ref, U_ref = solve_p_laplacian_gridap(N_small, p_val)
+  u_ref = get_free_dof_values(uh_ref)
+
+  # Compare solution vectors
+  error_l2 = norm(u_pl - u_ref) / norm(u_ref)
+  println("Relative L2 error vs Gridap reference: $(error_l2)")
+
+  # Compare energies
+  E_ref = Energies.energy(energy_pl, u_ref)
+  println("DD energy: $E_pl")
+  println("Reference energy: $E_ref")
+  println("Energy difference: $(abs(E_pl - E_ref))")
+
+  # Write both solutions to VTK for comparison
+  writevtk(
+    U_pl.space.fe_basis.trian,
+    "p_laplacian_comparison",
+    cellfields = [
+      "u_dd" => FEFunction(U_pl, u_pl),
+      "u_gridap" => FEFunction(U_pl, u_ref)
+    ]
+  )
+
+  if error_l2 < 1e-4
+    println("✓ DD solution agrees well with Gridap reference!")
+  else
+    println("⚠ Larger difference between DD and reference: check implementation")
+  end
+
+catch e
+  println("Error in p-Laplacian example: $e")
+  println("This may indicate implementation challenges with the nonlinear solver.")
+end
+
+# Nonlinear algebraic system example: Circle-Cubic intersection
+println("\n=== Nonlinear Algebraic System Example ===")
+println("Solving: F[1] = x[1]² + x[2]² - 1 = 0  (circle)")
+println("         F[2] = x[1]³ - x[2] = 0        (cubic)")
+
+# Define the system F(x) = 0 as an energy minimization: E(x) = ½||F(x)||²
+function circle_cubic_system(x::Vector{Float64})
+  F = zeros(2)
+  F[1] = x[1]^2 + x[2]^2 - 1.0    # circle: x² + y² = 1
+  F[2] = x[1]^3 - x[2]             # cubic: y = x³
+  return F
+end
+
+# Energy functional: E(x) = ½||F(x)||²
+function circle_cubic_energy(x::Vector{Float64})
+  F = circle_cubic_system(x)
+  return 0.5 * dot(F, F)
+end
+
+# Gradient: ∇E(x) = J(x)ᵀ F(x) where J is Jacobian of F
+function circle_cubic_gradient(x::Vector{Float64})
+  F = circle_cubic_system(x)
+
+  # Jacobian matrix J = [∂F₁/∂x₁  ∂F₁/∂x₂]
+  #                     [∂F₂/∂x₁  ∂F₂/∂x₂]
+  J = zeros(2, 2)
+  J[1, 1] = 2*x[1]        # ∂F₁/∂x₁ = 2x₁
+  J[1, 2] = 2*x[2]        # ∂F₁/∂x₂ = 2x₂
+  J[2, 1] = 3*x[1]^2      # ∂F₂/∂x₁ = 3x₁²
+  J[2, 2] = -1.0          # ∂F₂/∂x₂ = -1
+
+  return J' * F  # ∇E = Jᵀ F
+end
+
+# Create the nonlinear energy for the algebraic system
+energy_circle_cubic = Energies.NonlinearEnergy(
+  "Circle-Cubic System",
+  circle_cubic_energy,
+  circle_cubic_gradient,
+  2,  # 2D problem
+  params=Dict{String,Any}("description" => "Intersection of unit circle and cubic y=x³")
+)
+
+# Create simple partition for 2D problem (each subdomain gets one variable)
+part_cc = [Vector{Int32}([1]), Vector{Int32}([2])]
+
+# Initial guess (near one of the expected solutions)
+x_init = [0.8, 0.5]  # Should converge to intersection point
+
+try
+  println("Initial guess: x = $(x_init)")
+  println("Initial F(x) = $(circle_cubic_system(x_init))")
+  println("Initial ||F(x)|| = $(norm(circle_cubic_system(x_init)))")
+  println("Initial energy E(x) = $(Energies.energy(energy_circle_cubic, x_init))")
+
+  # Solve using domain decomposition
+  x_sol, E_sol, E_hist_cc, sols_cc = var_dd(energy_circle_cubic, part_cc, maxiter=50, tol=1e-10)
+
+  println("\nSolution found: x = $(x_sol)")
+  F_sol = circle_cubic_system(x_sol)
+  println("Final F(x) = $(F_sol)")
+  println("Final ||F(x)|| = $(norm(F_sol))")
+  println("Final energy E(x) = $E_sol")
+
+  # Verify the solution
+  circle_error = abs(x_sol[1]^2 + x_sol[2]^2 - 1.0)
+  cubic_error = abs(x_sol[1]^3 - x_sol[2])
+
+  println("\nVerification:")
+  println("Circle equation error: |x² + y² - 1| = $(circle_error)")
+  println("Cubic equation error: |x³ - y| = $(cubic_error)")
+
+  if norm(F_sol) < 1e-6
+    println("✓ Nonlinear algebraic system solved successfully!")
+    println("  Solution represents intersection of unit circle and cubic curve.")
+  else
+    println("⚠ System not fully converged, residual = $(norm(F_sol))")
+  end
+
+catch e
+  println("Error in algebraic system example: $e")
+end
