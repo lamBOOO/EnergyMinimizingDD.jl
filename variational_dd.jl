@@ -369,10 +369,11 @@ Energies.hessian(GRQ, x)   # Hessian implemented
 
 function FEM_Schroedinger(
   N::Int,
-  m::Int=9,
+  m::Int=9;
   P::F1=(x -> exp(sqrt((x.data[1])^2 + (x.data[2])^2))),
   # also return RHS to solve source problem
-  f::F2=(x -> 1.0)
+  f::F2=(x -> 1.0),
+  overlap::Int=2
 ) where {F1<:Function, F2<:Function}
 
   domain = (0, 1.0, 0, 1.0)
@@ -392,7 +393,7 @@ function FEM_Schroedinger(
   g = GridapDistributed.compute_cell_graph(model)
   par = Metis.partition(g, m)
   elpar = create_elements_partition(par, m)
-  create_overlapping_elements_partition!(elpar, g, m, 2)
+  create_overlapping_elements_partition!(elpar, g, m, overlap)
   t1 = time()
   dofspar = create_dofs_partition(elpar, VV)
   elapsed = time() - t1
@@ -411,7 +412,8 @@ function FEM_PLaplacian(
   N::Int,
   m::Int=9,
   p::Float64=3.0,
-  f::F=(x -> 1.0)
+  f::F=(x -> 1.0),
+  overlap::Int=2
 ) where {F<:Function}
 
   domain = (0, 1.0, 0, 1.0)
@@ -427,7 +429,7 @@ function FEM_PLaplacian(
   g = GridapDistributed.compute_cell_graph(model)
   par = Metis.partition(g, m)
   elpar = create_elements_partition(par, m)
-  create_overlapping_elements_partition!(elpar, g, m, 2)
+  create_overlapping_elements_partition!(elpar, g, m, overlap)
   dofspar = create_dofs_partition(elpar, VV)
 
   # Cache setup for zero-allocation energy/gradient evaluation
@@ -1135,7 +1137,7 @@ function reconstruct_implicit!(α::Vector{Float64}, u_cur::Vector{Float64}, idx_
 end# not implemented for abstract energy
 function var_dd(
   e::Energies.AbstractEnergy{Float64},
-  subspaces::Vector{Vector{Int32}};
+  subdomain_dofs::Vector{Vector{Int32}};
   kwargs...
 )
   throw(ErrorException("var_dd not implemented for $(typeof(e))"))
@@ -1181,7 +1183,6 @@ function var_dd(
     push!(e_hist, e_new)
     push!(sol_hist, copy(u_new))
     if resnorm < tol
-      # TODO: Change to resnorm < tol or M-norm distance of u_new, u_cur < tol
       println("Converged at iteration $n with energy e = $e_new")
       return u_new, e_new, e_hist, sol_hist
     end
@@ -1200,12 +1201,11 @@ N = 20
 m = 9
 maxiter = 200
 tol = 1e-5
-
-
+overlap = 2
 
 # Schroedinger EVP FEM
 println("\n=== Schrödinger EVP FEM Example ===")
-K, M, b, part, U = FEM_Schroedinger(N, m)
+K, M, b, part, U = FEM_Schroedinger(N, m, overlap=overlap)
 energy_eigen_fem = Energies.GeneralizedRayleighQuotient(K, M)
 # energy_eigen_fem = Energies.RayleighQuotient(K)
 u_approx, lambda_approx, lambda_history, solutions = var_dd(
@@ -1224,13 +1224,23 @@ writevtk(
   "eigen_solution",
   cellfields = ["u_approx" => FEFunction(U, u_approx)]
 )
+# write all sols to vtk file for visualization
+for (i, sol) in enumerate(solutions)
+  writevtk(
+    U.space.fe_basis.trian,
+    "schroedinger_solution_iter$(i-1)",
+    cellfields = ["u" => FEFunction(U, sol)]
+  )
+end
 println("✓ passed.")
 
 
 
 # Poisson problem FEM
 println("\n=== Poisson Linear FEM Example ===")
-K, M, b, part, U = FEM_Schroedinger(N, m, (x -> 0.0), (x -> 1.0))
+K, M, b, part, U = FEM_Schroedinger(
+  N, m, P=(x -> 0.0), f=(x -> 1.0), overlap=overlap
+)
 energy_poisson_fem = Energies.QuadraticEnergy(K, b, 0.0)
 # direct solve
 u_poisson_direct = K \ b
@@ -1250,6 +1260,15 @@ writevtk(
   ]
 )
 println("✓ passed.")
+
+# write all sols to vtk file for visualization
+for (i, sol) in enumerate(sols)
+  writevtk(
+    U.space.fe_basis.trian,
+    "poisson_solution_iter$(i-1)",
+    cellfields = ["u" => FEFunction(U, sol)]
+  )
+end
 
 # Linear Regression problem example
 println("\n=== Linear Regression Example ===")
