@@ -1159,15 +1159,7 @@ function var_dd(
   push!(e_hist, e_cur)
   push!(sol_hist, copy(u_cur))
 
-  # Filter subdomain DOFs to ensure they're within bounds
-  m = length(subdomain_dofs)  # Number of subdomains
-  # n_dofs = Energies.dimension(e)
-  # filtered_subdomain_dofs = Vector{Vector{Int32}}()
-
-  # for i = 1:m
-  #   filtered_dofs = filter(dof -> dof >= 1 && dof <= n_dofs, subdomain_dofs[i])
-  #   push!(filtered_subdomain_dofs, filtered_dofs)
-  # end
+  m = length(subdomain_dofs)
 
   local_updates = zeros(size(u_cur, 1), m)  # preallocate for efficiency
   for n in 1:maxiter
@@ -1188,7 +1180,7 @@ function var_dd(
     e_new = e(u_new)
     push!(e_hist, e_new)
     push!(sol_hist, copy(u_new))
-    if abs(e_new - e_cur) < tol
+    if resnorm < tol
       # TODO: Change to resnorm < tol or M-norm distance of u_new, u_cur < tol
       println("Converged at iteration $n with energy e = $e_new")
       return u_new, e_new, e_hist, sol_hist
@@ -1198,7 +1190,7 @@ function var_dd(
     e_cur = e_new
   end
 
-  println("Reached maxiter=$maxiter with final Rayleigh quotient ≈ $e_cur")
+  @warn "Reached maxiter=$maxiter with energy ≈ $e_cur"
   return u_cur, e_cur, e_hist, sol_hist
 end
 
@@ -1207,7 +1199,7 @@ end
 N = 20
 m = 9
 maxiter = 200
-tol = 1e-10
+tol = 1e-5
 
 
 
@@ -1326,7 +1318,7 @@ try
   println("Initial gradient norm: $(norm(grad_test))")
 
   # Domain decomposition solution with more relaxed tolerance
-  u_pl, E_pl, E_hist_pl, sols_pl = var_dd(energy_pl, part_pl, maxiter=30, tol=1e-8)
+  u_pl, E_pl, E_hist_pl, sols_pl = var_dd(energy_pl, part_pl, maxiter=30, tol=1e-5)
 
   println("Final p-Laplacian energy: $E_pl")
   println("Final gradient norm: $(Energies.residual_norm(energy_pl, u_pl))")
@@ -1438,7 +1430,7 @@ try
   println("Initial energy E(x) = $(Energies.energy(energy_circle_cubic, x_init))")
 
   # Solve using domain decomposition
-  x_sol, E_sol, E_hist_cc, sols_cc = var_dd(energy_circle_cubic, part_cc, maxiter=50, tol=1e-10)
+  x_sol, E_sol, E_hist_cc, sols_cc = var_dd(energy_circle_cubic, part_cc, maxiter=50, tol=1e-5)
 
   println("\nSolution found: x = $(x_sol)")
   F_sol = circle_cubic_system(x_sol)
