@@ -1,0 +1,2 @@
+- Remove params from nonlinear energy struct
+- Check bigger alggebraic problem where DD makese sense with overlap
