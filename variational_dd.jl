@@ -43,7 +43,8 @@ function hessian!(H, e::AbstractEnergy, x)
   return H
 end
 
-residual_norm(e::AbstractEnergy, x) = error("residual_norm not implemented for $(typeof(e))")
+# Default implementation: residual norm is the gradient norm for all energy types
+residual_norm(e::AbstractEnergy, x) = norm(gradient(e, x))
 
 """
   QuadraticEnergy{T,M<:AbstractMatrix{T},V<:AbstractVector{T}}
@@ -86,9 +87,7 @@ gradient(e::QuadraticEnergy{T}, x::AbstractVector{T}) where {T} =
 hessian(e::QuadraticEnergy{T}) where {T} = e.A
 hessian(e::QuadraticEnergy{T}, x::AbstractVector{T}) where {T} = hessian(e)
 
-function residual_norm(e::QuadraticEnergy{T}, x::AbstractVector{T}) where {T}
-  return e.A * x .- e.b |> norm
-end
+
 
 
 # 2) Rayleigh quotient:  ρ(x) = (x'Ax) / (x'x), scale-invariant in x ≠ 0
@@ -248,12 +247,7 @@ function hessian!(H::AbstractMatrix, e::GeneralizedRayleighQuotient,
   ))
 end
 
-# A helper function to compute the residual norm ||Ax - ρ(x)Bx||
-function residual_norm(e::GeneralizedRayleighQuotient, x::AbstractVector)
-  rho = energy(e, x)
-  r = e.A * x .- rho * (e.B * x)
-  return norm(r)
-end
+
 
 # 4) Generic Nonlinear Energy: E(u) for general nonlinear problems
 #    Can represent PDE problems like p-Laplacian: E(u) = ∫(|∇u|^p/p)dΩ - ∫f*u dΩ
@@ -279,10 +273,7 @@ dimension(e::NonlinearEnergy) = e.N
 # ∇E(u) - gradient evaluation
 gradient(e::NonlinearEnergy{T}, u::AbstractVector{T}) where {T} = e.grad_assembler(u)
 
-# For nonlinear problems, residual norm is the gradient norm (∇E = 0 at solution)
-function residual_norm(e::NonlinearEnergy{T}, u::AbstractVector{T}) where {T}
-  return norm(gradient(e, u))
-end
+
 
 # 6) Linear Regression Energy: E(x) = ||Ax - b||² for least squares problems
 #    Minimizing this energy leads to solving the normal equations A'Ax = A'b
@@ -313,9 +304,7 @@ end
 hessian(e::LinearRegressionEnergy{T}) where {T} = 2 * (e.A' * e.A)
 hessian(e::LinearRegressionEnergy{T}, x::AbstractVector{T}) where {T} = hessian(e)
 
-function residual_norm(e::LinearRegressionEnergy{T}, x::AbstractVector{T}) where {T}
-  return e.A * x .- e.b |> norm
-end
+
 
 
 # ---------- Utilities ----------
