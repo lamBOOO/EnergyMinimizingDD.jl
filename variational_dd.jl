@@ -822,102 +822,94 @@ function inf_step(
   return x_new
 end
 
-"""
-  inf_step(e::NonlinearEnergy, u_cur, idx_sub)
+function inf_step(e::Energies.NonlinearEnergy{Float64},
+                  u_cur::Vector{Float64},
+                  idx_sub::AbstractVector)
 
-Perform local minimization step for nonlinear energy using Newton's method
-in the subdomain spanned by {u_cur, e_j for j ∈ idx_sub}.
-Works for any nonlinear problem: PDEs, algebraic systems, etc.
-"""
-function inf_step(
-  e::Energies.NonlinearEnergy{Float64},
-  u_cur::Vector{Float64},
-  idx_sub::AbstractVector
-)
-  localdim = 1 + length(idx_sub)
-
-  if length(idx_sub) == 0
-    # Degenerate case: return current solution
-    return copy(u_cur)
-  end
-
-  # Newton iteration for local minimization in subspace
-  # We minimize E(u_cur + α₁*u_cur + ∑αⱼ*eⱼ) = E(∑βₖ*basis_k)
-  # where basis = [u_cur, e_j1, e_j2, ...]
-
-  α = zeros(localdim)
-  α[1] = 1.0  # Initial guess: α = [1, 0, 0, ...]
-
-  max_newton_iter = 100
-  newton_tol = 1e-6
-
-  for iter = 1:max_newton_iter
-    # Reconstruct current iterate
-    u_current = reconstruct_implicit!(α, u_cur, idx_sub)
-
-    # Compute gradient and approximate Hessian in subspace
-    grad_full = Energies.gradient(e, u_current)
-
-    # Project gradient to subspace: g_local[k] = ∂E/∂αₖ
-    g_local = zeros(localdim)
-    g_local[1] = dot(grad_full, u_cur)  # ∂E/∂α₁
-    for (k, j) in pairs(idx_sub)
-      g_local[k+1] = grad_full[j]  # ∂E/∂αₖ = grad_full[j]
+    m = length(idx_sub)
+    if m == 0
+        return copy(u_cur)
     end
 
-    # Check convergence
-    if norm(g_local) < newton_tol
-      break
-    end
-
-    # Approximate Hessian using finite differences (could be improved with analytical Hessian)
-    H_local = zeros(localdim, localdim)
-    eps_fd = 1e-6
-
-    for i = 1:localdim
-      α_plus = copy(α)
-      α_plus[i] += eps_fd
-      u_plus = reconstruct_implicit!(α_plus, u_cur, idx_sub)
-      grad_plus = Energies.gradient(e, u_plus)
-
-      # Project gradient difference
-      g_plus = zeros(localdim)
-      g_plus[1] = dot(grad_plus, u_cur)
-      for (k, j) in pairs(idx_sub)
-        g_plus[k+1] = grad_plus[j]
+    # Rᵢᵀz extension operator (maps reduced space to full space)
+    function Rᵢᵀz(z)
+      u = zeros(length(u_cur))
+      @inbounds for (k, j) in pairs(idx_sub)
+        u[j] = z[k]
       end
-
-      H_local[:, i] = (g_plus .- g_local) / eps_fd
+      return u
     end
 
-    # Newton step with regularization for stability
-    H_reg = H_local + 1e-8 * I
-    try
-      Δα = H_reg \ (-g_local)
-
-      # Line search for stability
-      step_size = 1.0
-      α_new = α + step_size * Δα
-      u_new = reconstruct_implicit!(α_new, u_cur, idx_sub)
-
-      # Simple backtracking
-      while step_size > 1e-4
-        u_test = reconstruct_implicit!(α + step_size * Δα, u_cur, idx_sub)
-        if Energies.energy(e, u_test) <= Energies.energy(e, u_current)
-          break
+    # Reduced quantities at z
+    function reduced_grad(z)
+        u = u_cur .+ Rᵢᵀz(z)
+        g_full = Energies.gradient(e, u)
+        g = similar(z)
+        @inbounds for (k, j) in pairs(idx_sub)
+            g[k] = g_full[j]                 # g = Vᵀ ∇E
         end
-        step_size *= 0.5
-      end
-
-      α += step_size * Δα
-    catch
-      # If Hessian is singular, use steepest descent
-      α -= 0.01 * g_local / (norm(g_local) + 1e-12)
+        return g, u, g_full
     end
-  end
 
-  return reconstruct_implicit!(α, u_cur, idx_sub)
+    # Finite-diff reduced Hessian (or replace by Hessian–vector products)
+    function reduced_hessian_fd(z, g_at_z; eps=1e-6)
+        H = zeros(m, m)
+        for i in 1:m
+            zpert = copy(z); zpert[i] += eps
+            g_pert, _, _ = reduced_grad(zpert)
+            @inbounds H[:, i] = (g_pert .- g_at_z) ./ eps
+        end
+        # Tikhonov for stability
+        @inbounds for i in 1:m
+            H[i,i] += 1e-10
+        end
+        return H
+    end
+
+    # Backtracking on the true energy along x + V(z + t*p)
+    function linesearch(z, p, E0, u0; c=1e-4, tau=0.5, tmin=1e-6)
+        t = 1.0
+        while t ≥ tmin
+            u = u_cur .+ Rᵢᵀz(z .+ t .* p)
+            if Energies.energy(e, u) ≤ E0 - c * t * dot(p, p) # simple decrease test
+                return t, u
+            end
+            t *= tau
+        end
+        return 0.0, u0
+    end
+
+    z = zeros(m)  # start at the current point: u = u_cur + V*z with z=0
+    maxit = 50
+    tol = 1e-6
+
+    for k in 1:maxit
+        g, u, _ = reduced_grad(z)
+        if norm(g) < tol
+            return u
+        end
+        H = reduced_hessian_fd(z, g)  # better: use analytic Hessian or Hv products
+        # Try Newton; fall back to gradient step if singular
+        p = try
+            -H \ g
+        catch
+            -g / (norm(g) + 1e-12)
+        end
+        E0 = Energies.energy(e, u)
+        t, u_new = linesearch(z, p, E0, u)
+        if t == 0.0
+            # fall back to steepest descent
+            p = -g
+            t, u_new = linesearch(z, p, E0, u)
+            if t == 0.0
+                return u  # give up (likely very flat)
+            end
+        end
+        z .+= t .* p
+    end
+    return Rᵢᵀz(z)
 end
+
 
 
 """
