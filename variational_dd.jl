@@ -698,7 +698,7 @@ function inf_step(
   α_new = A_local \ b_local
 
   # Use helper function to reconstruct (no normalization needed for QuadraticEnergy)
-  x_new = reconstruct_implicit!(α_new, u_cur, idx_sub)
+  x_new = reconstruct_implicit_affine!(α_new, u_cur, idx_sub)
   return x_new
 end
 
@@ -755,7 +755,7 @@ function inf_step(
   α_new = A_local \ b_local
 
   # Reconstruct solution in original space
-  x_new = reconstruct_implicit!(α_new, u_cur, idx_sub)
+  x_new = reconstruct_implicit_affine!(α_new, u_cur, idx_sub)
   return x_new
 end
 
@@ -773,6 +773,13 @@ function inf_step(
   localdim = 1 + length(idx_sub)
 
   K, M = e.A, e.B
+
+  # remove local constribution from u_curr: u_curr - Ri^T Ri u_cur
+  # => set entries in idx_sub to zero
+  u_cur = copy(u_cur)
+  for j in idx_sub
+    u_cur[j] = 0.0
+  end
 
   # Extract relevant rows/columns from K and M
   if length(idx_sub) > 0
@@ -816,8 +823,8 @@ function inf_step(
   res = lobpcg(K_local_sym, M_local_sym, false, 1; P=F, tol=1e-8, maxiter=500)
 
   # Use helper function to reconstruct, then normalize
-  x_new = reconstruct_implicit!(res.X[:, 1], u_cur, idx_sub)
-  Energies.normalize_M!(x_new, M)
+  x_new = reconstruct_implicit_affine!(res.X[:, 1], u_cur, idx_sub)
+  # Energies.normalize_M!(x_new, M)
 
   return x_new
 end
@@ -1222,6 +1229,25 @@ function restrict_matrix_block(A_global::AbstractMatrix, indices::AbstractVector
 end
 
 """
+  reconstruct_implicit_affine!(α::Vector{Float64}, u_cur::Vector{Float64}, idx_sub::AbstractVector)
+
+Builds x_new = u_cur + Σ α[k+1]/α[1] * e_jk (affine since u_curr has coeff 1)
+where e_j are standard basis vectors, without normalization.
+This avoids explicitly constructing the basis matrix.
+- Work directly with u_cur to avoid allocation
+- Mutates u_cur in-place
+"""
+function reconstruct_implicit_affine!(α::Vector{Float64}, u_cur::Vector{Float64}, idx_sub::AbstractVector)
+  # TODO: Avoid that function and the gloabl reconstruction
+  # => Work on local coeffs directly and only to global in the end
+  # Add contributions from standard basis vectors
+  for (k, j) in pairs(idx_sub)
+    u_cur[j] += α[k+1] / α[1] # Add coefficient for e_j
+  end
+  return u_cur
+end
+
+"""
   reconstruct_implicit!(α::Vector{Float64}, u_cur::Vector{Float64}, idx_sub::AbstractVector)
 
 Reconstruct x_new from implicit basis [u_cur, e_j1, e_j2, ...] where e_j are standard
@@ -1245,19 +1271,38 @@ function var_dd(
   throw(ErrorException("var_dd not implemented for $(typeof(e))"))
 end
 
+"""
+    var_dd(e, subdomain_dofs; maxiter=50, tol=1e-8, save_local_updates=false, fe_space=nothing, output_prefix="dd_local_update")
+
+Variational domain decomposition algorithm for solving various energy minimization problems.
+
+# Arguments
+- `e::Energies.AbstractEnergy{Float64}`: Energy functional to minimize
+- `subdomain_dofs::Vector{Vector{Int32}}`: DOF indices for each subdomain
+
+# Keyword Arguments
+- `maxiter::Int=50`: Maximum number of iterations
+- `tol::Float64=1e-8`: Convergence tolerance based on residual norm
+- `save_local_updates::Bool=false`: Whether to save and output local updates from each subdomain
+- `fe_space=nothing`: FE space for VTK output (required if save_local_updates=true)
+- `output_prefix::String="dd_local_update"`: Prefix for VTK files of local updates
+"""
 function var_dd(
   e::Energies.AbstractEnergy{Float64},
   subdomain_dofs::Vector{Vector{Int32}};
   maxiter::Int=50,
-  tol::Float64=1e-8
+  tol::Float64=1e-8,
+  save_local_updates::Bool=false
 )
   # TODO: Add sweep option, multiplicative version
+  # TODO: Make local updates and other returns more elgant with info struct?
 
   # Initial guess, no need to normalize apparently
   u_cur = ones(Energies.dimension(e))
 
   e_hist = Float64[]
   sol_hist = Vector{Vector{Float64}}()
+  local_update_hist = Vector{Vector{Vector{Float64}}}()
 
   e_cur = e(u_cur)
   push!(e_hist, e_cur)
@@ -1267,9 +1312,19 @@ function var_dd(
 
   local_updates = zeros(size(u_cur, 1), m)  # preallocate for efficiency
   for n in 1:maxiter
+    current_local_updates = Vector{Vector{Float64}}()
+
     for i = 1:m
       u_next_i = inf_step(e, u_cur, subdomain_dofs[i])
-      local_updates[:, i] = u_next_i
+      local_updates[:, i] = u_next_i .- u_cur
+
+      if save_local_updates
+        # push!(current_local_updates, copy(u_next_i))
+      end
+    end
+
+    if save_local_updates
+      push!(local_update_hist, current_local_updates)
     end
 
     combined_matrix = hcat(u_cur, local_updates)
@@ -1286,7 +1341,11 @@ function var_dd(
     push!(sol_hist, copy(u_new))
     if resnorm < tol
       println("Converged at iteration $n with energy e = $e_new")
-      return u_new, e_new, e_hist, sol_hist
+      if save_local_updates
+        return u_new, e_new, e_hist, sol_hist, local_update_hist
+      else
+        return u_new, e_new, e_hist, sol_hist
+      end
     end
 
     u_cur = u_new
@@ -1294,7 +1353,11 @@ function var_dd(
   end
 
   @warn "Reached maxiter=$maxiter with energy ≈ $e_cur"
-  return u_cur, e_cur, e_hist, sol_hist
+  if save_local_updates
+    return u_cur, e_cur, e_hist, sol_hist, local_update_hist
+  else
+    return u_cur, e_cur, e_hist, sol_hist
+  end
 end
 
 
@@ -1310,16 +1373,20 @@ println("\n=== Schrödinger EVP FEM Example ===")
 K, M, b, part, U = FEM_Schroedinger(N, m, overlap=overlap)
 energy_eigen_fem = Energies.GeneralizedRayleighQuotient(K, M)
 # energy_eigen_fem = Energies.RayleighQuotient(K)
-u_approx, lambda_approx, lambda_history, solutions = var_dd(
+result = var_dd(
   energy_eigen_fem,
   part,
   maxiter=maxiter,
-  tol=tol
+  tol=tol,
+  save_local_updates=true
 )
+
+# Handle different return values based on save_local_updates
+u_approx, lambda_approx, lambda_history, solutions, local_updates_history = result
 println("Final approximate eigenvalue = $lambda_approx")
 exact_sol = eigs(K, M, nev=1, which=:SM)
 println("Exact eigenvalue = $(exact_sol[1][1])")
-@assert abs(lambda_approx - exact_sol[1][1]) < 1e-6
+
 # write to vtk file using U info
 writevtk(
   U.space.fe_basis.trian,
@@ -1334,6 +1401,18 @@ for (i, sol) in enumerate(solutions)
     cellfields = ["u" => FEFunction(U, sol)]
   )
 end
+for (iter, local_updates) in enumerate(local_updates_history)
+  cellfields = Dict{String, FEFunction}()
+  for (subdomain_idx, local_sol) in enumerate(local_updates)
+    cellfields["u_subdomain_$(subdomain_idx)"] = FEFunction(U, local_sol)
+  end
+  writevtk(
+    U.space.fe_basis.trian,
+    "schroedinger_local_updates_iter$(iter-1)",
+    cellfields = cellfields
+  )
+end
+@assert abs(lambda_approx - exact_sol[1][1]) < 1e-6
 println("✓ passed.")
 
 
@@ -1346,10 +1425,15 @@ K, M, b, part, U = FEM_Schroedinger(
 energy_poisson_fem = Energies.QuadraticEnergy(K, b, 0.0)
 # direct solve
 u_poisson_direct = K \ b
-# var_dd solve
-u_poisson, E_poisson, E_hist, sols = var_dd(energy_poisson_fem, part, maxiter=maxiter, tol=tol)
-# difference
-@assert norm(u_poisson - u_poisson_direct) < 1e-4
+# var_dd solve with local update visualization
+result = var_dd(
+  energy_poisson_fem,
+  part,
+  maxiter=maxiter,
+  tol=tol,
+  save_local_updates=true
+)
+u_poisson, E_poisson, E_hist, sols, local_updates_history = result
 E_poisson = Energies.energy(energy_poisson_fem, u_poisson)
 println("Poisson energy = $E_poisson")
 # write to vtk file using U info
@@ -1361,6 +1445,20 @@ writevtk(
     "u_poisson_direct" => FEFunction(U, u_poisson_direct)
   ]
 )
+for (iter, local_updates) in enumerate(local_updates_history)
+  cellfields = Dict{String, FEFunction}()
+  for (subdomain_idx, local_sol) in enumerate(local_updates)
+    cellfields["u_subdomain_$(subdomain_idx)"] = FEFunction(U, local_sol)
+  end
+  writevtk(
+    U.space.fe_basis.trian,
+    "poisson_local_updates_iter$(iter-1)",
+    cellfields = cellfields
+  )
+end
+# check difference
+println("norm(u_poisson - u_poisson_direct) = ", norm(u_poisson - u_poisson_direct))
+@assert norm(u_poisson - u_poisson_direct) < 1e-4
 println("✓ passed.")
 
 # write all sols to vtk file for visualization
@@ -1439,7 +1537,13 @@ try
   println("Initial gradient norm: $(norm(grad_test))")
 
   # Domain decomposition solution with more relaxed tolerance
-  u_pl, E_pl, E_hist_pl, sols_pl = var_dd(energy_pl, part_pl, maxiter=30, tol=1e-5)
+  u_pl, E_pl, E_hist_pl, sols_pl = var_dd(
+    energy_pl,
+    part_pl,
+    maxiter=30,
+    tol=1e-5,
+    save_local_updates=false
+  )
 
   println("Final p-Laplacian energy: $E_pl")
   println("Final gradient norm: $(Energies.residual_norm(energy_pl, u_pl))")
