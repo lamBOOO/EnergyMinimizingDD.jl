@@ -648,6 +648,7 @@ function inf_step(
   u_current::Vector{Float64},
   idx_sub::AbstractVector
 )
+  # TODO: Use the more efficient DD operations with views
   throw(ErrorException("inf_step not implemented for $(typeof(e))"))
 end
 
@@ -1117,6 +1118,115 @@ end
 function M_norm_distance(u::Vector{Float64}, v::Vector{Float64}, M::AbstractMatrix)
   w = u .- v
   return sqrt(dot(w, M * w))
+end
+
+"""
+  restrict_to_subdomain!(u_local::AbstractVector, u_global::AbstractVector, idx_sub::AbstractVector)
+
+Efficient restriction operator: extract subdomain values from global vector.
+Writes u_local[k] = u_global[idx_sub[k]] for k = 1:length(idx_sub).
+"""
+function restrict_to_subdomain!(u_local::AbstractVector, u_global::AbstractVector, idx_sub::AbstractVector)
+  for (k, j) in pairs(idx_sub)
+    u_local[k] = u_global[j]
+  end
+  return u_local
+end
+
+"""
+  restrict_to_subdomain(u_global::AbstractVector, idx_sub::AbstractVector)
+
+Allocating version of restriction operator.
+"""
+function restrict_to_subdomain(u_global::AbstractVector, idx_sub::AbstractVector)
+  u_local = similar(u_global, length(idx_sub))
+  return restrict_to_subdomain!(u_local, u_global, idx_sub)
+end
+
+"""
+  extend_from_subdomain!(u_global::AbstractVector, u_local::AbstractVector, idx_sub::AbstractVector)
+
+Efficient extension operator: scatter subdomain values into global vector.
+Writes u_global[idx_sub[k]] = u_local[k] for k = 1:length(idx_sub).
+Does not zero out other entries - use zero_out_complement! if needed.
+"""
+function extend_from_subdomain!(u_global::AbstractVector, u_local::AbstractVector, idx_sub::AbstractVector)
+  for (k, j) in pairs(idx_sub)
+    u_global[j] = u_local[k]
+  end
+  return u_global
+end
+
+"""
+  zero_out_complement!(u_global::AbstractVector, idx_sub::AbstractVector)
+
+Zero out all entries of u_global except those indexed by idx_sub.
+Useful for creating functions supported only on subdomain.
+"""
+function zero_out_complement!(u_global::AbstractVector, idx_sub::AbstractVector)
+  # Create a set for fast lookup
+  idx_set = Set(idx_sub)
+  for i in eachindex(u_global)
+    if i ∉ idx_set
+      u_global[i] = 0.0
+    end
+  end
+  return u_global
+end
+
+"""
+  SubdomainView{T,V<:AbstractVector{T}} <: AbstractVector{T}
+
+A view into a global vector that presents only the subdomain DOFs.
+Avoids allocation when working with subdomain data.
+"""
+struct SubdomainView{T,V<:AbstractVector{T}} <: AbstractVector{T}
+  parent::V
+  indices::Vector{Int}
+end
+
+# AbstractArray interface
+Base.size(v::SubdomainView) = (length(v.indices),)
+Base.getindex(v::SubdomainView, i::Int) = v.parent[v.indices[i]]
+Base.setindex!(v::SubdomainView, val, i::Int) = (v.parent[v.indices[i]] = val)
+Base.IndexStyle(::Type{<:SubdomainView}) = IndexLinear()
+
+"""
+  subdomain_view(u_global::AbstractVector, idx_sub::AbstractVector)
+
+Create a view into the global vector that presents only the subdomain DOFs.
+Changes to the view are reflected in the original vector.
+"""
+function subdomain_view(u_global::AbstractVector{T}, idx_sub::AbstractVector) where T
+  return SubdomainView{T,typeof(u_global)}(u_global, collect(Int, idx_sub))
+end
+
+"""
+  restrict_matrix_block!(A_local::AbstractMatrix, A_global::AbstractMatrix,
+                        row_indices::AbstractVector, col_indices::AbstractVector)
+
+Efficient matrix restriction: extract block from global matrix.
+A_local[i,j] = A_global[row_indices[i], col_indices[j]]
+"""
+function restrict_matrix_block!(A_local::AbstractMatrix, A_global::AbstractMatrix,
+                               row_indices::AbstractVector, col_indices::AbstractVector)
+  for (j, col_idx) in pairs(col_indices)
+    for (i, row_idx) in pairs(row_indices)
+      A_local[i, j] = A_global[row_idx, col_idx]
+    end
+  end
+  return A_local
+end
+
+"""
+  restrict_matrix_block(A_global::AbstractMatrix, indices::AbstractVector)
+
+Allocating version for symmetric case: extract A_global[indices, indices].
+"""
+function restrict_matrix_block(A_global::AbstractMatrix, indices::AbstractVector)
+  n = length(indices)
+  A_local = Matrix{eltype(A_global)}(undef, n, n)
+  return restrict_matrix_block!(A_local, A_global, indices, indices)
 end
 
 """
