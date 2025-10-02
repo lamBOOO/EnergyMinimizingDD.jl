@@ -10,7 +10,7 @@ using IterativeSolvers
 
 P(x)= exp(sqrt((x.data[1])^2+(x.data[2])^2))
 
-function Setup_FEM(N::Int, m::Int=9) # Discretizing the domain, building mass and stiffness matrix, specifying the overlapping domains
+function Setup_FEM(N::Int, m::Int=9; overlap::Int=2, nonoverlapping::Bool=false) # Discretizing the domain, building mass and stiffness matrix, specifying the overlapping domains
     domain=(0, 1.0, 0, 1.0)
     partition1 = (1.0 * N, 1.0 * N)
     model = CartesianDiscreteModel(domain, partition1; isperiodic=(false, false))
@@ -26,16 +26,17 @@ function Setup_FEM(N::Int, m::Int=9) # Discretizing the domain, building mass an
     g = GridapDistributed.compute_cell_graph(model)
     par = Metis.partition(g, m)
     elpar = create_elements_partition(par, m)
-    create_overlapping_elements_partition!(elpar, g, m, 2)
+    create_overlapping_elements_partition!(elpar, g, m, overlap)
     t1=time()
-    dofspar = create_dofs_partition(elpar, VV)
+    dofspar = create_dofs_partition(elpar, VV; nonoverlapping=nonoverlapping)
     elapsed=time()-t1
     println("dofspar needs $elapsed seconds ")
     return K,M, dofspar, VV
 end
 
 function create_dofs_partition(
-  elemsp::Vector{Vector{Int32}}, sp::Gridap.FESpaces.UnconstrainedFESpace
+  elemsp::Vector{Vector{Int32}}, sp::Gridap.FESpaces.UnconstrainedFESpace;
+  nonoverlapping::Bool=false
 )
   m = sp.fe_basis.trian.model
   dim = size(m.grid_topology.n_m_to_nface_to_mfaces,2) - 1
@@ -50,6 +51,19 @@ function create_dofs_partition(
   freenodesp = copy(nodesp)
   Threads.@threads for ipar = 1:npars
     filter!(e -> e in sp.metadata.free_dof_to_node, nodesp[ipar])
+  end
+
+  # Remove duplicates if nonoverlapping mode is enabled
+  if nonoverlapping
+    @debug "removing duplicate nodes for nonoverlapping partition"
+    # Track which nodes have been assigned to a subdomain
+    assigned_nodes = Set{Int32}()
+    for ipar = 1:npars
+      # Keep only nodes that haven't been assigned to a previous subdomain
+      freenodesp[ipar] = filter(node -> !(node in assigned_nodes), freenodesp[ipar])
+      # Mark these nodes as assigned
+      union!(assigned_nodes, freenodesp[ipar])
+    end
   end
 
   @debug "create dofsp"
@@ -376,10 +390,12 @@ function ddm_eigen_solver(;
     m::Int=2,
     maxiter::Int=50,
     tol::Float64=1e-8,
+    overlap::Int=2,
+    nonoverlapping::Bool=false,
     #sweep::Bool=true
 )
     setup_time=time()
-    K, M, subspaces,fesp= Setup_FEM(N,m)
+    K, M, subspaces,fesp= Setup_FEM(N,m; overlap=overlap, nonoverlapping=nonoverlapping)
     elapsed_setup=time()-setup_time
     println("$elapsed_setup seconds needed for setup")
     coarse_basis= coarse_space_corr(subspaces,fesp)
