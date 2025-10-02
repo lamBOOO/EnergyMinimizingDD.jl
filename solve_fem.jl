@@ -54,6 +54,8 @@ function create_dofs_partition(
   end
 
   # Remove duplicates if nonoverlapping mode is enabled
+  # This ensures nodes at subdomain interfaces belong to exactly one subdomain
+  # Algorithm: Process subdomains in order, assigning each node to the first subdomain that contains it
   if nonoverlapping
     @debug "removing duplicate nodes for nonoverlapping partition"
     # Track which nodes have been assigned to a subdomain
