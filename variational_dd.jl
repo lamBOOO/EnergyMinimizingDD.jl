@@ -115,7 +115,7 @@ gradient(e::RayleighQuotient{T}, x::AbstractVector{T}) where {T} = begin
   xx = dot(x, x)
   xAx = dot(x, Ax)
   @assert xx != zero(T) "Rayleigh quotient gradient undefined at x=0"
-  (2 / (xx * xx)) * (Ax .* xx .- x .* xAx)
+  (2 / xx) * (Ax .- x .* (xAx/xx))
 end
 
 # A helper: in-place gradient for performance
@@ -661,6 +661,9 @@ function inf_step(
 
   A, b = e.A, e.b
 
+  # u_cur = copy(u_cur)
+  # zero_out_local!(u_cur, idx_sub)
+
   # Extract relevant rows/columns from A and b
   if length(idx_sub) > 0
     # Build the local matrix more efficiently
@@ -685,6 +688,9 @@ function inf_step(
         A_local[k1+1, k2+1] = A[j1, j2]
       end
     end
+
+    # A_local = K' * A * K
+    # where K = [u_cur, e_j1, e_j2, ...] and j1, j2 are subdomain indices
   else
     # Degenerate case: only current solution
     A_local = reshape([dot(u_cur, A * u_cur)], 1, 1)
@@ -713,6 +719,8 @@ function inf_step(
 
   # For linear regression energy ||Ax - b||², the optimal solution in any subspace
   # is found by solving the normal equations for that subspace
+  u_cur = copy(u_cur)
+  zero_out_local!(u_cur, idx_sub)
 
   if length(idx_sub) > 0
     # Build local system: minimize ||A*[u_cur, e_j1, e_j2, ...]*α - b||²
@@ -777,9 +785,7 @@ function inf_step(
   # remove local constribution from u_curr: u_curr - Ri^T Ri u_cur
   # => set entries in idx_sub to zero
   u_cur = copy(u_cur)
-  for j in idx_sub
-    u_cur[j] = 0.0
-  end
+  zero_out_local!(u_cur, idx_sub)
 
   # Extract relevant rows/columns from K and M
   if length(idx_sub) > 0
@@ -815,6 +821,8 @@ function inf_step(
     M_local = reshape([dot(u_cur, M * u_cur)], 1, 1)
   end
 
+  # K_local = B' * K * B with B = [u_cur e(isd_1) e(isd_2) ...] where e(isd_1) are standard basis vectors in isd_1
+
   @debug "Size of K_local: $(size(K_local))"
   @debug "Size of M_local: $(size(M_local))"
   K_local_sym = Symmetric(K_local)
@@ -838,9 +846,9 @@ function inf_step(e::Energies.NonlinearEnergy{Float64},
         return copy(u_cur)
     end
 
-    # Rᵢᵀz extension operator (maps reduced space to full space)
-    function Rᵢᵀz(z)
-      u = zeros(length(u_cur))
+    # u = u_cur - Rᵢ u_cur + Rᵢᵀz z
+    function affine_extension(z, u_cur)
+      u = copy(u_cur)
       @inbounds for (k, j) in pairs(idx_sub)
         u[j] = z[k]
       end
@@ -849,7 +857,7 @@ function inf_step(e::Energies.NonlinearEnergy{Float64},
 
     # Reduced quantities at z
     function reduced_grad(z)
-        u = u_cur .+ Rᵢᵀz(z)
+        u = affine_extension(z, u_cur)
         g_full = Energies.gradient(e, u)
         g = similar(z)
         @inbounds for (k, j) in pairs(idx_sub)
@@ -877,7 +885,7 @@ function inf_step(e::Energies.NonlinearEnergy{Float64},
     function linesearch(z, p, E0, u0; c=1e-4, tau=0.5, tmin=1e-6)
         t = 1.0
         while t ≥ tmin
-            u = u_cur .+ Rᵢᵀz(z .+ t .* p)
+            u = affine_extension(z .+ t .* p, u_cur)
             if Energies.energy(e, u) ≤ E0 - c * t * dot(p, p) # simple decrease test
                 return t, u
             end
@@ -914,7 +922,7 @@ function inf_step(e::Energies.NonlinearEnergy{Float64},
         end
         z .+= t .* p
     end
-    return Rᵢᵀz(z)
+    return affine_extension(z, zeros(length(u_cur)))
 end
 
 
@@ -1006,7 +1014,7 @@ function combine_step(
   mul!(M_local, B', temp_M)  # => M_local = B' M B
 
   _, eigvecs = eigen(K_local, M_local)
-  x_new = B * eigvecs[:, 1]
+  x_new = B * eigvecs[:, 1]  # a[1] * u + a[2] * v1
   Energies.normalize_M!(x_new, M)
   return x_new
 end
@@ -1173,6 +1181,13 @@ function zero_out_complement!(u_global::AbstractVector, idx_sub::AbstractVector)
   return u_global
 end
 
+function zero_out_local!(u_global::AbstractVector, idx_sub::AbstractVector)
+  for j in idx_sub
+    u_global[j] = 0.0
+  end
+  return u_global
+end
+
 """
   SubdomainView{T,V<:AbstractVector{T}} <: AbstractVector{T}
 
@@ -1231,7 +1246,7 @@ end
 """
   reconstruct_implicit_affine!(α::Vector{Float64}, u_cur::Vector{Float64}, idx_sub::AbstractVector)
 
-Builds x_new = u_cur + Σ α[k+1]/α[1] * e_jk (affine since u_curr has coeff 1)
+Builds x_new = 1 * u_cur + Σ α[k+1]/α[1] * e_jk (affine since u_curr has coeff 1)
 where e_j are standard basis vectors, without normalization.
 This avoids explicitly constructing the basis matrix.
 - Work directly with u_cur to avoid allocation
@@ -1294,7 +1309,7 @@ function var_dd(
   tol::Float64=1e-8,
   save_local_updates::Bool=false
 )
-  # TODO: Add sweep option, multiplicative version
+  # TODO: Add "sweep" option [3->1->5->7], multiplicative version [1->2->3]
   # TODO: Make local updates and other returns more elgant with info struct?
 
   # Initial guess, no need to normalize apparently
@@ -1319,7 +1334,7 @@ function var_dd(
       local_updates[:, i] = u_next_i .- u_cur
 
       if save_local_updates
-        # push!(current_local_updates, copy(u_next_i))
+        push!(current_local_updates, copy(u_next_i .- u_cur))
       end
     end
 
@@ -1417,7 +1432,7 @@ println("✓ passed.")
 
 
 
-# Poisson problem FEM
+# Poisson problem FEM: -Δu = f with f(x) = 1
 println("\n=== Poisson Linear FEM Example ===")
 K, M, b, part, U = FEM_Schroedinger(
   N, m, P=(x -> 0.0), f=(x -> 1.0), overlap=overlap
