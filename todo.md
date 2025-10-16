@@ -1,3 +1,6 @@
 - Remove params from nonlinear energy struct
 - Check bigger alggebraic problem where DD makese sense with overlap
 - Separate Eneergies, DD, FEM, into submdoles
+- Should we make the Gridap FEM really part of the package or just an example?
+- Remove all unnecessary import/using statements in the src/ files
+- Apply formatting with JuliaFormatter.jl, e.g. 80 characters per line

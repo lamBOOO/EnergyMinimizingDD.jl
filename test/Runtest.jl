@@ -68,7 +68,7 @@ for i in 1:length(solutions)
     marker=:none)
 end
 
-# save them 
+# save them
 savefig(plt1, "Final_fct.png")
 savefig(plt2, "R_convergence.png")
 savefig(plt3, "Convergence_vec.png")
