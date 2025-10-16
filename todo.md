@@ -5,3 +5,4 @@
 - Remove all unnecessary import/using statements in the src/ files
 - Apply formatting with JuliaFormatter.jl, e.g. 80 characters per line
 - Add documentation with Documenter.jl also to CI
+- Make a more comprehensive parameter study
