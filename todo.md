@@ -4,3 +4,4 @@
 - Should we make the Gridap FEM really part of the package or just an example?
 - Remove all unnecessary import/using statements in the src/ files
 - Apply formatting with JuliaFormatter.jl, e.g. 80 characters per line
+- Add documentation with Documenter.jl also to CI
