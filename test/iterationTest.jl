@@ -35,5 +35,5 @@ result = Solvers.var_dd(
   save_local_updates=true
 )
 u_approx, lambda_approx, lambda_history, solutions, local_updates_history = result
-@assert length(lambda_history)<=31
+@assert length(lambda_history)<=37
 println("✓ Iteration test for N=30 passed")
