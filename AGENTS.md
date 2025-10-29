@@ -1,0 +1,1 @@
+- For julia files, always execute them with `julia --project=.` to ensure the correct environment is used.

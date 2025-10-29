@@ -117,9 +117,9 @@ function coarse_space_corr(dofsp::Vector{Vector{Int32}}, sp::Gridap.FESpaces.Unc
   Ri,Di=pu_matrices(dofsp,sp)
   n=size(Di,1) # no. subdomains
   m=size(Ri[1],2) # no. of DOFS
-  Z=Vector{Vector{Float64}}(undef,n)
+  Z=zeros(m,n)
   for i=1:n
-  Z[i]=(Ri[i]'*Di[i]*Ri[i])*ones(m) #Z as in Nicolaides in DD Book
+  Z[:,i]=(Ri[i]'*Di[i]*Ri[i])*ones(m) #Z as in Nicolaides in DD Book
   end
   return Z
 end
@@ -186,9 +186,8 @@ Notes
 """
 function inf_step(u_current::Vector{Float64},
                   K::AbstractMatrix, M::AbstractMatrix,
-                  idx_sub::AbstractVector)
+                  idx_sub::AbstractVector, nev::Int64)
     t_build_start = time()
-    N = length(u_current)
     localdim = 1 + length(idx_sub)
 
     # More efficient: avoid creating standard basis vectors explicitly
@@ -197,7 +196,7 @@ function inf_step(u_current::Vector{Float64},
 
     t_local_matrices_start = time()
     # Efficient approach: work directly with submatrices instead of building B
-    extended_idx = [1:N; idx_sub]  # Current solution + subdomain indices
+     # Current solution + subdomain indices
 
     # Extract relevant rows/columns from K and M
     if length(idx_sub) > 0
@@ -240,11 +239,14 @@ function inf_step(u_current::Vector{Float64},
     @debug "Size of M_local: $(size(M_local))"
     K_local_sym = Symmetric(K_local);  M_local_sym = Symmetric(M_local)         # if applicable
     F = cholesky(K_local_sym)                              # ≈ A^{-1} preconditioner
-    X0 = ones(size(K_local,1), 1)                 # initial guess (one vector)
-    res = lobpcg(K_local_sym, M_local_sym, false, X0; P=F, tol=1e-8, maxiter=500)  # false = search smallest
+    α_min=Vector{Vector{Float64}}(undef, nev)
+    x_new=Vector{Vector{Float64}}(undef, nev)
+    res = lobpcg(K_local_sym, M_local_sym, false, nev; P=F, tol=1e-8, maxiter=500)  # false = search smallest
     λmin = res.λ[1]
-    vmin = res.X[:, 1]                       # already B-orthonormal
-    α_min = vmin
+                       
+    for i=1:nev
+      α_min[i]=res.X[:,i]      # already B-orthonormal
+    end
     # eigvals, eigvecs = eigen(K_local, M_local)
     # i_min = argmin(eigvals)
     # α_min = eigvecs[:, i_min]
@@ -252,14 +254,19 @@ function inf_step(u_current::Vector{Float64},
 
     t_finalize_start = time()
     # Reconstruct the solution without explicit B matrix
-    x_new = α_min[1] * u_current  # Coefficient for current solution
+    for i=1:nev
+    x_new[i] = α_min[i][1] * u_current # Coefficient for current solution
+    end  
 
     # Add contributions from standard basis vectors
+    for i=1:nev
     for (k, j) in pairs(idx_sub)
-        x_new[j] += α_min[k+1]  # Add coefficient for e_j
+        x_new[i][j] += α_min[i][k+1]  # Add coefficient for e_j
     end
-
-    normalize_M!(x_new, M)
+  end
+    for i=1:nev
+    normalize_M!(x_new[i], M)
+    end
     t_finalize = time() - t_finalize_start
 
     # Only print detailed timing for slow operations (> 0.01 seconds)
@@ -290,11 +297,11 @@ Mathematically this performs the exact minimization
 
 Returns the updated vector `x_new` with `x_new' * M * x_new = 1`.
 """
-function combine_step(u_collection::Vector{Vector{Float64}},
+function combine_step(u_collection::Matrix{Float64},
                      K::AbstractMatrix, M::AbstractMatrix)
     t_qr_start = time()
-    B = hcat(u_collection...)
-    B = Matrix(qr(B).Q)
+    
+    B = Matrix(qr(u_collection).Q)
     t_qr = time() - t_qr_start
 
     t_matrices_start = time()
@@ -395,19 +402,21 @@ function ddm_eigen_solver(;
     #sub_int = 1:m
     for n in 1:maxiter
       t3= time()
+        nev=1
         # Local updates
         t_local_start = time()
-        local_updates = Vector{Vector{Float64}}(undef, m+1)
-        local_updates[1] = u_cur
+        local_updates = zeros(size(u_cur,1), (nev*m)+1)
+        local_updates[:,1] = u_cur
         for i=1:m
             t_inf_step_start = time()
+            l=1
             #println(i)
 
             # Additive
             # u_next_i = inf_step(local_updates[1], K, M, subspaces[i])
 
             # Multiplicative
-            u_next_i = inf_step(local_updates[i], K, M, subspaces[i])            # if dot(u_next_i, u_cur) < 0
+            u_next_i = inf_step(local_updates[:,i+(l-1)*(nev-1)], K, M, subspaces[i], nev)            # if dot(u_next_i, u_cur) < 0
             #     u_next_i .*= -1.0
             # end
             # normalize_M!(u_next_i, M)
@@ -419,9 +428,12 @@ function ddm_eigen_solver(;
             # marker=:none))
             # sleep(1)
 
-            local_updates[i+1] = u_next_i
+            for j=1:nev
+              local_updates[:,(i-1)*nev+j+1]=u_next_i[j]
+            end
             t_inf_step = time() - t_inf_step_start
             @debug "inf_step for subdomain $i took $t_inf_step seconds"
+            l=l+1
         end
         t_local_updates = time() - t_local_start
         @debug "All local updates took $t_local_updates seconds"
@@ -433,7 +445,8 @@ function ddm_eigen_solver(;
         t_combine_start = time()
         @debug "size of local updates is $(length(local_updates))"
         @debug "size of coarse basis is $(length(coarse_basis))"
-        u_new = combine_step([local_updates; coarse_basis], K, M)
+        combined_matrix=hcat(coarse_basis,local_updates)
+        u_new = combine_step(combined_matrix, K, M)
         t_combine = time() - t_combine_start
         @debug "combine_step took $t_combine seconds"
 
