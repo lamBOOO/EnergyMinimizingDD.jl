@@ -250,12 +250,11 @@ struct NonlinearEnergy{T,F1<:Function,F2<:Function} <: AbstractEnergy{T}
   assembler::F1  # Function that assembles the energy given u: (u) -> energy_value
   grad_assembler::F2  # Function that assembles the gradient: (u) -> gradient_vector
   N::Int        # Problem dimension
-  params::Dict{String,Any}  # Additional parameters (e.g., p for p-Laplacian, etc.)
 end
 
 NonlinearEnergy(name::String, assembler::F1, grad_assembler::F2, N::Int;
-               params::Dict{String,Any}=Dict{String,Any}()) where {F1,F2} =
-  NonlinearEnergy{Float64,F1,F2}(name, assembler, grad_assembler, N, params)
+               ) where {F1,F2} =
+  NonlinearEnergy{Float64,F1,F2}(name, assembler, grad_assembler, N)
 
 # E(u) - energy evaluation
 energy(e::NonlinearEnergy{T}, u::AbstractVector{T}) where {T} = e.assembler(u)
