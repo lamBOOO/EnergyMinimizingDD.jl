@@ -176,8 +176,8 @@ m_small = 9   # Fewer subdomains
 energy_assembler, grad_assembler, part_pl, U_pl, n_dofs = FEMDiscretizations.FEM_PLaplacian(N_small, m_small, p_val)
 
 # Create p-Laplacian energy functional using the generic NonlinearEnergy
-energy_pl = Energies.NonlinearEnergy("p-Laplacian", energy_assembler, grad_assembler, n_dofs,
-                                    params=Dict{String,Any}("p" => p_val))
+energy_pl = Energies.NonlinearEnergy("p-Laplacian", energy_assembler, grad_assembler, n_dofs
+                                    )
 
 # Test energy and gradient evaluation with better initial guess
 Random.seed!(123)  # For reproducibility
@@ -290,8 +290,7 @@ energy_circle_cubic = Energies.NonlinearEnergy(
   "Circle-Cubic System",
   circle_cubic_energy,
   circle_cubic_gradient,
-  2,  # 2D problem
-  params=Dict{String,Any}("description" => "Intersection of unit circle and cubic y=x³")
+  2 # 2D problem
 )
 
 # Create simple partition for 2D problem (each subdomain gets one variable)
