@@ -2,3 +2,4 @@ Manifest.toml
 *.png
 docs/build/
 *.vtu
+docs/Project.toml

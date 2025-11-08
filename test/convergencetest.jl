@@ -21,8 +21,8 @@ K, M, b, part, U = FEMDiscretizations.FEM_Schroedinger(N, m, P=f1, overlap=2)
     save_local_updates=true
   )
   u_approx, lambda_approx, lambda_history, solutions, local_updates_history = result
-  rel_err=abs(lambda_exact-lambda_approx)
-  @assert rel_err<0.01
+  abs_err=abs(lambda_exact-lambda_approx)
+  @assert abs_err<0.01
   println("✓ Laplace convergence test passed")
   println("Analytical EV=$lambda_exact")
   println("Computed EV=$lambda_approx")
