@@ -5,7 +5,7 @@ using Plots
 using LinearAlgebra
 
 # TODO: Improve and write data to CSV
-
+#Plot for visual representation
 N = 20
 ms = collect(2:2:10)
 errors = []
@@ -69,7 +69,6 @@ olaps=collect(2:2:10)
 for (i, o) in enumerate(olaps)
   K, M, b, part, U = FEMDiscretizations.FEM_Schroedinger(N, m, overlap=o)
   energy_eigen_fem = Energies.GeneralizedRayleighQuotient(K, M)
-  # energy_eigen_fem = Energies.RayleighQuotient(K)
   result = Solvers.var_dd(
     energy_eigen_fem,
     part,
@@ -78,7 +77,6 @@ for (i, o) in enumerate(olaps)
     save_local_updates=true
   )
   e_hist = result[3]
-  # true lowest eigenvalue
   lowest_eval = minimum(eigen(Matrix(K), Matrix(M)).values)
   push!(err3, e_hist .- lowest_eval)
 end
