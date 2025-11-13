@@ -25,11 +25,14 @@ abstract type AbstractEnergy{T} end
 energy(e::AbstractEnergy, x) = error("energy not implemented for $(typeof(e))")
 
 # Underlying dimension
-dimension(e::AbstractEnergy) = error("dimension not implemented for $(typeof(e))")
+dimension(e::AbstractEnergy) =
+  error("dimension not implemented for $(typeof(e))")
 
 # Optionally provide defaults via AD; otherwise keep them abstract.
-gradient(e::AbstractEnergy, x) = error("gradient not implemented for $(typeof(e))")
-hessian(e::AbstractEnergy, x) = error("hessian not implemented for $(typeof(e))")
+gradient(e::AbstractEnergy, x) =
+  error("gradient not implemented for $(typeof(e))")
+hessian(e::AbstractEnergy, x) =
+  error("hessian not implemented for $(typeof(e))")
 
 # In-place variants are optional but nice for performance
 function gradient!(g, e::AbstractEnergy, x)
@@ -60,15 +63,19 @@ Quadratic energy functions typically have the form
 E(x) = ½xᵀAx + bᵀx + c, where A is a matrix,
 b is a vector, and c is a scalar constant.
 """
-struct QuadraticEnergy{T,M<:AbstractMatrix{T},V<:AbstractVector{T}} <: AbstractEnergy{T}
+struct QuadraticEnergy{T,M<:AbstractMatrix{T},V<:AbstractVector{T}} <:
+       AbstractEnergy{T}
   A::M           # can be Dense, Sparse, or Symmetric wrapper
   b::V
   c::T
 end
 
 # Make a convenient constructor; wrap A as Symmetric if you know it.
-QuadraticEnergy(A::AbstractMatrix{T}, b::AbstractVector{T}; c::T=zero(T)) where {T} =
-  QuadraticEnergy{T,typeof(A),typeof(b)}(A, b, c)
+QuadraticEnergy(
+  A::AbstractMatrix{T},
+  b::AbstractVector{T};
+  c::T = zero(T),
+) where {T} = QuadraticEnergy{T,typeof(A),typeof(b)}(A, b, c)
 
 # E(x)
 energy(e::QuadraticEnergy{T}, x::AbstractVector{T}) where {T} =
@@ -78,8 +85,7 @@ energy(e::QuadraticEnergy{T}, x::AbstractVector{T}) where {T} =
 dimension(e::QuadraticEnergy) = size(e.A, 1)
 
 # ∇E(x) = Ax - b  (if A symmetric; if not, this is gradient of 1/2 x'(A+A')x - b'x)
-gradient(e::QuadraticEnergy{T}, x::AbstractVector{T}) where {T} =
-  e.A * x .- e.b
+gradient(e::QuadraticEnergy{T}, x::AbstractVector{T}) where {T} = e.A * x .- e.b
 
 # ∇²E(x) = A (constant)
 hessian(e::QuadraticEnergy{T}) where {T} = e.A
@@ -110,7 +116,7 @@ gradient(e::RayleighQuotient{T}, x::AbstractVector{T}) where {T} = begin
   xx = dot(x, x)
   xAx = dot(x, Ax)
   @assert xx != zero(T) "Rayleigh quotient gradient undefined at x=0"
-  (2 / xx) * (Ax .- x .* (xAx/xx))
+  (2 / xx) * (Ax .- x .* (xAx / xx))
 end
 
 # A helper: in-place gradient for performance
@@ -139,7 +145,8 @@ function hessian(e::RayleighQuotient, x::AbstractVector)
   factor2 = -4 * xx_inv * xx_inv
 
   grad_unnorm = Ax - rho * x
-  H = factor1 * (e.A - rho * I) + factor2 * (x * grad_unnorm' + grad_unnorm * x')
+  H =
+    factor1 * (e.A - rho * I) + factor2 * (x * grad_unnorm' + grad_unnorm * x')
 
   return H
 end
@@ -182,32 +189,36 @@ end
 
 # 3) Generalized Rayleigh quotient:  ρ(x) = (x'Ax) / (x'Bx), scale-invariant in x ≠ 0
 #    (covers generalized eigenvalue problems Ax = λBx)
-struct GeneralizedRayleighQuotient{T,M<:AbstractMatrix{T},N<:AbstractMatrix{T}} <: AbstractEnergy{T}
+struct GeneralizedRayleighQuotient{
+  T,
+  M<:AbstractMatrix{T},
+  N<:AbstractMatrix{T},
+} <: AbstractEnergy{T}
   A::M           # typically symmetric/hermitian for real-valued quotient
   B::N           # typically symmetric/hermitian positive definite
 end
 # ρ(x)
-energy(e::GeneralizedRayleighQuotient{T}, x::AbstractVector{T
-}) where {T} = begin
-  num = dot(x, e.A * x)
-  den = dot(x, e.B * x)
-  @assert den != zero(T) "Generalized Rayleigh quotient undefined at x with x'Bx=0"
-  num / den
-end
+energy(e::GeneralizedRayleighQuotient{T}, x::AbstractVector{T}) where {T} =
+  begin
+    num = dot(x, e.A * x)
+    den = dot(x, e.B * x)
+    @assert den != zero(T) "Generalized Rayleigh quotient undefined at x with x'Bx=0"
+    num / den
+  end
 
 # dimension
 dimension(e::GeneralizedRayleighQuotient) = size(e.A, 1)
 
 # ∇ρ(x) = 2 * ( (Ax)(x'Bx) - (Bx)(x'Ax) ) / (x'Bx)^2
-gradient(e::GeneralizedRayleighQuotient{T}, x::AbstractVector{T
-}) where {T} = begin
-  Ax = e.A * x
-  Bx = e.B * x
-  xx_Bx = dot(x, Bx)
-  x_Ax = dot(x, Ax)
-  @assert xx_Bx != zero(T) "Generalized Rayleigh quotient gradient undefined at x with x'Bx=0"
-  (2 / (xx_Bx * xx_Bx)) * (Ax .* xx_Bx .- Bx .* x_Ax)
-end
+gradient(e::GeneralizedRayleighQuotient{T}, x::AbstractVector{T}) where {T} =
+  begin
+    Ax = e.A * x
+    Bx = e.B * x
+    xx_Bx = dot(x, Bx)
+    x_Ax = dot(x, Ax)
+    @assert xx_Bx != zero(T) "Generalized Rayleigh quotient gradient undefined at x with x'Bx=0"
+    (2 / (xx_Bx * xx_Bx)) * (Ax .* xx_Bx .- Bx .* x_Ax)
+  end
 # ∇²ρ(x) is more complicated; omitted for brevity
 # You can implement it similarly to RayleighQuotient if needed.
 
@@ -233,11 +244,16 @@ function hessian(e::GeneralizedRayleighQuotient, x::AbstractVector)
   return H
 end
 # In-place version for better performance with large matrices
-function hessian!(H::AbstractMatrix, e::GeneralizedRayleighQuotient,
-  x::AbstractVector)
-  throw(ErrorException(
-    "In-place Hessian not implemented for GeneralizedRayleighQuotient"
-  ))
+function hessian!(
+  H::AbstractMatrix,
+  e::GeneralizedRayleighQuotient,
+  x::AbstractVector,
+)
+  throw(
+    ErrorException(
+      "In-place Hessian not implemented for GeneralizedRayleighQuotient",
+    ),
+  )
 end
 
 
@@ -252,8 +268,12 @@ struct NonlinearEnergy{T,F1<:Function,F2<:Function} <: AbstractEnergy{T}
   N::Int        # Problem dimension
 end
 
-NonlinearEnergy(name::String, assembler::F1, grad_assembler::F2, N::Int;
-               ) where {F1,F2} =
+NonlinearEnergy(
+  name::String,
+  assembler::F1,
+  grad_assembler::F2,
+  N::Int;
+) where {F1,F2} =
   NonlinearEnergy{Float64,F1,F2}(name, assembler, grad_assembler, N)
 
 # E(u) - energy evaluation
@@ -263,13 +283,15 @@ energy(e::NonlinearEnergy{T}, u::AbstractVector{T}) where {T} = e.assembler(u)
 dimension(e::NonlinearEnergy) = e.N
 
 # ∇E(u) - gradient evaluation
-gradient(e::NonlinearEnergy{T}, u::AbstractVector{T}) where {T} = e.grad_assembler(u)
+gradient(e::NonlinearEnergy{T}, u::AbstractVector{T}) where {T} =
+  e.grad_assembler(u)
 
 
 
 # 6) Linear Regression Energy: E(x) = ||Ax - b||² for least squares problems
 #    Minimizing this energy leads to solving the normal equations A'Ax = A'b
-struct LinearRegressionEnergy{T,M<:AbstractMatrix{T},V<:AbstractVector{T}} <: AbstractEnergy{T}
+struct LinearRegressionEnergy{T,M<:AbstractMatrix{T},V<:AbstractVector{T}} <:
+       AbstractEnergy{T}
   A::M           # Design matrix (m × n where m ≥ n typically)
   b::V           # Observation vector (length m)
 end
@@ -291,7 +313,8 @@ end
 
 # ∇²E(x) = 2AᵀA (constant Hessian)
 hessian(e::LinearRegressionEnergy{T}) where {T} = 2 * (e.A' * e.A)
-hessian(e::LinearRegressionEnergy{T}, x::AbstractVector{T}) where {T} = hessian(e)
+hessian(e::LinearRegressionEnergy{T}, x::AbstractVector{T}) where {T} =
+  hessian(e)
 
 
 
