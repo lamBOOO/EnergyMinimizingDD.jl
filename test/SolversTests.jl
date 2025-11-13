@@ -22,46 +22,47 @@ overlap = 2
 
 # Schroedinger EVP FEM
 println("\n=== Schrödinger EVP FEM Example ===")
-K, M, b, part, U = FEMDiscretizations.FEM_Schroedinger(N, m, overlap=overlap)
+K, M, b, part, U = FEMDiscretizations.FEM_Schroedinger(N, m, overlap = overlap)
 energy_eigen_fem = Energies.GeneralizedRayleighQuotient(K, M)
 # energy_eigen_fem = Energies.RayleighQuotient(K)
 result = Solvers.var_dd(
   energy_eigen_fem,
   part,
-  maxiter=maxiter,
-  tol=tol,
-  save_local_updates=true
+  maxiter = maxiter,
+  tol = tol,
+  save_local_updates = true,
 )
 
 # Handle different return values based on save_local_updates
-u_approx, lambda_approx, lambda_history, solutions, local_updates_history = result
+u_approx, lambda_approx, lambda_history, solutions, local_updates_history =
+  result
 println("Final approximate eigenvalue = $lambda_approx")
-exact_sol = eigs(K, M, nev=1, which=:SM)
+exact_sol = eigs(K, M, nev = 1, which = :SM)
 println("Exact eigenvalue = $(exact_sol[1][1])")
 
 # write to vtk file using U info
 writevtk(
   U.space.fe_basis.trian,
   "eigen_solution",
-  cellfields = ["u_approx" => FEFunction(U, u_approx)]
+  cellfields = ["u_approx" => FEFunction(U, u_approx)],
 )
 # write all sols to vtk file for visualization
 for (i, sol) in enumerate(solutions)
   writevtk(
     U.space.fe_basis.trian,
     "schroedinger_solution_iter$(i-1)",
-    cellfields = ["u" => FEFunction(U, sol)]
+    cellfields = ["u" => FEFunction(U, sol)],
   )
 end
 for (iter, local_updates) in enumerate(local_updates_history)
-  cellfields = Dict{String, FEFunction}()
+  cellfields = Dict{String,FEFunction}()
   for (subdomain_idx, local_sol) in enumerate(local_updates)
     cellfields["u_subdomain_$(subdomain_idx)"] = FEFunction(U, local_sol)
   end
   writevtk(
     U.space.fe_basis.trian,
     "schroedinger_local_updates_iter$(iter-1)",
-    cellfields = cellfields
+    cellfields = cellfields,
   )
 end
 @assert abs(lambda_approx - exact_sol[1][1]) < 1e-6
@@ -72,7 +73,11 @@ println("✓ passed.")
 # Poisson problem FEM: -Δu = f with f(x) = 1
 println("\n=== Poisson Linear FEM Example ===")
 K, M, b, part, U = FEMDiscretizations.FEM_Schroedinger(
-  N, m, P=(x -> 0.0), f=(x -> 1.0), overlap=overlap
+  N,
+  m,
+  P = (x -> 0.0),
+  f = (x -> 1.0),
+  overlap = overlap,
 )
 energy_poisson_fem = Energies.QuadraticEnergy(K, b, 0.0)
 # direct solve
@@ -81,9 +86,9 @@ u_poisson_direct = K \ b
 result = Solvers.var_dd(
   energy_poisson_fem,
   part,
-  maxiter=maxiter,
-  tol=tol,
-  save_local_updates=true
+  maxiter = maxiter,
+  tol = tol,
+  save_local_updates = true,
 )
 u_poisson, E_poisson, E_hist, sols, local_updates_history = result
 E_poisson = Energies.energy(energy_poisson_fem, u_poisson)
@@ -94,22 +99,25 @@ writevtk(
   "poisson_solution",
   cellfields = [
     "u_poisson" => FEFunction(U, u_poisson),
-    "u_poisson_direct" => FEFunction(U, u_poisson_direct)
-  ]
+    "u_poisson_direct" => FEFunction(U, u_poisson_direct),
+  ],
 )
 for (iter, local_updates) in enumerate(local_updates_history)
-  cellfields = Dict{String, FEFunction}()
+  cellfields = Dict{String,FEFunction}()
   for (subdomain_idx, local_sol) in enumerate(local_updates)
     cellfields["u_subdomain_$(subdomain_idx)"] = FEFunction(U, local_sol)
   end
   writevtk(
     U.space.fe_basis.trian,
     "poisson_local_updates_iter$(iter-1)",
-    cellfields = cellfields
+    cellfields = cellfields,
   )
 end
 # check difference
-println("norm(u_poisson - u_poisson_direct) = ", norm(u_poisson - u_poisson_direct))
+println(
+  "norm(u_poisson - u_poisson_direct) = ",
+  norm(u_poisson - u_poisson_direct),
+)
 @assert norm(u_poisson - u_poisson_direct) < 1e-4
 println("✓ passed.")
 
@@ -118,7 +126,7 @@ for (i, sol) in enumerate(sols)
   writevtk(
     U.space.fe_basis.trian,
     "poisson_solution_iter$(i-1)",
-    cellfields = ["u" => FEFunction(U, sol)]
+    cellfields = ["u" => FEFunction(U, sol)],
   )
 end
 
@@ -139,16 +147,17 @@ energy_lr = Energies.LinearRegressionEnergy(A_lr, b_lr)
 
 # Create simple uniform partition for demonstration
 # In practice, this would be more sophisticated domain decomposition
-part_lr = [Vector{Int32}() for _ in 1:m]
-for i in 1:n_params
-  push!(part_lr[((i-1) % m) + 1], i)
+part_lr = [Vector{Int32}() for _ = 1:m]
+for i = 1:n_params
+  push!(part_lr[((i-1)%m)+1], i)
 end
 
 # Direct solution via normal equations
 x_direct = (A_lr' * A_lr) \ (A_lr' * b_lr)
 
 # Domain decomposition solution
-x_dd, E_lr, E_hist_lr, sols_lr = Solvers.var_dd(energy_lr, part_lr, maxiter=maxiter, tol=tol)
+x_dd, E_lr, E_hist_lr, sols_lr =
+  Solvers.var_dd(energy_lr, part_lr, maxiter = maxiter, tol = tol)
 
 # Compare solutions
 println("Direct least squares energy: $(Energies.energy(energy_lr, x_direct))")
@@ -173,11 +182,16 @@ println("\n=== p-Laplacian Nonlinear FEM Example ===")
 p_val = 3.0
 N_small = 20  # Use smaller problem size for testing
 m_small = 9   # Fewer subdomains
-energy_assembler, grad_assembler, part_pl, U_pl, n_dofs = FEMDiscretizations.FEM_PLaplacian(N_small, m_small, p_val)
+energy_assembler, grad_assembler, part_pl, U_pl, n_dofs =
+  FEMDiscretizations.FEM_PLaplacian(N_small, m_small, p_val)
 
 # Create p-Laplacian energy functional using the generic NonlinearEnergy
-energy_pl = Energies.NonlinearEnergy("p-Laplacian", energy_assembler, grad_assembler, n_dofs
-                                    )
+energy_pl = Energies.NonlinearEnergy(
+  "p-Laplacian",
+  energy_assembler,
+  grad_assembler,
+  n_dofs,
+)
 
 # Test energy and gradient evaluation with better initial guess
 Random.seed!(123)  # For reproducibility
@@ -192,9 +206,9 @@ try
   u_pl, E_pl, E_hist_pl, sols_pl = Solvers.var_dd(
     energy_pl,
     part_pl,
-    maxiter=30,
-    tol=1e-5,
-    save_local_updates=false
+    maxiter = 30,
+    tol = 1e-5,
+    save_local_updates = false,
   )
 
   println("Final p-Laplacian energy: $E_pl")
@@ -204,7 +218,7 @@ try
   writevtk(
     U_pl.space.fe_basis.trian,
     "p_laplacian_solution",
-    cellfields = ["u_pl" => FEFunction(U_pl, u_pl)]
+    cellfields = ["u_pl" => FEFunction(U_pl, u_pl)],
   )
 
   # Verify that we've found a critical point (gradient should be small)
@@ -212,7 +226,9 @@ try
   if final_grad_norm < 1e-2
     println("✓ p-Laplacian converged successfully!")
   else
-    println("⚠ p-Laplacian converged but with larger residual: $final_grad_norm")
+    println(
+      "⚠ p-Laplacian converged but with larger residual: $final_grad_norm",
+    )
   end
 
   # Compare with Gridap reference solution
@@ -236,19 +252,23 @@ try
     "p_laplacian_comparison",
     cellfields = [
       "u_dd" => FEFunction(U_pl, u_pl),
-      "u_gridap" => FEFunction(U_pl, u_ref)
-    ]
+      "u_gridap" => FEFunction(U_pl, u_ref),
+    ],
   )
 
   if error_l2 < 1e-4
     println("✓ DD solution agrees well with Gridap reference!")
   else
-    println("⚠ Larger difference between DD and reference: check implementation")
+    println(
+      "⚠ Larger difference between DD and reference: check implementation",
+    )
   end
 
 catch e
   println("Error in p-Laplacian example: $e")
-  println("This may indicate implementation challenges with the nonlinear solver.")
+  println(
+    "This may indicate implementation challenges with the nonlinear solver.",
+  )
 end
 
 # Nonlinear algebraic system example: Circle-Cubic intersection
@@ -277,9 +297,9 @@ function circle_cubic_gradient(x::Vector{Float64})
   # Jacobian matrix J = [∂F₁/∂x₁  ∂F₁/∂x₂]
   #                     [∂F₂/∂x₁  ∂F₂/∂x₂]
   J = zeros(2, 2)
-  J[1, 1] = 2*x[1]        # ∂F₁/∂x₁ = 2x₁
-  J[1, 2] = 2*x[2]        # ∂F₁/∂x₂ = 2x₂
-  J[2, 1] = 3*x[1]^2      # ∂F₂/∂x₁ = 3x₁²
+  J[1, 1] = 2 * x[1]        # ∂F₁/∂x₁ = 2x₁
+  J[1, 2] = 2 * x[2]        # ∂F₁/∂x₂ = 2x₂
+  J[2, 1] = 3 * x[1]^2      # ∂F₂/∂x₁ = 3x₁²
   J[2, 2] = -1.0          # ∂F₂/∂x₂ = -1
 
   return J' * F  # ∇E = Jᵀ F
@@ -290,7 +310,7 @@ energy_circle_cubic = Energies.NonlinearEnergy(
   "Circle-Cubic System",
   circle_cubic_energy,
   circle_cubic_gradient,
-  2 # 2D problem
+  2, # 2D problem
 )
 
 # Create simple partition for 2D problem (each subdomain gets one variable)
@@ -303,10 +323,13 @@ try
   println("Initial guess: x = $(x_init)")
   println("Initial F(x) = $(circle_cubic_system(x_init))")
   println("Initial ||F(x)|| = $(norm(circle_cubic_system(x_init)))")
-  println("Initial energy E(x) = $(Energies.energy(energy_circle_cubic, x_init))")
+  println(
+    "Initial energy E(x) = $(Energies.energy(energy_circle_cubic, x_init))",
+  )
 
   # Solve using domain decomposition
-  x_sol, E_sol, E_hist_cc, sols_cc = Solvers.var_dd(energy_circle_cubic, part_cc, maxiter=50, tol=1e-5)
+  x_sol, E_sol, E_hist_cc, sols_cc =
+    Solvers.var_dd(energy_circle_cubic, part_cc, maxiter = 50, tol = 1e-5)
 
   println("\nSolution found: x = $(x_sol)")
   F_sol = circle_cubic_system(x_sol)
@@ -324,7 +347,9 @@ try
 
   if norm(F_sol) < 1e-6
     println("✓ Nonlinear algebraic system solved successfully!")
-    println("  Solution represents intersection of unit circle and cubic curve.")
+    println(
+      "  Solution represents intersection of unit circle and cubic curve.",
+    )
   else
     println("⚠ System not fully converged, residual = $(norm(F_sol))")
   end

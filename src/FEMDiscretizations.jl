@@ -13,24 +13,25 @@ using LineSearches
 
 function FEM_Schroedinger(
   N::Int,
-  m::Int=9;
-  P::F1=(x -> exp(sqrt((x.data[1])^2 + (x.data[2])^2))),
+  m::Int = 9;
+  P::F1 = (x -> exp(sqrt((x.data[1])^2 + (x.data[2])^2))),
   # also return RHS to solve source problem
-  f::F2=(x -> 1.0),
-  overlap::Int=2
-) where {F1<:Function, F2<:Function}
+  f::F2 = (x -> 1.0),
+  overlap::Int = 2,
+) where {F1<:Function,F2<:Function}
 
   domain = (0, 1.0, 0, 1.0)
   partition1 = (1.0 * N, 1.0 * N)
-  model = CartesianDiscreteModel(domain, partition1; isperiodic=(false, false))
+  model =
+    CartesianDiscreteModel(domain, partition1; isperiodic = (false, false))
   reffe = ReferenceFE(lagrangian, Float64, 1)
-  VV = TestFESpace(model, reffe, dirichlet_tags=["boundary"])
+  VV = TestFESpace(model, reffe, dirichlet_tags = ["boundary"])
   Ω = Triangulation(model)
   dΩ = Measure(Ω, 2)
   U = TrialFESpace(VV, 0)
   a1(u, v) = ∫(∇(u) ⋅ ∇(v) + (x -> P(x)) * u * v)dΩ
   a2(u, v) = ∫(u * v)dΩ
-  b(v) = ∫( (x -> f(x)) * v )dΩ
+  b(v) = ∫((x -> f(x)) * v)dΩ
   K = assemble_matrix(a1, VV, U)
   M = assemble_matrix(a2, VV, U)
   b = assemble_vector(b, VV)
@@ -54,17 +55,18 @@ optimized energy and gradient assemblers using cached FEFunction pattern.
 """
 function FEM_PLaplacian(
   N::Int,
-  m::Int=9,
-  p::Float64=3.0,
-  f::F=(x -> 1.0),
-  overlap::Int=2
+  m::Int = 9,
+  p::Float64 = 3.0,
+  f::F = (x -> 1.0),
+  overlap::Int = 2,
 ) where {F<:Function}
 
   domain = (0, 1.0, 0, 1.0)
   partition1 = (1.0 * N, 1.0 * N)
-  model = CartesianDiscreteModel(domain, partition1; isperiodic=(false, false))
+  model =
+    CartesianDiscreteModel(domain, partition1; isperiodic = (false, false))
   reffe = ReferenceFE(lagrangian, Float64, 1)
-  VV = TestFESpace(model, reffe, dirichlet_tags=["boundary"])
+  VV = TestFESpace(model, reffe, dirichlet_tags = ["boundary"])
   Ω = Triangulation(model)
   dΩ = Measure(Ω, 2)
   U = TrialFESpace(VV, 0)
@@ -84,13 +86,14 @@ function FEM_PLaplacian(
 
   # Use smooth, branch-free ε-regularization
   eps2 = 1e-24
-  half_p = p/2
+  half_p = p / 2
 
   # Prebuild load pieces: ∫ f u = b_free⋅u_free + c_dirichlet
-  rhs_form(v) = ∫( v * (x -> f(x)) )dΩ
+  rhs_form(v) = ∫(v * (x -> f(x)))dΩ
   b_free = assemble_vector(rhs_form, VV)
-  c_dirichlet = sum( ∫( FEFunction(U, zero(b_free),
-                                        get_dirichlet_dof_values(U)) * (x -> f(x)) )dΩ )
+  c_dirichlet = sum(
+    ∫(FEFunction(U, zero(b_free), get_dirichlet_dof_values(U)) * (x -> f(x)))dΩ,
+  )
 
   # Energy density: (|∇u|^2 + eps2)^(p/2) / p
   e_density = (∇u) -> ((∇u ⊙ ∇u + eps2)^half_p) / p
@@ -100,7 +103,7 @@ function FEM_PLaplacian(
     # Mutate the cached FEFunction instead of constructing a new one
     copyto!(get_free_dof_values(ufe_cache), u_vec)
 
-    E_grad = sum( ∫( e_density ∘ ∇(ufe_cache) )dΩ )
+    E_grad = sum(∫(e_density ∘ ∇(ufe_cache))dΩ)
     # ∫ f u = b_free⋅u_free + c_dirichlet
     return E_grad - (dot(b_free, u_vec) + c_dirichlet)
   end
@@ -109,7 +112,7 @@ function FEM_PLaplacian(
   # p-Laplacian weak form following Gridap tutorial
   flux(∇u) = begin
     gnorm_sq = ∇u ⊙ ∇u + eps2
-    return gnorm_sq^((p-2)/2) * ∇u
+    return gnorm_sq^((p - 2) / 2) * ∇u
   end
 
   # Jacobian for Newton method
@@ -119,7 +122,7 @@ function FEM_PLaplacian(
     if gnorm < 1e-12  # Additional safety
       return zero(∇du)
     end
-    return (p-2) * gnorm^(p-4) * (∇u ⊙ ∇du) * ∇u + gnorm^(p-2) * ∇du
+    return (p - 2) * gnorm^(p - 4) * (∇u ⊙ ∇du) * ∇u + gnorm^(p - 2) * ∇du
   end
 
   # Weak residual and Jacobian
@@ -153,16 +156,17 @@ Uses consistent smooth ε-regularization matching the DD version.
 """
 function solve_p_laplacian_gridap(
   N::Int,
-  p::Float64=3.0,
-  f::F=(x -> 1.0)
+  p::Float64 = 3.0,
+  f::F = (x -> 1.0),
 ) where {F<:Function}
 
   # Setup domain and FE space (same as DD version for consistency)
   domain = (0, 1.0, 0, 1.0)
   partition1 = (1.0 * N, 1.0 * N)
-  model = CartesianDiscreteModel(domain, partition1; isperiodic=(false, false))
+  model =
+    CartesianDiscreteModel(domain, partition1; isperiodic = (false, false))
   reffe = ReferenceFE(lagrangian, Float64, 1)
-  V0 = TestFESpace(model, reffe, dirichlet_tags=["boundary"])
+  V0 = TestFESpace(model, reffe, dirichlet_tags = ["boundary"])
   Ug = TrialFESpace(V0, 0)
 
   # Numerical integration setup
@@ -176,7 +180,7 @@ function solve_p_laplacian_gridap(
 
   flux(∇u) = begin
     gnorm_sq = ∇u ⊙ ∇u + eps2
-    return gnorm_sq^((p-2)/2) * ∇u
+    return gnorm_sq^((p - 2) / 2) * ∇u
   end
 
   # Jacobian for Newton method
@@ -186,7 +190,7 @@ function solve_p_laplacian_gridap(
     if gnorm < 1e-12  # Additional safety
       return zero(∇du)
     end
-    return (p-2) * gnorm^(p-4) * (∇u ⊙ ∇du) * ∇u + gnorm^(p-2) * ∇du
+    return (p - 2) * gnorm^(p - 4) * (∇u ⊙ ∇du) * ∇u + gnorm^(p - 2) * ∇du
   end
 
   # Weak residual and Jacobian
@@ -198,11 +202,11 @@ function solve_p_laplacian_gridap(
 
   # Setup nonlinear solver using NLsolve with optimized tolerance
   nls = NLSolver(
-    show_trace=false,
-    method=:newton,
-    linesearch=LineSearches.BackTracking(),
-    ftol=1e-8,
-    iterations=50
+    show_trace = false,
+    method = :newton,
+    linesearch = LineSearches.BackTracking(),
+    ftol = 1e-8,
+    iterations = 50,
   )
   solver = FESolver(nls)
 
@@ -218,15 +222,25 @@ function solve_p_laplacian_gridap(
 end
 
 function create_dofs_partition(
-  elemsp::Vector{Vector{Int32}}, sp::Gridap.FESpaces.UnconstrainedFESpace
+  elemsp::Vector{Vector{Int32}},
+  sp::Gridap.FESpaces.UnconstrainedFESpace,
 )
   m = sp.fe_basis.trian.model
   dim = size(m.grid_topology.n_m_to_nface_to_mfaces, 2) - 1
   npars = length(elemsp)
   @debug "create nodesp"
-  nodesp = [Vector{Int32}() for _ in 1:npars]
+  nodesp = [Vector{Int32}() for _ = 1:npars]
   Threads.@threads for ipar = 1:npars
-    nodesp[ipar] = sort(unique(vcat([m.grid_topology.n_m_to_nface_to_mfaces[dim+1][el] for el in elemsp[ipar]]...)))
+    nodesp[ipar] = sort(
+      unique(
+        vcat(
+          [
+            m.grid_topology.n_m_to_nface_to_mfaces[dim+1][el] for
+            el in elemsp[ipar]
+          ]...,
+        ),
+      ),
+    )
   end
 
   @debug "create freenodesp"
@@ -248,7 +262,7 @@ function create_elements_partition(partition::Vector{Int32}, npars::Integer) # H
   nelems = length(partition)
   @debug nelems, length(partition)
   @assert nelems == length(partition)
-  elemsp = [Vector{Int32}() for _ in 1:npars]
+  elemsp = [Vector{Int32}() for _ = 1:npars]
   for iel = 1:nelems
     push!(elemsp[partition[iel]], iel)
   end
