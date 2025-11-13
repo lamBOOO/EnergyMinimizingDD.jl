@@ -16,7 +16,7 @@ jobs:
         version: '1'
     - name: Install JuliaFormatter app
       run: |
-        julia -e 'import Pkg; Pkg.Apps.add("JuliaFormatter"); Pkg.instantiate()'
+        julia -e 'import Pkg; Pkg.add("JuliaFormatter"); Pkg.Apps.add("JuliaFormatter"); Pkg.instantiate()'
         julia -e 'import Pkg; Pkg.activate(); Pkg.build()' # optional
     - name: Check formatting
       run: |
