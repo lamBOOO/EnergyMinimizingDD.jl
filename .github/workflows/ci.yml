@@ -7,13 +7,6 @@ on:
     branches: [main]
 
 jobs:
-  code-style:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: julia-actions/julia-format@v4
-        with:
-          version: '1' # Set `version` to '1.0.54' if you need to use JuliaFormatter.jl v1.0.54 (default: '1')
-          suggestion-label: 'format-suggest' # leave this unset or empty to show suggestions for all PRs
   format-check:
     runs-on: ubuntu-latest
     steps:
@@ -23,7 +16,7 @@ jobs:
         version: '1'
     - name: Install JuliaFormatter app
       run: |
-        julia -e 'import Pkg; Pkg.add("JuliaFormatter"); Pkg.instantiate()'
+        julia -e 'import Pkg; Pkg.Apps.add("JuliaFormatter"); Pkg.instantiate()'
         julia -e 'import Pkg; Pkg.activate(); Pkg.build()' # optional
     - name: Check formatting
       run: |
