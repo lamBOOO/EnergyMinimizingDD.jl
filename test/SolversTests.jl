@@ -408,7 +408,7 @@ energy_synthetic_system = Energies.NonlinearEnergy(
   5 # 5D problem
 )
 
-part_synth = [Vector{Int32}([1]), Vector{Int32}([2]), Vector{Int32}([3]), Vector{Int32}([4]), Vector{Int32}([5])]
+part_synth = [Vector{Int32}([1,2,3]), Vector{Int32}([3,4,5])]
 
 # Initial guess (near one of the expected solutions)
 x_init2 = [1.2, 1.3, 1.4, 1.1, 1.2]  # Should converge to analytical solution
