@@ -310,7 +310,7 @@ energy_circle_cubic = Energies.NonlinearEnergy(
   "Circle-Cubic System",
   circle_cubic_energy,
   circle_cubic_gradient,
-  2 # 2D problem
+  2, # 2D problem
 )
 
 # Create simple partition for 2D problem (each subdomain gets one variable)
@@ -364,11 +364,11 @@ println("\n=== Nonlinear Synthetic Algebraic System Example ===")
 # Define the system F(x) = 0 as an energy minimization: E(x) = ½||F(x)||²
 function synth_system(x::Vector{Float64})
   F = zeros(5)
-  F[1] = x[1]^2 + x[2]^2 + x[3]^2+ x[4]^2+(x[5]^2)-5
-  F[2] = exp(x[1])+ x[2]*x[3]-exp(1)-1
-  F[3] = sin(x[3])+ x[4]*x[5]-sin(1)-1
-  F[4]= x[1]*x[2]+ x[3]*x[4]+ (x[5]^3)-3
-  F[5]= x[1]+x[2]+x[3]+x[4]+x[5]-5
+  F[1] = x[1]^2 + x[2]^2 + x[3]^2 + x[4]^2 + (x[5]^2) - 5
+  F[2] = exp(x[1]) + x[2] * x[3] - exp(1) - 1
+  F[3] = sin(x[3]) + x[4] * x[5] - sin(1) - 1
+  F[4] = x[1] * x[2] + x[3] * x[4] + (x[5]^3) - 3
+  F[5] = x[1] + x[2] + x[3] + x[4] + x[5] - 5
   return F
 end
 
@@ -382,22 +382,22 @@ end
 function synthetic_sys_gradient(x::Vector{Float64})
   F = synth_system(x)
   J = zeros(5, 5)
-  for i=1:5
-    J[1,i]= 2*x[i]
+  for i = 1:5
+    J[1, i] = 2 * x[i]
   end
-  J[2,1]=exp(x[1])
-  J[2,2]=x[3]
-  J[2,3]=x[2]
-  J[3,3]= cos(x[3])
-  J[3,4]=x[5]
-  J[3,5]=x[4]
-  J[4,1]=x[2]
-  J[4,2]=x[1]
-  J[4,3]=x[4]
-  J[4,4]=x[3]
-  J[4,5]= 3*x[5]^2
-  for i=1:5
-    J[5,i]= 1
+  J[2, 1] = exp(x[1])
+  J[2, 2] = x[3]
+  J[2, 3] = x[2]
+  J[3, 3] = cos(x[3])
+  J[3, 4] = x[5]
+  J[3, 5] = x[4]
+  J[4, 1] = x[2]
+  J[4, 2] = x[1]
+  J[4, 3] = x[4]
+  J[4, 4] = x[3]
+  J[4, 5] = 3 * x[5]^2
+  for i = 1:5
+    J[5, i] = 1
   end
   return J' * F  # ∇E = Jᵀ F
 end
@@ -405,10 +405,10 @@ energy_synthetic_system = Energies.NonlinearEnergy(
   "Synthetic 5D System",
   synthetic_sys_energy,
   synthetic_sys_gradient,
-  5 # 5D problem
+  5, # 5D problem
 )
 
-part_synth = [Vector{Int32}([1,2,3]), Vector{Int32}([3,4,5])]
+part_synth = [Vector{Int32}([1, 2, 3]), Vector{Int32}([3, 4, 5])]
 
 # Initial guess (near one of the expected solutions)
 x_init2 = [1.2, 1.3, 1.4, 1.1, 1.2]  # Should converge to analytical solution
@@ -422,8 +422,12 @@ try
   )
 
   # Solve using domain decomposition
-  x_sol2, E_sol2, E_hist_synth, sols_synth=
-    Solvers.var_dd(energy_synthetic_system, part_synth, maxiter = 10000, tol = 1e-5)
+  x_sol2, E_sol2, E_hist_synth, sols_synth = Solvers.var_dd(
+    energy_synthetic_system,
+    part_synth,
+    maxiter = 10000,
+    tol = 1e-5,
+  )
 
   println("\nSolution found: x = $(x_sol2)")
   F_sol2 = synth_system(x_sol2)
@@ -432,8 +436,8 @@ try
   println("Final energy E(x) = $E_sol2")
 
   # Verify the solution
-  err=ones(5)-x_sol2  
- synth_error=norm(err)
+  err = ones(5) - x_sol2
+  synth_error = norm(err)
 
   println("\nVerification:")
   println("System error = $(synth_error)")

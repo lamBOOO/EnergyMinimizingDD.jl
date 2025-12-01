@@ -10,15 +10,21 @@ using CSV
 overlap1 = zeros(4, 3)
 overlap2 = zeros(4, 3)
 overlap4 = zeros(4, 3)
-f(x)=0
+f(x) = 0
 #collect data for matrix study
 for k = 1:4
-  N = 10*(2^k)
+  N = 10 * (2^k)
 
-  for i=1:3
-    m=2^i
+  for i = 1:3
+    m = 2^i
     println("Doing olap 1 for N=$N and m=$m")
-    K, M, b, part, U = FEMDiscretizations.FEM_Schroedinger(N, m, P=f, overlap = 1, maxiter=100)
+    K, M, b, part, U = FEMDiscretizations.FEM_Schroedinger(
+      N,
+      m,
+      P = f,
+      overlap = 1,
+      maxiter = 100,
+    )
     energy_eigen_fem = Energies.GeneralizedRayleighQuotient(K, M)
     result = Solvers.var_dd(
       energy_eigen_fem,
@@ -33,13 +39,19 @@ for k = 1:4
 end
 
 for k = 1:4
-  N = 10*(2^k)
+  N = 10 * (2^k)
 
-  for i=1:3
-    m=2^i
+  for i = 1:3
+    m = 2^i
     println("Doing olap 2 for N=$N and m=$m")
 
-    K, M, b, part, U = FEMDiscretizations.FEM_Schroedinger(N, m, P=f, overlap = 2, maxiter=100)
+    K, M, b, part, U = FEMDiscretizations.FEM_Schroedinger(
+      N,
+      m,
+      P = f,
+      overlap = 2,
+      maxiter = 100,
+    )
     energy_eigen_fem = Energies.GeneralizedRayleighQuotient(K, M)
     result = Solvers.var_dd(
       energy_eigen_fem,
@@ -55,13 +67,19 @@ for k = 1:4
 end
 
 for k = 1:4
-   N = 10*(2^k)
+  N = 10 * (2^k)
 
-  for i=1:3
-    m=2^i
+  for i = 1:3
+    m = 2^i
     println("Doing olap 4 for N=$N and m=$m")
 
-    K, M, b, part, U = FEMDiscretizations.FEM_Schroedinger(N, m, P=f, overlap = 4, maxiter=100)
+    K, M, b, part, U = FEMDiscretizations.FEM_Schroedinger(
+      N,
+      m,
+      P = f,
+      overlap = 4,
+      maxiter = 100,
+    )
     energy_eigen_fem = Energies.GeneralizedRayleighQuotient(K, M)
     result = Solvers.var_dd(
       energy_eigen_fem,
