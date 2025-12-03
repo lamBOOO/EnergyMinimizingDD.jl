@@ -14,16 +14,15 @@ K, M, b, part, U =
   FEMDiscretizations.FEM_Schroedinger(N, m, P = f1, overlap = 2)
 energy_eigen_fem = Energies.GeneralizedRayleighQuotient(K, M)
 # energy_eigen_fem = Energies.RayleighQuotient(K)
-result = Solvers.var_dd(
+res= Solvers.var_dd(
   energy_eigen_fem,
   part,
   maxiter = 100,
   tol = 1E-4,
-  save_local_updates = true,
+  save_local_updates = false,
 )
-u_approx, lambda_approx, lambda_history, solutions, local_updates_history =
-  result
-abs_err = abs(lambda_exact - lambda_approx)
+println(typeof(res))
+abs_err = abs(lambda_exact -info.e )
 @assert abs_err < 0.01
 println("✓ Laplace convergence test passed")
 println("Analytical EV=$lambda_exact")

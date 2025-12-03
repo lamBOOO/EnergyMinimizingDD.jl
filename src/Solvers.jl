@@ -705,6 +705,15 @@ function reconstruct_implicit!(
   return x_new
 end
 
+struct info_dd
+  u::Vector{Float64}
+  e::Float64
+  sol_hist::Vector{Vector{Float64}}
+  e_hist::Vector{Float64}
+  residuals::Vector{Float64}
+end
+
+
 """
     var_dd(e, subdomain_dofs; maxiter=50, tol=1e-8, save_local_updates=false, fe_space=nothing, output_prefix="dd_local_update")
 
@@ -734,9 +743,10 @@ function var_dd(
   # Initial guess, no need to normalize apparently
   u_cur = ones(Energies.dimension(e))
 
-  e_hist = Float64[]
+  e_hist = Vector{Float64}()
   sol_hist = Vector{Vector{Float64}}()
   local_update_hist = Vector{Vector{Vector{Float64}}}()
+   residuals = Vector{Float64}()
 
   e_cur = e(u_cur)
   push!(e_hist, e_cur)
@@ -775,12 +785,15 @@ function var_dd(
     e_new = e(u_new)
     push!(e_hist, e_new)
     push!(sol_hist, copy(u_new))
+    push!(residuals, resnorm)
     if resnorm < tol
       println("Converged at iteration $n with energy e = $e_new")
+        info=info_dd(u_cur, e_cur, sol_hist, e_hist,  residuals)
       if save_local_updates
-        return u_new, e_new, e_hist, sol_hist, local_update_hist
+      
+        return info, local_update_hist
       else
-        return u_new, e_new, e_hist, sol_hist
+        return info
       end
     end
 
@@ -789,10 +802,11 @@ function var_dd(
   end
 
   @warn "Reached maxiter=$maxiter with energy ≈ $e_cur"
+  info=info_dd(u_cur, e_cur, sol_hist, e_hist,  residuals)
   if save_local_updates
-    return u_cur, e_cur, e_hist, sol_hist, local_update_hist
+    return info, local_update_hist
   else
-    return u_cur, e_cur, e_hist, sol_hist
+    return info  
   end
 end
 
