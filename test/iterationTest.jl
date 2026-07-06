@@ -19,7 +19,7 @@ result = Solvers.var_dd(
   tol = tol,
   save_local_updates = true,
 )
-u_approx, lambda_approx, lambda_history, solutions, local_updates_history =
+u_approx, lambda_approx, lambda_history, solutions, resnorm_history, local_updates_history =
   result
 @assert length(lambda_history) <= 26
 println("✓ Iteration test for N=20 passed")
@@ -35,7 +35,7 @@ result = Solvers.var_dd(
   tol = tol,
   save_local_updates = true,
 )
-u_approx, lambda_approx, lambda_history, solutions, local_updates_history =
+u_approx, lambda_approx, lambda_history, solutions, resnorm_history, local_updates_history =
   result
 @assert length(lambda_history) <= 37
 println("✓ Iteration test for N=30 passed")

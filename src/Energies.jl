@@ -1,5 +1,7 @@
 module Energies
 
+export AbstractEnergy, QuadraticEnergy, RayleighQuotient, GeneralizedRayleighQuotient, NonlinearEnergy, LinearRegressionEnergy
+
 using LinearAlgebra
 using FiniteDiff
 using Gridap

@@ -736,6 +736,7 @@ function var_dd(
 
   e_hist = Float64[]
   sol_hist = Vector{Vector{Float64}}()
+  resnorm_hist = Float64[]
   local_update_hist = Vector{Vector{Vector{Float64}}}()
 
   e_cur = e(u_cur)
@@ -750,7 +751,7 @@ function var_dd(
 
     for i = 1:m
       u_next_i = inf_step(e, u_cur, subdomain_dofs[i])
-      local_updates[:, i] = u_next_i .- u_cur
+      local_updates[:, i] = u_next_i
 
       if save_local_updates
         push!(current_local_updates, copy(u_next_i .- u_cur))
@@ -765,6 +766,7 @@ function var_dd(
     u_new = combine_step(e, combined_matrix)
 
     resnorm = Energies.residual_norm(e, u_new)
+    push!(resnorm_hist, resnorm)
     @printf(
       "Iteration %3d: Residual norm ≈ %12.6e energy = %12.6e\n",
       n,
@@ -778,9 +780,9 @@ function var_dd(
     if resnorm < tol
       println("Converged at iteration $n with energy e = $e_new")
       if save_local_updates
-        return u_new, e_new, e_hist, sol_hist, local_update_hist
+        return u_new, e_new, e_hist, sol_hist, resnorm_hist, local_update_hist
       else
-        return u_new, e_new, e_hist, sol_hist
+        return u_new, e_new, e_hist, sol_hist, resnorm_hist
       end
     end
 
@@ -790,9 +792,9 @@ function var_dd(
 
   @warn "Reached maxiter=$maxiter with energy ≈ $e_cur"
   if save_local_updates
-    return u_cur, e_cur, e_hist, sol_hist, local_update_hist
+    return u_cur, e_cur, e_hist, sol_hist, resnorm_hist, local_update_hist
   else
-    return u_cur, e_cur, e_hist, sol_hist
+    return u_cur, e_cur, e_hist, sol_hist, resnorm_hist
   end
 end
 

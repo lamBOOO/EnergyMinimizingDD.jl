@@ -1,6 +1,7 @@
 using VariationalDomainDecomposition.Energies
 using VariationalDomainDecomposition.FEMDiscretizations
 using VariationalDomainDecomposition.Solvers
+using VariationalDomainDecomposition
 using LinearAlgebra
 using FiniteDiff
 using Gridap
@@ -14,18 +15,18 @@ using LineSearches
 
 
 
-N = 20
-m = 9
-maxiter = 200
-tol = 1e-5
-overlap = 2
+N = 80
+m = 2
+maxiter = 100
+tol = 1e-4
+overlap = 4
 
 # Schroedinger EVP FEM
 println("\n=== Schrödinger EVP FEM Example ===")
-K, M, b, part, U = FEMDiscretizations.FEM_Schroedinger(N, m, overlap = overlap)
+K, M, b, part, U = VariationalDomainDecomposition.FEMDiscretizations.FEM_Schroedinger(N, m, overlap = overlap)
 energy_eigen_fem = Energies.GeneralizedRayleighQuotient(K, M)
 # energy_eigen_fem = Energies.RayleighQuotient(K)
-result = Solvers.var_dd(
+result = VariationalDomainDecomposition.Solvers.var_dd(
   energy_eigen_fem,
   part,
   maxiter = maxiter,
@@ -34,10 +35,10 @@ result = Solvers.var_dd(
 )
 
 # Handle different return values based on save_local_updates
-u_approx, lambda_approx, lambda_history, solutions, local_updates_history =
+u_approx, lambda_approx, lambda_history, solutions, resnorm_history, local_updates_history =
   result
 println("Final approximate eigenvalue = $lambda_approx")
-exact_sol = eigs(K, M, nev = 1, which = :SM)
+exact_sol = eigs(K, M, nev = 1, which = :SM, maxiter = 1000)
 println("Exact eigenvalue = $(exact_sol[1][1])")
 
 # write to vtk file using U info
@@ -69,10 +70,28 @@ end
 println("✓ passed.")
 
 
+#inverse iteaertion
+println("\n=== Inverse Iteration Schrödinger EVP FEM Example ===")
+x = ones(size(K,1))
+ii_resnorms = Float64[]
+for i=1:100
+  global x
+  x = (K) \ (M*x)
+  x = x / sqrt(dot(x, M*x))
+  resnorm = norm(K*x - (dot(x, K*x)/dot(x, M*x))*M*x)
+  push!(ii_resnorms, resnorm)
+  @printf("Iteration %3d: Residual norm ≈ %12.6e\n", i, resnorm)
+  if resnorm < tol
+    break
+  end
+end
+lambda_approx_inv = dot(x, K*x)/dot(x, M*x)
+println("Final approximate eigenvalue (inverse iteration) = $lambda_approx_inv")
+
 
 # Poisson problem FEM: -Δu = f with f(x) = 1
 println("\n=== Poisson Linear FEM Example ===")
-K, M, b, part, U = FEMDiscretizations.FEM_Schroedinger(
+K, M, b, part, U = VariationalDomainDecomposition.FEMDiscretizations.FEM_Schroedinger(
   N,
   m,
   P = (x -> 0.0),
@@ -83,14 +102,15 @@ energy_poisson_fem = Energies.QuadraticEnergy(K, b, 0.0)
 # direct solve
 u_poisson_direct = K \ b
 # Solvers.var_dd solve with local update visualization
-result = Solvers.var_dd(
+result = VariationalDomainDecomposition.Solvers.var_dd(
   energy_poisson_fem,
   part,
   maxiter = maxiter,
-  tol = tol,
+  tol = 1e-5,
   save_local_updates = true,
 )
-u_poisson, E_poisson, E_hist, sols, local_updates_history = result
+u_poisson, E_poisson, E_hist, sols, resnorm_hist_poisson, local_updates_history =
+  result
 E_poisson = Energies.energy(energy_poisson_fem, u_poisson)
 println("Poisson energy = $E_poisson")
 # write to vtk file using U info
@@ -156,7 +176,7 @@ end
 x_direct = (A_lr' * A_lr) \ (A_lr' * b_lr)
 
 # Domain decomposition solution
-x_dd, E_lr, E_hist_lr, sols_lr =
+x_dd, E_lr, E_hist_lr, sols_lr, resnorm_hist_lr =
   Solvers.var_dd(energy_lr, part_lr, maxiter = maxiter, tol = tol)
 
 # Compare solutions
@@ -203,7 +223,7 @@ try
   println("Initial gradient norm: $(norm(grad_test))")
 
   # Domain decomposition solution with more relaxed tolerance
-  u_pl, E_pl, E_hist_pl, sols_pl = Solvers.var_dd(
+  u_pl, E_pl, E_hist_pl, sols_pl, resnorm_hist_pl = Solvers.var_dd(
     energy_pl,
     part_pl,
     maxiter = 30,
@@ -233,7 +253,7 @@ try
 
   # Compare with Gridap reference solution
   println("\n--- Comparison with Gridap Reference ---")
-  uh_ref, U_ref = solve_p_laplacian_gridap(N_small, p_val)
+  uh_ref, U_ref = FEMDiscretizations.solve_p_laplacian_gridap(N_small, p_val)
   u_ref = get_free_dof_values(uh_ref)
 
   # Compare solution vectors
@@ -328,7 +348,7 @@ try
   )
 
   # Solve using domain decomposition
-  x_sol, E_sol, E_hist_cc, sols_cc =
+  x_sol, E_sol, E_hist_cc, sols_cc, resnorm_hist_cc =
     Solvers.var_dd(energy_circle_cubic, part_cc, maxiter = 50, tol = 1e-5)
 
   println("\nSolution found: x = $(x_sol)")

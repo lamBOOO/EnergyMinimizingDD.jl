@@ -21,7 +21,7 @@ result = Solvers.var_dd(
   tol = 1E-4,
   save_local_updates = true,
 )
-u_approx, lambda_approx, lambda_history, solutions, local_updates_history =
+u_approx, lambda_approx, lambda_history, solutions, resnorm_history, local_updates_history =
   result
 abs_err = abs(lambda_exact - lambda_approx)
 @assert abs_err < 0.01
