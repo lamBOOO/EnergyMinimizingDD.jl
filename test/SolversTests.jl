@@ -13,8 +13,6 @@ using Printf
 using Random
 using LineSearches
 
-
-
 N = 80
 m = 2
 maxiter = 100
@@ -23,36 +21,35 @@ overlap = 4
 
 # Schroedinger EVP FEM
 println("\n=== Schrödinger EVP FEM Example ===")
-K, M, b, part, U = VariationalDomainDecomposition.FEMDiscretizations.FEM_Schroedinger(N, m, overlap = overlap)
+K, M, b, part, U = VariationalDomainDecomposition.FEMDiscretizations.FEM_Schroedinger(
+  N, m; overlap=overlap
+)
 energy_eigen_fem = Energies.GeneralizedRayleighQuotient(K, M)
 # energy_eigen_fem = Energies.RayleighQuotient(K)
 result = VariationalDomainDecomposition.Solvers.var_dd(
-  energy_eigen_fem,
-  part,
-  maxiter = maxiter,
-  tol = tol,
-  save_local_updates = true,
+  energy_eigen_fem, part; maxiter=maxiter, tol=tol, save_local_updates=true
 )
 
 # Handle different return values based on save_local_updates
-u_approx, lambda_approx, lambda_history, solutions, resnorm_history, local_updates_history =
-  result
+u_approx,
+lambda_approx, lambda_history, solutions, resnorm_history,
+local_updates_history = result
 println("Final approximate eigenvalue = $lambda_approx")
-exact_sol = eigs(K, M, nev = 1, which = :SM, maxiter = 1000)
+exact_sol = eigs(K, M; nev=1, which=:SM, maxiter=1000)
 println("Exact eigenvalue = $(exact_sol[1][1])")
 
 # write to vtk file using U info
 writevtk(
   U.space.fe_basis.trian,
-  "eigen_solution",
-  cellfields = ["u_approx" => FEFunction(U, u_approx)],
+  "eigen_solution";
+  cellfields=["u_approx" => FEFunction(U, u_approx)],
 )
 # write all sols to vtk file for visualization
 for (i, sol) in enumerate(solutions)
   writevtk(
     U.space.fe_basis.trian,
-    "schroedinger_solution_iter$(i-1)",
-    cellfields = ["u" => FEFunction(U, sol)],
+    "schroedinger_solution_iter$(i-1)";
+    cellfields=["u" => FEFunction(U, sol)],
   )
 end
 for (iter, local_updates) in enumerate(local_updates_history)
@@ -62,19 +59,18 @@ for (iter, local_updates) in enumerate(local_updates_history)
   end
   writevtk(
     U.space.fe_basis.trian,
-    "schroedinger_local_updates_iter$(iter-1)",
-    cellfields = cellfields,
+    "schroedinger_local_updates_iter$(iter-1)";
+    cellfields=cellfields,
   )
 end
 @assert abs(lambda_approx - exact_sol[1][1]) < 1e-6
 println("✓ passed.")
 
-
 #inverse iteaertion
 println("\n=== Inverse Iteration Schrödinger EVP FEM Example ===")
-x = ones(size(K,1))
+x = ones(size(K, 1))
 ii_resnorms = Float64[]
-for i=1:100
+for i in 1:100
   global x
   x = (K) \ (M*x)
   x = x / sqrt(dot(x, M*x))
@@ -88,36 +84,28 @@ end
 lambda_approx_inv = dot(x, K*x)/dot(x, M*x)
 println("Final approximate eigenvalue (inverse iteration) = $lambda_approx_inv")
 
-
 # Poisson problem FEM: -Δu = f with f(x) = 1
 println("\n=== Poisson Linear FEM Example ===")
 K, M, b, part, U = VariationalDomainDecomposition.FEMDiscretizations.FEM_Schroedinger(
-  N,
-  m,
-  P = (x -> 0.0),
-  f = (x -> 1.0),
-  overlap = overlap,
+  N, m; P=(x -> 0.0), f=(x -> 1.0), overlap=overlap
 )
 energy_poisson_fem = Energies.QuadraticEnergy(K, b, 0.0)
 # direct solve
 u_poisson_direct = K \ b
 # Solvers.var_dd solve with local update visualization
 result = VariationalDomainDecomposition.Solvers.var_dd(
-  energy_poisson_fem,
-  part,
-  maxiter = maxiter,
-  tol = 1e-5,
-  save_local_updates = true,
+  energy_poisson_fem, part; maxiter=maxiter, tol=1e-5, save_local_updates=true
 )
-u_poisson, E_poisson, E_hist, sols, resnorm_hist_poisson, local_updates_history =
-  result
+u_poisson,
+E_poisson, E_hist, sols, resnorm_hist_poisson,
+local_updates_history = result
 E_poisson = Energies.energy(energy_poisson_fem, u_poisson)
 println("Poisson energy = $E_poisson")
 # write to vtk file using U info
 writevtk(
   U.space.fe_basis.trian,
-  "poisson_solution",
-  cellfields = [
+  "poisson_solution";
+  cellfields=[
     "u_poisson" => FEFunction(U, u_poisson),
     "u_poisson_direct" => FEFunction(U, u_poisson_direct),
   ],
@@ -129,14 +117,13 @@ for (iter, local_updates) in enumerate(local_updates_history)
   end
   writevtk(
     U.space.fe_basis.trian,
-    "poisson_local_updates_iter$(iter-1)",
-    cellfields = cellfields,
+    "poisson_local_updates_iter$(iter-1)";
+    cellfields=cellfields,
   )
 end
 # check difference
 println(
-  "norm(u_poisson - u_poisson_direct) = ",
-  norm(u_poisson - u_poisson_direct),
+  "norm(u_poisson - u_poisson_direct) = ", norm(u_poisson - u_poisson_direct)
 )
 @assert norm(u_poisson - u_poisson_direct) < 1e-4
 println("✓ passed.")
@@ -145,8 +132,8 @@ println("✓ passed.")
 for (i, sol) in enumerate(sols)
   writevtk(
     U.space.fe_basis.trian,
-    "poisson_solution_iter$(i-1)",
-    cellfields = ["u" => FEFunction(U, sol)],
+    "poisson_solution_iter$(i-1)";
+    cellfields=["u" => FEFunction(U, sol)],
   )
 end
 
@@ -167,17 +154,18 @@ energy_lr = Energies.LinearRegressionEnergy(A_lr, b_lr)
 
 # Create simple uniform partition for demonstration
 # In practice, this would be more sophisticated domain decomposition
-part_lr = [Vector{Int32}() for _ = 1:m]
-for i = 1:n_params
-  push!(part_lr[((i-1)%m)+1], i)
+part_lr = [Vector{Int32}() for _ in 1:m]
+for i in 1:n_params
+  push!(part_lr[((i - 1) % m) + 1], i)
 end
 
 # Direct solution via normal equations
 x_direct = (A_lr' * A_lr) \ (A_lr' * b_lr)
 
 # Domain decomposition solution
-x_dd, E_lr, E_hist_lr, sols_lr, resnorm_hist_lr =
-  Solvers.var_dd(energy_lr, part_lr, maxiter = maxiter, tol = tol)
+x_dd, E_lr, E_hist_lr, sols_lr, resnorm_hist_lr = Solvers.var_dd(
+  energy_lr, part_lr; maxiter=maxiter, tol=tol
+)
 
 # Compare solutions
 println("Direct least squares energy: $(Energies.energy(energy_lr, x_direct))")
@@ -196,21 +184,18 @@ println("Normal equation residual (DD): $(norm(normal_residual_dd))")
 @assert abs(E_lr - Energies.energy(energy_lr, x_direct)) < 1e-6
 println("✓ passed.")
 
-
 # p-Laplacian nonlinear problem example
 println("\n=== p-Laplacian Nonlinear FEM Example ===")
 p_val = 3.0
 N_small = 20  # Use smaller problem size for testing
 m_small = 9   # Fewer subdomains
-energy_assembler, grad_assembler, part_pl, U_pl, n_dofs =
-  FEMDiscretizations.FEM_PLaplacian(N_small, m_small, p_val)
+energy_assembler, grad_assembler, part_pl, U_pl, n_dofs = FEMDiscretizations.FEM_PLaplacian(
+  N_small, m_small, p_val
+)
 
 # Create p-Laplacian energy functional using the generic NonlinearEnergy
 energy_pl = Energies.NonlinearEnergy(
-  "p-Laplacian",
-  energy_assembler,
-  grad_assembler,
-  n_dofs,
+  "p-Laplacian", energy_assembler, grad_assembler, n_dofs
 )
 
 # Test energy and gradient evaluation with better initial guess
@@ -224,11 +209,7 @@ try
 
   # Domain decomposition solution with more relaxed tolerance
   u_pl, E_pl, E_hist_pl, sols_pl, resnorm_hist_pl = Solvers.var_dd(
-    energy_pl,
-    part_pl,
-    maxiter = 30,
-    tol = 1e-5,
-    save_local_updates = false,
+    energy_pl, part_pl; maxiter=30, tol=1e-5, save_local_updates=false
   )
 
   println("Final p-Laplacian energy: $E_pl")
@@ -237,8 +218,8 @@ try
   # Write to VTK file for visualization
   writevtk(
     U_pl.space.fe_basis.trian,
-    "p_laplacian_solution",
-    cellfields = ["u_pl" => FEFunction(U_pl, u_pl)],
+    "p_laplacian_solution";
+    cellfields=["u_pl" => FEFunction(U_pl, u_pl)],
   )
 
   # Verify that we've found a critical point (gradient should be small)
@@ -247,7 +228,7 @@ try
     println("✓ p-Laplacian converged successfully!")
   else
     println(
-      "⚠ p-Laplacian converged but with larger residual: $final_grad_norm",
+      "⚠ p-Laplacian converged but with larger residual: $final_grad_norm"
     )
   end
 
@@ -269,10 +250,9 @@ try
   # Write both solutions to VTK for comparison
   writevtk(
     U_pl.space.fe_basis.trian,
-    "p_laplacian_comparison",
-    cellfields = [
-      "u_dd" => FEFunction(U_pl, u_pl),
-      "u_gridap" => FEFunction(U_pl, u_ref),
+    "p_laplacian_comparison";
+    cellfields=[
+      "u_dd" => FEFunction(U_pl, u_pl), "u_gridap" => FEFunction(U_pl, u_ref)
     ],
   )
 
@@ -280,14 +260,14 @@ try
     println("✓ DD solution agrees well with Gridap reference!")
   else
     println(
-      "⚠ Larger difference between DD and reference: check implementation",
+      "⚠ Larger difference between DD and reference: check implementation"
     )
   end
 
 catch e
   println("Error in p-Laplacian example: $e")
   println(
-    "This may indicate implementation challenges with the nonlinear solver.",
+    "This may indicate implementation challenges with the nonlinear solver."
   )
 end
 
@@ -344,12 +324,13 @@ try
   println("Initial F(x) = $(circle_cubic_system(x_init))")
   println("Initial ||F(x)|| = $(norm(circle_cubic_system(x_init)))")
   println(
-    "Initial energy E(x) = $(Energies.energy(energy_circle_cubic, x_init))",
+    "Initial energy E(x) = $(Energies.energy(energy_circle_cubic, x_init))"
   )
 
   # Solve using domain decomposition
-  x_sol, E_sol, E_hist_cc, sols_cc, resnorm_hist_cc =
-    Solvers.var_dd(energy_circle_cubic, part_cc, maxiter = 50, tol = 1e-5)
+  x_sol, E_sol, E_hist_cc, sols_cc, resnorm_hist_cc = Solvers.var_dd(
+    energy_circle_cubic, part_cc; maxiter=50, tol=1e-5
+  )
 
   println("\nSolution found: x = $(x_sol)")
   F_sol = circle_cubic_system(x_sol)
@@ -368,7 +349,7 @@ try
   if norm(F_sol) < 1e-6
     println("✓ Nonlinear algebraic system solved successfully!")
     println(
-      "  Solution represents intersection of unit circle and cubic curve.",
+      "  Solution represents intersection of unit circle and cubic curve."
     )
   else
     println("⚠ System not fully converged, residual = $(norm(F_sol))")
@@ -402,7 +383,7 @@ end
 function synthetic_sys_gradient(x::Vector{Float64})
   F = synth_system(x)
   J = zeros(5, 5)
-  for i = 1:5
+  for i in 1:5
     J[1, i] = 2 * x[i]
   end
   J[2, 1] = exp(x[1])
@@ -416,7 +397,7 @@ function synthetic_sys_gradient(x::Vector{Float64})
   J[4, 3] = x[4]
   J[4, 4] = x[3]
   J[4, 5] = 3 * x[5]^2
-  for i = 1:5
+  for i in 1:5
     J[5, i] = 1
   end
   return J' * F  # ∇E = Jᵀ F
@@ -438,15 +419,12 @@ try
   println("Initial F(x) = $(synth_system(x_init2))")
   println("Initial ||F(x)|| = $(norm(synth_system(x_init2)))")
   println(
-    "Initial energy E(x) = $(Energies.energy(energy_synthetic_system, x_init2))",
+    "Initial energy E(x) = $(Energies.energy(energy_synthetic_system, x_init2))"
   )
 
   # Solve using domain decomposition
   x_sol2, E_sol2, E_hist_synth, sols_synth = Solvers.var_dd(
-    energy_synthetic_system,
-    part_synth,
-    maxiter = 10000,
-    tol = 1e-5,
+    energy_synthetic_system, part_synth; maxiter=10000, tol=1e-5
   )
 
   println("\nSolution found: x = $(x_sol2)")
@@ -465,7 +443,7 @@ try
   if norm(F_sol2) < 1e-6
     println("✓ Nonlinear algebraic system solved successfully!")
     println(
-      "  Solution represents intersection of unit circle and cubic curve.",
+      "  Solution represents intersection of unit circle and cubic curve."
     )
   else
     println("⚠ System not fully converged, residual = $(norm(F_sol2))")
