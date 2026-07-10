@@ -13,6 +13,8 @@ using VariationalDomainDecomposition.FEMDiscretizations
 using VariationalDomainDecomposition.Energies
 using VariationalDomainDecomposition.Solvers
 using Gridap
+using GridapDistributed
+using Metis
 using Arpack
 using LinearAlgebra
 using SparseArrays
@@ -68,6 +70,24 @@ schroedinger_setup(N, m, overlap) = FEMDiscretizations.FEM_Schroedinger(
   f = (x -> 1.0),
   overlap = overlap,
 )
+
+"Non-overlapping METIS cell owner and overlap multiplicity on the N x N mesh."
+function metis_cell_partition(N, m, overlap)
+  model = CartesianDiscreteModel(
+    (0, 1.0, 0, 1.0),
+    (1.0 * N, 1.0 * N);
+    isperiodic = (false, false),
+  )
+  g = GridapDistributed.compute_cell_graph(model)
+  owner = Int.(Metis.partition(g, m))
+  elpar = FEMDiscretizations.create_elements_partition(Int32.(owner), m)
+  FEMDiscretizations.create_overlapping_elements_partition!(elpar, g, m, overlap)
+  mult = zeros(Int, length(owner))
+  for elems in elpar, el in elems
+    mult[el] += 1
+  end
+  return owner, mult
+end
 
 "Reference lowest eigenvalue of the discrete pencil (K, M) via Arpack."
 function reference_lambda(K, M)

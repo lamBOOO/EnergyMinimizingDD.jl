@@ -98,6 +98,64 @@ function add_partition_boundaries!(ax, owner_grid; color = (:black, 0.55), linew
   lines!(ax, xs, ys; color = color, linewidth = linewidth)
 end
 
+function legend_line_marker_elements(methods, markers)
+  return [
+    [
+      LineElement(color = color_for(i), linewidth = 2.5),
+      MarkerElement(
+        color = color_for(i),
+        marker = markers[method],
+        markersize = MARKERSIZE,
+      ),
+    ] for (i, method) in enumerate(methods)
+  ]
+end
+
+function add_partition_inset!(figpos, parts, m; halign = 1.03, valign = 0.97)
+  pmask = parts.m .== m
+  N = parts.N[findfirst(pmask)]
+  pax = Axis(
+    figpos;
+    width = Relative(0.3),
+    height = Relative(0.3),
+    halign = halign,
+    valign = valign,
+    tellwidth = false,
+    tellheight = false,
+    aspect = DataAspect(),
+    limits = (0, 1, 0, 1),
+    xticksvisible = false,
+    yticksvisible = false,
+    xticklabelsvisible = false,
+    yticklabelsvisible = false,
+    xlabelvisible = false,
+    ylabelvisible = false,
+  )
+  translate!(pax.blockscene, 0, 0, 150)
+  hidedecorations!(pax)
+  hidespines!(pax)
+
+  owner_grid = Matrix(reshape(Int.(pick(parts, :owner, pmask)), N, N)')
+  mult_grid = Matrix(reshape(Int.(pick(parts, :mult, pmask)), N, N)')
+  cell_centers = collect(range(1 / (2N), 1 - 1 / (2N); length = N))
+  heatmap!(
+    pax,
+    cell_centers,
+    cell_centers,
+    float.(owner_grid);
+    colormap = :Spectral_9,
+  )
+  heatmap!(
+    pax,
+    cell_centers,
+    cell_centers,
+    [RGBAf(0, 0, 0, mult_grid[i, j] > 1 ? 0.1f0 * mult_grid[i, j] : 0.0f0)
+     for i in axes(mult_grid, 1), j in axes(mult_grid, 2)];
+  )
+  add_partition_boundaries!(pax, owner_grid)
+  return pax
+end
+
 # ---------------------------------------------------------------------------
 # Fig 1: problem setup illustration (partition, overlap, solutions)
 # ---------------------------------------------------------------------------
@@ -566,22 +624,35 @@ end
 # ---------------------------------------------------------------------------
 function fig12_poisson_cmp()
   tbl = loadtable("study8_linear_cmp.csv")
+  parts = loadtable("study8_partitions.csv")
   ms = sort(unique(tbl.m))
   labels = Dict(
-    "var_dd" => "variational DD",
+    "var_dd" => "varDD",
     "as" => "damped AS",
     "ras" => "RAS",
-    "pcg_as" => "CG + AS",
+    "pcg_as" => "CG+AS",
   )
   methods = ("var_dd", "as", "ras", "pcg_as")
-  fig = Figure(size = (330 * length(ms), 350))
+  markers = Dict(
+    "var_dd" => :circle,
+    "as" => :rect,
+    "ras" => :utriangle,
+    "pcg_as" => :diamond,
+  )
+  finite_res = tbl.resnorm[tbl.resnorm .> 0]
+  ylims = (1e-10 * 0.5, maximum(finite_res) * 3)
+  ytick_exps = sort(collect(floor(Int, log10(ylims[2])):-2:ceil(Int, log10(ylims[1]))))
+  yticks = LogTicks(ytick_exps)
+  fig = Figure(size = (330 * length(ms), 330))
   for (j, m) in enumerate(ms)
     ax = Axis(
       fig[1, j];
       xlabel = "subdomain solves",
-      ylabel = "residual norm",
+      ylabel = j == 1 ? "residual norm ‖Axₖ-b‖₂" : "",
       yscale = log10,
+      yticks = yticks,
       title = "m = $m",
+      limits = (nothing, ylims),
     )
     for (i, method) in enumerate(methods)
       mask = (tbl.m .== m) .& (tbl.method .== method) .& (tbl.resnorm .> 1e-14)
@@ -591,10 +662,19 @@ function fig12_poisson_cmp()
         logfloor(pick(tbl, :resnorm, mask));
         label = labels[method],
         color = color_for(i),
+        marker = markers[method],
       )
     end
-    j == 1 && add_legend!(ax; position = :rt)
+    add_partition_inset!(fig[1, j], parts, m)
   end
+  Legend(
+    fig[2, 1:length(ms)],
+    legend_line_marker_elements(methods, markers),
+    [labels[method] for method in methods];
+    orientation = :horizontal,
+    framevisible = true,
+  )
+  rowgap!(fig.layout, 8)
   savefigs(fig, "fig12_poisson_cmp")
 end
 
@@ -620,7 +700,7 @@ function fig13_evp_cmp()
   ylims = (1e-6 * 0.5, maximum(finite_res) * 3)
   ytick_exps = sort(collect(floor(Int, log10(ylims[2])):-2:ceil(Int, log10(ylims[1]))))
   yticks = LogTicks(ytick_exps)
-  fig = Figure(size = (330 * length(ms), 300))
+  fig = Figure(size = (330 * length(ms), 330))
   for (j, m) in enumerate(ms)
     ax = Axis(
       fig[1, j];
@@ -646,64 +726,16 @@ function fig13_evp_cmp()
         marker = markers[method],
       )
     end
-    # if j == 1
-      elements = [
-        [
-          LineElement(
-            color = color_for(i),
-            linewidth = 2.5),
-          MarkerElement(
-            color = color_for(i),
-            marker = markers[method],
-            markersize = MARKERSIZE,
-          ),
-        ] for (i, method) in enumerate(methods)
-      ]
-      axislegend(ax, elements, [labels[method] for method in methods]; position = :rt, framevisible = true)
-    # end
-
-    pmask = parts.m .== m
-    N = parts.N[findfirst(pmask)]
-    pax = Axis(
-      fig[1, j];
-      width = Relative(0.3),
-      height = Relative(0.3),
-      halign = -0.03,
-      valign = 0.03,
-      tellwidth = false,
-      tellheight = false,
-      aspect = DataAspect(),
-      limits = (0, 1, 0, 1),
-      xticksvisible = false,
-      yticksvisible = false,
-      xticklabelsvisible = false,
-      yticklabelsvisible = false,
-      xlabelvisible = false,
-      ylabelvisible = false,
-    )
-    translate!(pax.blockscene, 0, 0, 150)
-    hidedecorations!(pax)
-    hidespines!(pax)
-    owner_grid = Matrix(reshape(Int.(pick(parts, :owner, pmask)), N, N)')
-    mult_grid = Matrix(reshape(Int.(pick(parts, :mult, pmask)), N, N)')
-    cell_centers = collect(range(1 / (2N), 1 - 1 / (2N); length = N))
-    heatmap!(
-      pax,
-      cell_centers,
-      cell_centers,
-      float.(owner_grid);
-      colormap = :Spectral_9,
-      # colorrange = (0.5, m + 0.5),  # keep same colors
-    )
-    heatmap!(
-      pax,
-      cell_centers,
-      cell_centers,
-      [RGBAf(0, 0, 0, mult_grid[i, j] > 1 ? 0.1f0 * mult_grid[i, j] : 0.0f0)
-       for i in axes(mult_grid, 1), j in axes(mult_grid, 2)];
-    )
-    add_partition_boundaries!(pax, owner_grid)
+    add_partition_inset!(fig[1, j], parts, m)
   end
+  Legend(
+    fig[2, 1:length(ms)],
+    legend_line_marker_elements(methods, markers),
+    [labels[method] for method in methods];
+    orientation = :horizontal,
+    framevisible = true,
+  )
+  rowgap!(fig.layout, 8)
   savefigs(fig, "fig13_evp_cmp")
 end
 

@@ -9,28 +9,9 @@
 isdefined(Main, :PAPER_COMMON) || include("common.jl")
 
 using IterativeSolvers
-using GridapDistributed
-using Metis
 
 rayleigh(K, M, x) = dot(x, K * x) / dot(x, M * x)
 evp_resnorm(K, M, x, lambda) = norm(K * x - lambda .* (M * x))
-
-function metis_cell_partition(N, m, overlap)
-  model = CartesianDiscreteModel(
-    (0, 1.0, 0, 1.0),
-    (1.0 * N, 1.0 * N);
-    isperiodic = (false, false),
-  )
-  g = GridapDistributed.compute_cell_graph(model)
-  owner = Int.(Metis.partition(g, m))
-  elpar = FEMDiscretizations.create_elements_partition(Int32.(owner), m)
-  FEMDiscretizations.create_overlapping_elements_partition!(elpar, g, m, overlap)
-  mult = zeros(Int, length(owner))
-  for elems in elpar, el in elems
-    mult[el] += 1
-  end
-  return owner, mult
-end
 
 function normalize_M!(x, M)
   x ./= sqrt(dot(x, M * x))

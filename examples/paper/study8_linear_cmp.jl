@@ -61,7 +61,8 @@ function pcg_as(K, b, S; maxiter, tol)
 end
 
 function run_study8()
-  if !needs_run("study8_linear_cmp.csv")
+  files = ("study8_linear_cmp.csv", "study8_partitions.csv")
+  if !needs_run(files...)
     println("study8: cached, skipping")
     return
   end
@@ -80,6 +81,13 @@ function run_study8()
     solves = Int[],
     resnorm = Float64[],
   )
+  part_rows = (
+    m = Int[],
+    N = Int[],
+    idx = Int[],
+    owner = Int[],
+    mult = Int[],
+  )
   record(method, m, hist) = for (s, rn) in hist
     push!(rows.method, method)
     push!(rows.m, m)
@@ -90,6 +98,15 @@ function run_study8()
   for m in ms
     K, M, b, dofspar, U = laplace_setup(N, m, overlap)
     S = schwarz_setup(K, dofspar)
+
+    owner, mult = metis_cell_partition(N, m, overlap)
+    for idx in eachindex(owner)
+      push!(part_rows.m, m)
+      push!(part_rows.N, N)
+      push!(part_rows.idx, idx)
+      push!(part_rows.owner, owner[idx])
+      push!(part_rows.mult, mult[idx])
+    end
 
     # var_dd: resnorm_hist[k] = ||K u - b|| after sweep k (m solves per sweep)
     _, _, _, _, resnorm_hist = Solvers.var_dd(
@@ -108,6 +125,7 @@ function run_study8()
     println("  m = $m done (AS damping theta = $(round(theta; digits = 3)))")
   end
   savetable("study8_linear_cmp.csv", rows)
+  savetable("study8_partitions.csv", part_rows)
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__
