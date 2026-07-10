@@ -3,36 +3,100 @@
 
 isdefined(Main, :PAPER_COMMON) || include("common.jl")
 
-using Plots
-using Plots.PlotMeasures
+using CairoMakie
 
-default(
-  fontfamily = "Computer Modern",
-  linewidth = 2.5,
-  framestyle = :box,
-  grid = true,
-  gridalpha = 0.12,
-  labelfontsize = 12,
-  tickfontsize = 10,
-  legendfontsize = 10,
-  titlefontsize = 13,
-  dpi = 300,
+set_theme!(
+  Theme(
+    fontsize = 18,
+    # font = "Latin Modern Roman",
+    Axis = (
+      xticklabelsize = 16,
+      yticklabelsize = 16,
+      xlabelsize = 20,
+      ylabelsize = 20,
+      titlesize = 20,
+      # titlefont = "Latin Modern Roman",
+      xgridvisible = true,
+      ygridvisible = true,
+      xgridcolor = (:black, 0.12),
+      ygridcolor = (:black, 0.12),
+      spinewidth = 1.2,
+    ),
+    Axis3 = (
+      titlesize = 14,
+      # titlefont = "Latin Modern Roman",
+      xticklabelsize = 10,
+      yticklabelsize = 10,
+      zticklabelsize = 10,
+    ),
+    Lines = (linewidth = 2.5,),
+    Scatter = (markersize = 8, strokewidth = 0),
+    Legend = (labelsize = 16, framevisible = true),
+  ),
 )
+
+const PALETTE = Makie.wong_colors()
+const MARKERSIZE = 8
 
 "Save a figure as PDF (vector, for LaTeX) and PNG (preview) into figures/."
 function savefigs(fig, name)
-  savefig(fig, joinpath(FIG_DIR, name * ".pdf"))
-  savefig(fig, joinpath(FIG_DIR, name * ".png"))
+  save(joinpath(FIG_DIR, name * ".pdf"), fig)
+  save(joinpath(FIG_DIR, name * ".png"), fig; px_per_unit = 2)
   println("  saved $(name).{pdf,png}")
   return fig
 end
 
-# Common marker style for convergence panels
-const MSTYLE =
-  (marker = :circle, markersize = 3.5, markerstrokewidth = 0)
-
 # Select entries of column `col` where `mask` holds (columntable helper)
 pick(tbl, col, mask) = collect(getproperty(tbl, col)[mask])
+
+function add_series!(
+  ax,
+  x,
+  y;
+  label = nothing,
+  color = nothing,
+  linestyle = :solid,
+  marker = :circle,
+  markersize = MARKERSIZE,
+  linewidth = 2.5,
+)
+  c = isnothing(color) ? PALETTE[1] : color
+  lines!(ax, x, y; label = label, color = c, linestyle = linestyle, linewidth = linewidth)
+  scatter!(ax, x, y; color = c, marker = marker, markersize = markersize)
+end
+
+function add_legend!(ax; position = :rt)
+  axislegend(ax; position = position, framevisible = true)
+end
+
+function color_for(i)
+  PALETTE[mod1(i, length(PALETTE))]
+end
+
+function add_partition_boundaries!(ax, owner_grid; color = (:black, 0.55), linewidth = 0.45)
+  n = size(owner_grid, 1)
+  xs = Float64[]
+  ys = Float64[]
+  function add_segment!(x1, y1, x2, y2)
+    append!(xs, (x1, x2, NaN))
+    append!(ys, (y1, y2, NaN))
+  end
+  for i in 1:n-1, j in 1:n
+    owner_grid[i, j] == owner_grid[i+1, j] && continue
+    x = i / n
+    add_segment!(x, (j - 1) / n, x, j / n)
+  end
+  for i in 1:n, j in 1:n-1
+    owner_grid[i, j] == owner_grid[i, j+1] && continue
+    y = j / n
+    add_segment!((i - 1) / n, y, i / n, y)
+  end
+  add_segment!(0, 0, 1, 0)
+  add_segment!(1, 0, 1, 1)
+  add_segment!(1, 1, 0, 1)
+  add_segment!(0, 1, 0, 0)
+  lines!(ax, xs, ys; color = color, linewidth = linewidth)
+end
 
 # ---------------------------------------------------------------------------
 # Fig 1: problem setup illustration (partition, overlap, solutions)
@@ -42,102 +106,129 @@ function fig01_setup()
   gs = loadtable("study1_schroedinger.csv")
   plap = loadtable("study1_plap.csv")
 
+  fig = Figure(size = (880, 780))
+
   Npart = part.N[1]
-  xs = interior_nodes(Npart)
+  xs = collect(interior_nodes(Npart))
   nsub = maximum(part.owner)
 
-  p1 = heatmap(
+  ax1 = Axis(
+    fig[1, 1];
+    title = "METIS partition (owner)",
+    xlabel = "x1",
+    ylabel = "x2",
+    aspect = DataAspect(),
+    limits = (0, 1, 0, 1),
+  )
+  heatmap!(
+    ax1,
     xs,
     xs,
     field_matrix(float.(part.owner), Npart);
-    title = "METIS partition (owner)",
-    color = cgrad(:tab10, nsub; categorical = true),
-    colorbar = false,
-    aspect_ratio = :equal,
-    xlims = (0, 1),
-    ylims = (0, 1),
+    colormap = :tab10,
+    colorrange = (0.5, nsub + 0.5),
+  )
+
+  ax2 = Axis(
+    fig[1, 2];
+    title = "overlap multiplicity",
     xlabel = "x1",
     ylabel = "x2",
+    aspect = DataAspect(),
+    limits = (0, 1, 0, 1),
   )
-  p2 = heatmap(
+  hm2 = heatmap!(
+    ax2,
     xs,
     xs,
     field_matrix(float.(part.mult), Npart);
-    title = "overlap multiplicity",
-    color = cgrad(:viridis, maximum(part.mult); categorical = true),
-    colorbar_ticks = collect(1:maximum(part.mult)),
-    aspect_ratio = :equal,
-    xlims = (0, 1),
-    ylims = (0, 1),
-    xlabel = "x1",
-    ylabel = "x2",
+    colormap = :viridis,
+    colorrange = (0.5, maximum(part.mult) + 0.5),
   )
+  Colorbar(fig[1, 3], hm2; ticks = collect(1:maximum(part.mult)))
+
   Ngs = gs.N[1]
-  p3 = heatmap(
-    all_nodes(Ngs),
-    all_nodes(Ngs),
-    field_matrix_with_bc(gs.value, Ngs);
+  ax3 = Axis(
+    fig[2, 1];
     title = "Schroedinger ground state",
-    color = :viridis,
-    aspect_ratio = :equal,
-    xlims = (0, 1),
-    ylims = (0, 1),
     xlabel = "x1",
     ylabel = "x2",
+    aspect = DataAspect(),
+    limits = (0, 1, 0, 1),
   )
+  heatmap!(
+    ax3,
+    collect(all_nodes(Ngs)),
+    collect(all_nodes(Ngs)),
+    field_matrix_with_bc(gs.value, Ngs);
+    colormap = :viridis,
+  )
+
   Npl = plap.N[1]
-  p4 = heatmap(
-    all_nodes(Npl),
-    all_nodes(Npl),
-    field_matrix_with_bc(plap.value, Npl);
+  ax4 = Axis(
+    fig[2, 2];
     title = "p-Laplacian solution (p = 3)",
-    color = :viridis,
-    aspect_ratio = :equal,
-    xlims = (0, 1),
-    ylims = (0, 1),
     xlabel = "x1",
     ylabel = "x2",
+    aspect = DataAspect(),
+    limits = (0, 1, 0, 1),
   )
-  fig = plot(p1, p2, p3, p4; layout = (2, 2), size = (880, 780), margin = 3mm)
+  heatmap!(
+    ax4,
+    collect(all_nodes(Npl)),
+    collect(all_nodes(Npl)),
+    field_matrix_with_bc(plap.value, Npl);
+    colormap = :viridis,
+  )
+
+  colgap!(fig.layout, 12)
+  rowgap!(fig.layout, 12)
   savefigs(fig, "fig01_setup")
 end
 
 # ---------------------------------------------------------------------------
 # Fig 2: EVP convergence histories (sweep m, sweep overlap)
 # ---------------------------------------------------------------------------
-function conv_panel(tbl, values, labelfn; kwargs...)
-  p = plot(;
+function conv_panel!(figpos, tbl, values, labelfn; title = "")
+  ax = Axis(
+    figpos;
     xlabel = "iteration",
     ylabel = "eigenvalue error",
-    yscale = :log10,
-    legend = :topright,
-    kwargs...,
+    yscale = log10,
+    title = title,
   )
-  for v in values
+  for (i, v) in enumerate(values)
     mask = (tbl.param .== v) .& (tbl.err .> 1e-13)
-    plot!(
-      p,
+    add_series!(
+      ax,
       pick(tbl, :iter, mask),
       logfloor(pick(tbl, :err, mask));
       label = labelfn(v),
-      MSTYLE...,
+      color = color_for(i),
     )
   end
-  return p
+  add_legend!(ax; position = :rt)
+  return ax
 end
 
 function fig02_evp_convergence()
   tm = loadtable("study2_sweep_m.csv")
   to = loadtable("study2_sweep_olap.csv")
-  p1 =
-    conv_panel(tm, sort(unique(tm.param)), v -> "m = $v"; title = "overlap = 2")
-  p2 = conv_panel(
+  fig = Figure(size = (900, 350))
+  conv_panel!(
+    fig[1, 1],
+    tm,
+    sort(unique(tm.param)),
+    v -> "m = $v";
+    title = "overlap = 2",
+  )
+  conv_panel!(
+    fig[1, 2],
     to,
     sort(unique(to.param)),
     v -> "overlap = $v";
     title = "m = 6",
   )
-  fig = plot(p1, p2; layout = (1, 2), size = (900, 350), margin = 5mm)
   savefigs(fig, "fig02_evp_convergence")
 end
 
@@ -146,24 +237,20 @@ end
 # ---------------------------------------------------------------------------
 function fig03_evp_baseline()
   tbl = loadtable("study2_baseline.csv")
-  fig = plot(;
-    xlabel = "iteration",
-    ylabel = "eigenvalue error",
-    yscale = :log10,
-    legend = :topright,
-    size = (600, 400),
-  )
-  for (method, label) in
-      (("var_dd", "variational DD"), ("inverse_iteration", "inverse iteration"))
+  fig = Figure(size = (600, 400))
+  ax = Axis(fig[1, 1]; xlabel = "iteration", ylabel = "eigenvalue error", yscale = log10)
+  for (i, (method, label)) in
+      enumerate((("var_dd", "variational DD"), ("inverse_iteration", "inverse iteration")))
     mask = (tbl.method .== method) .& (tbl.err .> 1e-13)
-    plot!(
-      fig,
+    add_series!(
+      ax,
       pick(tbl, :iter, mask),
       logfloor(pick(tbl, :err, mask));
       label = label,
-      MSTYLE...,
+      color = color_for(i),
     )
   end
+  add_legend!(ax; position = :rt)
   savefigs(fig, "fig03_evp_baseline")
 end
 
@@ -174,30 +261,19 @@ function fig04_evp_haccuracy()
   tbl = loadtable("study2_haccuracy.csv")
   hs = collect(tbl.h)
   errs = collect(tbl.err)
-  fig = plot(
-    hs,
-    errs;
-    xscale = :log10,
-    yscale = :log10,
+  fig = Figure(size = (600, 400))
+  ax = Axis(
+    fig[1, 1];
     xlabel = "mesh size h",
     ylabel = "eigenvalue error vs exact",
-    label = "var_dd (converged)",
-    legend = :topleft,
-    size = (600, 400),
-    MSTYLE...,
+    xscale = log10,
+    yscale = log10,
   )
-  # O(h^2) reference line anchored at the finest mesh
+  add_series!(ax, hs, errs; label = "var_dd (converged)", color = color_for(1))
   href = [minimum(hs), maximum(hs)]
   eref = errs[argmin(hs)] .* (href ./ minimum(hs)) .^ 2
-  plot!(
-    fig,
-    href,
-    eref;
-    label = "quadratic reference",
-    linestyle = :dash,
-    linewidth = 1.5,
-    color = :black,
-  )
+  lines!(ax, href, eref; label = "quadratic reference", color = :black, linestyle = :dash, linewidth = 1.5)
+  add_legend!(ax; position = :lt)
   savefigs(fig, "fig04_evp_haccuracy")
 end
 
@@ -212,48 +288,48 @@ function fig05_robustness()
   Ns = sort(unique(tbl.N))
   ms = sort(unique(tbl.m))
   N_fix = maximum(Ns) > 40 ? 40 : maximum(Ns)
+  fig = Figure(size = (900, 350))
 
-  p1 = plot(;
+  ax1 = Axis(
+    fig[1, 1];
     xlabel = "number of subdomains m",
     ylabel = "iterations",
     title = "overlap = 2",
-    legend = :topleft,
     xticks = ms,
   )
   for (ci, N) in enumerate(Ns), (problem, (ls, plabel)) in PROBLEM_STYLE
     mask = (tbl.problem .== problem) .& (tbl.N .== N) .& (tbl.overlap .== 2)
-    plot!(
-      p1,
+    add_series!(
+      ax1,
       pick(tbl, :m, mask),
       pick(tbl, :iters, mask);
       label = "$plabel, N = $N",
-      color = ci,
+      color = color_for(ci),
       linestyle = ls,
-      MSTYLE...,
     )
   end
+  add_legend!(ax1; position = :lt)
 
   olaps = sort(unique(tbl.overlap))
-  p2 = plot(;
+  ax2 = Axis(
+    fig[1, 2];
     xlabel = "overlap",
     ylabel = "iterations",
     title = "N = $N_fix",
-    legend = :topright,
     xticks = olaps,
   )
   for (ci, m) in enumerate(ms), (problem, (ls, plabel)) in PROBLEM_STYLE
     mask = (tbl.problem .== problem) .& (tbl.N .== N_fix) .& (tbl.m .== m)
-    plot!(
-      p2,
+    add_series!(
+      ax2,
       pick(tbl, :overlap, mask),
       pick(tbl, :iters, mask);
       label = "$plabel, m = $m",
-      color = ci,
+      color = color_for(ci),
       linestyle = ls,
-      MSTYLE...,
     )
   end
-  fig = plot(p1, p2; layout = (1, 2), size = (900, 350), margin = 5mm)
+  add_legend!(ax2; position = :rt)
   savefigs(fig, "fig05_robustness")
 end
 
@@ -264,22 +340,24 @@ function fig06_timing()
   tbl = loadtable("study3_robustness.csv")
   ms = sort(unique(tbl.m))
   Nticks = sort(unique(tbl.N))
-  p1 = plot(;
+  fig = Figure(size = (900, 350))
+
+  ax1 = Axis(
+    fig[1, 1];
     xlabel = "mesh parameter N",
     ylabel = "wall-clock time [s]",
-    xscale = :log10,
-    yscale = :log10,
+    xscale = log10,
+    yscale = log10,
     xticks = (Nticks, string.(Nticks)),
-    legend = :topleft,
     title = "time per solve",
   )
-  p2 = plot(;
+  ax2 = Axis(
+    fig[1, 2];
     xlabel = "mesh parameter N",
     ylabel = "time per iteration [s]",
-    xscale = :log10,
-    yscale = :log10,
+    xscale = log10,
+    yscale = log10,
     xticks = (Nticks, string.(Nticks)),
-    legend = :topleft,
     title = "time per iteration",
   )
   for (ci, m) in enumerate(ms), (problem, (ls, plabel)) in PROBLEM_STYLE
@@ -292,10 +370,11 @@ function fig06_timing()
     Ns = pick(tbl, :N, mask)
     ts = pick(tbl, :time_s, mask)
     its = pick(tbl, :iters, mask)
-    plot!(p1, Ns, ts; label = "$plabel, m = $m", color = ci, linestyle = ls, MSTYLE...)
-    plot!(p2, Ns, ts ./ its; label = "$plabel, m = $m", color = ci, linestyle = ls, MSTYLE...)
+    add_series!(ax1, Ns, ts; label = "$plabel, m = $m", color = color_for(ci), linestyle = ls)
+    add_series!(ax2, Ns, ts ./ its; label = "$plabel, m = $m", color = color_for(ci), linestyle = ls)
   end
-  fig = plot(p1, p2; layout = (1, 2), size = (900, 350), margin = 5mm)
+  add_legend!(ax1; position = :lt)
+  add_legend!(ax2; position = :lt)
   savefigs(fig, "fig06_timing")
 end
 
@@ -305,47 +384,32 @@ end
 function fig07_poisson()
   tbl = loadtable("study4_poisson.csv")
   ms = sort(unique(tbl.m))
-  p1 = plot(;
-    xlabel = "iteration",
-    ylabel = "energy gap",
-    yscale = :log10,
-    legend = :topright,
-  )
-  p2 = plot(;
-    xlabel = "iteration",
-    ylabel = "residual norm",
-    yscale = :log10,
-    legend = :topright,
-  )
-  for m in ms
+  fig = Figure(size = (900, 350))
+  ax1 = Axis(fig[1, 1]; xlabel = "iteration", ylabel = "energy gap", yscale = log10)
+  ax2 = Axis(fig[1, 2]; xlabel = "iteration", ylabel = "residual norm", yscale = log10)
+  for (i, m) in enumerate(ms)
     mask_e =
       (tbl.m .== m) .& (tbl.quantity .== "energy_gap") .& (tbl.value .> 1e-14)
     mask_r =
       (tbl.m .== m) .& (tbl.quantity .== "resnorm") .& (tbl.value .> 1e-14)
-    plot!(
-      p1,
+    add_series!(
+      ax1,
       pick(tbl, :iter, mask_e),
       logfloor(pick(tbl, :value, mask_e));
       label = "m = $m",
-      MSTYLE...,
+      color = color_for(i),
     )
-    plot!(
-      p2,
+    add_series!(
+      ax2,
       pick(tbl, :iter, mask_r),
       logfloor(pick(tbl, :value, mask_r));
       label = "m = $m",
-      MSTYLE...,
+      color = color_for(i),
     )
   end
-  hline!(
-    p2,
-    [1e-12];
-    label = "tolerance",
-    linestyle = :dash,
-    linewidth = 1.5,
-    color = :black,
-  )
-  fig = plot(p1, p2; layout = (1, 2), size = (900, 350), margin = 5mm)
+  hlines!(ax2, [1e-12]; label = "tolerance", color = :black, linestyle = :dash, linewidth = 1.5)
+  add_legend!(ax1; position = :rt)
+  add_legend!(ax2; position = :rt)
   savefigs(fig, "fig07_poisson")
 end
 
@@ -356,39 +420,37 @@ function fig08_plaplacian()
   conv = loadtable("study5_conv.csv")
   summ = loadtable("study5_summary.csv")
   ps = sort(unique(conv.p))
-  p1 = plot(;
+  fig = Figure(size = (900, 350))
+  ax1 = Axis(
+    fig[1, 1];
     xlabel = "iteration",
     ylabel = "energy gap to Newton reference",
-    yscale = :log10,
-    legend = :topright,
+    yscale = log10,
   )
-  for p in ps
+  for (i, p) in enumerate(ps)
     mask = (conv.p .== p) .& (abs.(conv.energy_gap) .> 1e-13)
-    plot!(
-      p1,
+    add_series!(
+      ax1,
       pick(conv, :iter, mask),
       logfloor(abs.(pick(conv, :energy_gap, mask)));
       label = "p = $p",
-      MSTYLE...,
+      color = color_for(i),
     )
   end
-  p2 = scatter(
-    collect(summ.p),
-    collect(summ.relerr);
-    yscale = :log10,
+  add_legend!(ax1; position = :rt)
+
+  ax2 = Axis(
+    fig[1, 2];
     xlabel = "exponent p",
     ylabel = "rel. dof error vs Newton",
-    label = "",
-    markersize = 7,
-    markerstrokewidth = 0,
+    yscale = log10,
     xticks = collect(summ.p),
-    xlims = (minimum(summ.p) - 0.5, maximum(summ.p) + 0.5),
-    ylims = (1e-7, 1e-4),
+    limits = ((minimum(summ.p) - 0.5, maximum(summ.p) + 0.5), (1e-7, 1e-4)),
   )
+  scatter!(ax2, collect(summ.p), collect(summ.relerr); color = color_for(1), markersize = 12)
   for (pv, it, re) in zip(summ.p, summ.iters, summ.relerr)
-    annotate!(p2, pv, re * 3, text("$it iters", 9, :center))
+    text!(ax2, pv, re * 3; text = "$it iters", align = (:center, :center), fontsize = 14)
   end
-  fig = plot(p1, p2; layout = (1, 2), size = (900, 350), margin = 5mm)
   savefigs(fig, "fig08_plaplacian")
 end
 
@@ -399,35 +461,19 @@ function fig09_heat_warmstart()
   wc = loadtable("study6_warmcold.csv")
   ts = loadtable("study6_tau.csv")
 
-  p1 = plot(;
-    xlabel = "time step n",
-    ylabel = "DD iterations per step",
-    legend = :right,
-  )
-  for (mode, label) in (("cold", "cold start"), ("warm", "warm start"))
+  fig = Figure(size = (900, 350))
+  ax1 = Axis(fig[1, 1]; xlabel = "time step n", ylabel = "DD iterations per step")
+  for (i, (mode, label)) in enumerate((("cold", "cold start"), ("warm", "warm start")))
     mask = wc.mode .== mode
-    plot!(
-      p1,
-      pick(wc, :step, mask),
-      pick(wc, :iters, mask);
-      label = label,
-      MSTYLE...,
-    )
+    add_series!(ax1, pick(wc, :step, mask), pick(wc, :iters, mask); label = label, color = color_for(i))
   end
-  ylims!(p1, 0, maximum(wc.iters) + 2)
+  ylims!(ax1, 0, maximum(wc.iters) + 2)
+  add_legend!(ax1; position = :rc)
 
   taus = sort(unique(ts.tau))
   totals = [sum(pick(ts, :iters, ts.tau .== tau)) for tau in taus]
-  p2 = plot(
-    taus,
-    totals;
-    xscale = :log10,
-    xlabel = "time step size tau",
-    ylabel = "total DD iterations (T = 0.2)",
-    label = "",
-    MSTYLE...,
-  )
-  fig = plot(p1, p2; layout = (1, 2), size = (900, 350), margin = 5mm)
+  ax2 = Axis(fig[1, 2]; xlabel = "time step size tau", ylabel = "total DD iterations (T = 0.2)", xscale = log10)
+  add_series!(ax2, taus, totals; color = color_for(1))
   savefigs(fig, "fig09_heat_warmstart")
 end
 
@@ -437,39 +483,31 @@ end
 function fig10_heat_dissipation()
   ts = loadtable("study6_tau.csv")
   taus = sort(unique(ts.tau))
-  p1 = plot(;
-    xlabel = "t",
-    ylabel = "energy gap to steady state",
-    yscale = :log10,
-    legend = :topright,
-  )
-  p2 = plot(;
-    xlabel = "t",
-    ylabel = "rel. error vs direct solve",
-    yscale = :log10,
-    legend = :bottomright,
-  )
-  for tau in taus
+  fig = Figure(size = (900, 350))
+  ax1 = Axis(fig[1, 1]; xlabel = "t", ylabel = "energy gap to steady state", yscale = log10)
+  ax2 = Axis(fig[1, 2]; xlabel = "t", ylabel = "rel. error vs direct solve", yscale = log10)
+  for (i, tau) in enumerate(taus)
     mask = ts.tau .== tau
     label = @sprintf("tau = %.1e", tau)
-    plot!(
-      p1,
+    add_series!(
+      ax1,
       pick(ts, :t, mask),
       logfloor(pick(ts, :energy_gap, mask));
       label = label,
-      MSTYLE...,
-      markersize = 2.5,
+      color = color_for(i),
+      markersize = 6,
     )
-    plot!(
-      p2,
+    add_series!(
+      ax2,
       pick(ts, :t, mask),
       logfloor(pick(ts, :relerr, mask));
       label = label,
-      MSTYLE...,
-      markersize = 2.5,
+      color = color_for(i),
+      markersize = 6,
     )
   end
-  fig = plot(p1, p2; layout = (1, 2), size = (900, 350), margin = 5mm)
+  add_legend!(ax1; position = :rt)
+  add_legend!(ax2; position = :rb)
   savefigs(fig, "fig10_heat_dissipation")
 end
 
@@ -479,55 +517,47 @@ end
 function fig11_local3d()
   tbl = loadtable("study7_local3d.csv")
   N = tbl.N[1]
-  xs = all_nodes(N)
+  xs = collect(all_nodes(N))
   ks = sort(unique(tbl.iter))
   subs = sort(unique(tbl.sub[tbl.kind.=="update"]))
+  ncols = 1 + length(subs)
 
-  # include the zero Dirichlet boundary layer so surfaces reach the boundary
-  surf(vals; title = "", zlims = :auto) = surface(
-    xs,
-    xs,
-    field_matrix_with_bc(vals, N);
-    title = title,
-    color = :viridis,
-    colorbar = false,
-    xticks = false,
-    yticks = false,
-    zticks = true,
-    zlims = zlims,
-    titlefontsize = 11,
-    camera = (40, 35),
-  )
-
-  panels = []
+  fig = Figure(size = (330 * ncols, 300 * length(ks)))
   for (ri, k) in enumerate(ks)
     mask_u = (tbl.iter .== k) .& (tbl.kind .== "solution")
-    push!(
-      panels,
-      surf(pick(tbl, :value, mask_u); title = "iterate after sweep $k"),
+    ax = Axis3(
+      fig[ri, 1];
+      title = "iterate after sweep $k",
+      azimuth = 0.7pi,
+      elevation = 0.22pi,
+      xticksvisible = false,
+      yticksvisible = false,
     )
-    # shared z-range across this sweep's updates (shows their decay)
+    surface!(ax, xs, xs, field_matrix_with_bc(pick(tbl, :value, mask_u), N); colormap = :viridis)
+
     mask_all = (tbl.iter .== k) .& (tbl.kind .== "update")
     zmax = maximum(abs.(tbl.value[mask_all])) + 1e-12
-    for s in subs
+    for (cj, s) in enumerate(subs)
       mask = mask_all .& (tbl.sub .== s)
-      push!(
-        panels,
-        surf(
-          pick(tbl, :value, mask);
-          title = ri == 1 ? "update, subdomain $s" : "",
-          zlims = (-zmax, zmax),
-        ),
+      axu = Axis3(
+        fig[ri, cj+1];
+        title = ri == 1 ? "update, subdomain $s" : "",
+        azimuth = 0.7pi,
+        elevation = 0.22pi,
+        xticksvisible = false,
+        yticksvisible = false,
       )
+      surface!(
+        axu,
+        xs,
+        xs,
+        field_matrix_with_bc(pick(tbl, :value, mask), N);
+        colormap = :viridis,
+        colorrange = (-zmax, zmax),
+      )
+      zlims!(axu, -zmax, zmax)
     end
   end
-  ncols = 1 + length(subs)
-  fig = plot(
-    panels...;
-    layout = (length(ks), ncols),
-    size = (330 * ncols, 300 * length(ks)),
-    margin = 1mm,
-  )
   savefigs(fig, "fig11_local3d")
 end
 
@@ -543,74 +573,137 @@ function fig12_poisson_cmp()
     "ras" => "RAS",
     "pcg_as" => "CG + AS",
   )
-  panels = []
-  for m in ms
-    p = plot(;
+  methods = ("var_dd", "as", "ras", "pcg_as")
+  fig = Figure(size = (330 * length(ms), 350))
+  for (j, m) in enumerate(ms)
+    ax = Axis(
+      fig[1, j];
       xlabel = "subdomain solves",
       ylabel = "residual norm",
-      yscale = :log10,
+      yscale = log10,
       title = "m = $m",
-      legend = m == first(ms) ? :topright : false,
     )
-    for method in ("var_dd", "as", "ras", "pcg_as")
+    for (i, method) in enumerate(methods)
       mask = (tbl.m .== m) .& (tbl.method .== method) .& (tbl.resnorm .> 1e-14)
-      plot!(
-        p,
+      add_series!(
+        ax,
         pick(tbl, :solves, mask),
         logfloor(pick(tbl, :resnorm, mask));
         label = labels[method],
-        MSTYLE...,
+        color = color_for(i),
       )
     end
-    push!(panels, p)
+    j == 1 && add_legend!(ax; position = :rt)
   end
-  fig = plot(
-    panels...;
-    layout = (1, length(panels)),
-    size = (330 * length(panels), 350),
-    margin = 4mm,
-  )
   savefigs(fig, "fig12_poisson_cmp")
 end
 
 # ---------------------------------------------------------------------------
-# Fig 13: EVP -- comparison against one-level LOBPCG+AS baseline
+# Fig 13: EVP residual -- comparison against one-level LOPSD/LOBPCG+AS baselines
 # ---------------------------------------------------------------------------
 function fig13_evp_cmp()
   tbl = loadtable("study9_evp_cmp.csv")
+  parts = loadtable("study9_partitions.csv")
   ms = sort(unique(tbl.m))
   labels = Dict(
     "var_dd" => "varDD",
     "lopsd_as" => "LOPSD+AS",
-    "lobpcg_as" => "LOBPCG + AS",
+    "lobpcg_as" => "LOBPCG+AS",
   )
-  panels = []
-  for m in ms
-    p = plot(;
+  methods = ("var_dd", "lopsd_as", "lobpcg_as")
+  markers = Dict(
+    "var_dd" => :circle,
+    "lopsd_as" => :rect,
+    "lobpcg_as" => :utriangle,
+  )
+  finite_res = tbl.resnorm[.!isnan.(tbl.resnorm) .& (tbl.resnorm .> 0)]
+  ylims = (1e-6 * 0.5, maximum(finite_res) * 3)
+  ytick_exps = sort(collect(floor(Int, log10(ylims[2])):-2:ceil(Int, log10(ylims[1]))))
+  yticks = LogTicks(ytick_exps)
+  fig = Figure(size = (330 * length(ms), 300))
+  for (j, m) in enumerate(ms)
+    ax = Axis(
+      fig[1, j];
       xlabel = "subdomain solves",
-      ylabel = "eigenvalue error",
-      yscale = :log10,
+      ylabel = j == 1 ? "residual norm ‖Axₖ-λₖxₖ‖₂" : "",
+      yscale = log10,
+      yticks = yticks,
       title = "m = $m",
-      legend = m == first(ms) ? :topright : false,
+      limits = (nothing, ylims),
     )
-    for method in ("var_dd", "lopsd_as", "lobpcg_as")
-      mask = (tbl.m .== m) .& (tbl.method .== method) .& (tbl.err .> 1e-14)
-      plot!(
-        p,
+    for (i, method) in enumerate(methods)
+      mask =
+        (tbl.m .== m) .&
+        (tbl.method .== method) .&
+        .!isnan.(tbl.resnorm) .&
+        (tbl.resnorm .> 0)
+      add_series!(
+        ax,
         pick(tbl, :solves, mask),
-        logfloor(pick(tbl, :err, mask));
+        logfloor(pick(tbl, :resnorm, mask));
         label = labels[method],
-        MSTYLE...,
+        color = color_for(i),
+        marker = markers[method],
       )
     end
-    push!(panels, p)
+    # if j == 1
+      elements = [
+        [
+          LineElement(
+            color = color_for(i),
+            linewidth = 2.5),
+          MarkerElement(
+            color = color_for(i),
+            marker = markers[method],
+            markersize = MARKERSIZE,
+          ),
+        ] for (i, method) in enumerate(methods)
+      ]
+      axislegend(ax, elements, [labels[method] for method in methods]; position = :rt, framevisible = true)
+    # end
+
+    pmask = parts.m .== m
+    N = parts.N[findfirst(pmask)]
+    pax = Axis(
+      fig[1, j];
+      width = Relative(0.3),
+      height = Relative(0.3),
+      halign = -0.03,
+      valign = 0.03,
+      tellwidth = false,
+      tellheight = false,
+      aspect = DataAspect(),
+      limits = (0, 1, 0, 1),
+      xticksvisible = false,
+      yticksvisible = false,
+      xticklabelsvisible = false,
+      yticklabelsvisible = false,
+      xlabelvisible = false,
+      ylabelvisible = false,
+    )
+    translate!(pax.blockscene, 0, 0, 150)
+    hidedecorations!(pax)
+    hidespines!(pax)
+    owner_grid = Matrix(reshape(Int.(pick(parts, :owner, pmask)), N, N)')
+    mult_grid = Matrix(reshape(Int.(pick(parts, :mult, pmask)), N, N)')
+    cell_centers = collect(range(1 / (2N), 1 - 1 / (2N); length = N))
+    heatmap!(
+      pax,
+      cell_centers,
+      cell_centers,
+      float.(owner_grid);
+      colormap = :Spectral_9,
+      # colorrange = (0.5, m + 0.5),  # keep same colors
+    )
+    heatmap!(
+      pax,
+      cell_centers,
+      cell_centers,
+      [RGBAf(0, 0, 0, mult_grid[i, j] > 1 ? 0.1f0 * mult_grid[i, j] : 0.0f0)
+       for i in axes(mult_grid, 1), j in axes(mult_grid, 2)];
+    )
+    add_partition_boundaries!(pax, owner_grid)
   end
-  fig = plot(
-    panels...;
-    layout = (1, length(panels)),
-    size = (330 * length(panels), 350),
-    margin = 4mm,
-  )
   savefigs(fig, "fig13_evp_cmp")
 end
 

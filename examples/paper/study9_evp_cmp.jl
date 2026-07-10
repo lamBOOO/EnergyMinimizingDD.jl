@@ -9,9 +9,28 @@
 isdefined(Main, :PAPER_COMMON) || include("common.jl")
 
 using IterativeSolvers
+using GridapDistributed
+using Metis
 
 rayleigh(K, M, x) = dot(x, K * x) / dot(x, M * x)
 evp_resnorm(K, M, x, lambda) = norm(K * x - lambda .* (M * x))
+
+function metis_cell_partition(N, m, overlap)
+  model = CartesianDiscreteModel(
+    (0, 1.0, 0, 1.0),
+    (1.0 * N, 1.0 * N);
+    isperiodic = (false, false),
+  )
+  g = GridapDistributed.compute_cell_graph(model)
+  owner = Int.(Metis.partition(g, m))
+  elpar = FEMDiscretizations.create_elements_partition(Int32.(owner), m)
+  FEMDiscretizations.create_overlapping_elements_partition!(elpar, g, m, overlap)
+  mult = zeros(Int, length(owner))
+  for elems in elpar, el in elems
+    mult[el] += 1
+  end
+  return owner, mult
+end
 
 function normalize_M!(x, M)
   x ./= sqrt(dot(x, M * x))
@@ -72,7 +91,8 @@ function lobpcg_as_history(K, M, S; maxiter, tol)
 end
 
 function run_study9()
-  if !needs_run("study9_evp_cmp.csv")
+  files = ("study9_evp_cmp.csv", "study9_partitions.csv")
+  if !needs_run(files...)
     println("study9: cached, skipping")
     return
   end
@@ -82,7 +102,7 @@ function run_study9()
   N = SMALL ? 20 : 40
   ms = SMALL ? [2] : [2, 4, 8]
   overlap = 2
-  tol = 1e-8
+  tol = 1e-6
   maxiter = SMALL ? 25 : 100
 
   rows = (
@@ -92,6 +112,13 @@ function run_study9()
     lambda = Float64[],
     err = Float64[],
     resnorm = Float64[],
+  )
+  part_rows = (
+    m = Int[],
+    N = Int[],
+    idx = Int[],
+    owner = Int[],
+    mult = Int[],
   )
   record(method, m, lambda_ref, hist) = for (s, lambda, rn) in hist
     push!(rows.method, method)
@@ -106,6 +133,15 @@ function run_study9()
     K, M, b, dofspar, U = schroedinger_setup(N, m, overlap)
     S = schwarz_setup(K, dofspar)
     lambda_ref = dense_reference_lambda(K, M)
+
+    owner, mult = metis_cell_partition(N, m, overlap)
+    for idx in eachindex(owner)
+      push!(part_rows.m, m)
+      push!(part_rows.N, N)
+      push!(part_rows.idx, idx)
+      push!(part_rows.owner, owner[idx])
+      push!(part_rows.mult, mult[idx])
+    end
 
     _, _, e_hist, _, resnorm_hist = Solvers.var_dd(
       Energies.GeneralizedRayleighQuotient(K, M),
@@ -136,6 +172,7 @@ function run_study9()
     println("  m = $m done")
   end
   savetable("study9_evp_cmp.csv", rows)
+  savetable("study9_partitions.csv", part_rows)
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__
