@@ -720,6 +720,9 @@ Variational domain decomposition algorithm for solving various energy minimizati
 - `save_local_updates::Bool=false`: Whether to save and output local updates from each subdomain
 - `fe_space=nothing`: FE space for VTK output (required if save_local_updates=true)
 - `output_prefix::String="dd_local_update"`: Prefix for VTK files of local updates
+- `u0::Union{Nothing,Vector{Float64}}=nothing`: Initial guess (defaults to all-ones);
+  useful for warm starts, e.g. across time steps of a gradient flow
+- `verbose::Bool=true`: Print per-iteration convergence information
 """
 function var_dd(
   e::Energies.AbstractEnergy{Float64},
@@ -727,12 +730,14 @@ function var_dd(
   maxiter::Int = 50,
   tol::Float64 = 1e-8,
   save_local_updates::Bool = false,
+  u0::Union{Nothing,Vector{Float64}} = nothing,
+  verbose::Bool = true,
 )
   # TODO: Add "sweep" option [3->1->5->7], multiplicative version [1->2->3]
   # TODO: Make local updates and other returns more elgant with info struct?
 
   # Initial guess, no need to normalize apparently
-  u_cur = ones(Energies.dimension(e))
+  u_cur = isnothing(u0) ? ones(Energies.dimension(e)) : copy(u0)
 
   e_hist = Float64[]
   sol_hist = Vector{Vector{Float64}}()
@@ -767,7 +772,7 @@ function var_dd(
 
     resnorm = Energies.residual_norm(e, u_new)
     push!(resnorm_hist, resnorm)
-    @printf(
+    verbose && @printf(
       "Iteration %3d: Residual norm ≈ %12.6e energy = %12.6e\n",
       n,
       resnorm,
@@ -778,7 +783,7 @@ function var_dd(
     push!(e_hist, e_new)
     push!(sol_hist, copy(u_new))
     if resnorm < tol
-      println("Converged at iteration $n with energy e = $e_new")
+      verbose && println("Converged at iteration $n with energy e = $e_new")
       if save_local_updates
         return u_new, e_new, e_hist, sol_hist, resnorm_hist, local_update_hist
       else
