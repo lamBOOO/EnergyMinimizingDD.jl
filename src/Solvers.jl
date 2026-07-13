@@ -11,7 +11,7 @@ using Printf
 using Random
 using LineSearches
 
-using VariationalDomainDecomposition.Energies
+using VariationalDD.Energies
 
 """
   inf_step(e::Energies.AbstractEnergy{Float64}, u_current::Vector{Float64}, idx_sub::AbstractVector)

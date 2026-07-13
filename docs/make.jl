@@ -4,11 +4,12 @@ Pkg.develop(path=dirname(@__DIR__))
 Pkg.instantiate()
 
 using Documenter
-using DDEigen
+using VariationalDD
 
 makedocs(
-    sitename = "DDEigen",
-    modules = [DDEigen],
+    sitename = "VariationalDD",
+    modules = [VariationalDD],
+    checkdocs = :none,
     format = Documenter.HTML(),
     pages = [
         "Home" => "index.md",

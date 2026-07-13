@@ -61,7 +61,7 @@ function create_dofs_partition(
   return dofsp
 end
 
-function create_elements_partition(partition::Vector{Int32}, npars::Integer) # Helper function from DDEigenlab
+function create_elements_partition(partition::Vector{Int32}, npars::Integer) # Helper function from VariationalDD
   nelems = length(partition)
   @debug nelems, length(partition)
   @assert nelems == length(partition)
@@ -74,7 +74,7 @@ function create_elements_partition(partition::Vector{Int32}, npars::Integer) # H
   return elemsp
 end
 
- function create_overlapping_elements_partition!(elemsp, g, npars::Integer, ol) # Helper function from DDEigenlab
+ function create_overlapping_elements_partition!(elemsp, g, npars::Integer, ol) # Helper function from VariationalDD
   for iol = 1:ol
     @debug "overlap" iol
       Threads.@threads for ipar = 1:npars
@@ -496,9 +496,9 @@ end
 # Auto-run block:
 # Runs when (a) the file is executed as a script, or (b) we are in an interactive
 # session (e.g. VSCode Cmd+R / REPL include) unless explicitly disabled by
-# setting ENV["DDEIGEN_SKIP_AUTORUN"] = "1".
+# setting ENV["VARIATIONALDD_SKIP_AUTORUN"] = "1".
 # It still skips during Documenter builds (non-interactive include).
-if (abspath(PROGRAM_FILE) == @__FILE__) || (isinteractive() && get(ENV, "DDEIGEN_SKIP_AUTORUN", "0") != "1")
+if (abspath(PROGRAM_FILE) == @__FILE__) || (isinteractive() && get(ENV, "VARIATIONALDD_SKIP_AUTORUN", "0") != "1")
   ###############################################################################
   # Run the solver (only when executed as a script)
   ###############################################################################

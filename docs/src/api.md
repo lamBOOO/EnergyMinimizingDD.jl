@@ -3,7 +3,7 @@
 ## Core Functions
 
 ```@docs
-DDEigen.inf_step
-DDEigen.combine_step
-DDEigen.ddm_eigen_solver
+VariationalDD.Solvers.inf_step
+VariationalDD.Solvers.combine_step
+VariationalDD.Solvers.var_dd
 ```

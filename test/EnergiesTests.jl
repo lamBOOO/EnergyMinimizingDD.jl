@@ -1,4 +1,4 @@
-using VariationalDomainDecomposition.Energies
+using VariationalDD.Energies
 using LinearAlgebra
 using FiniteDiff
 using Gridap

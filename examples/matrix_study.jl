@@ -1,7 +1,7 @@
 
-using VariationalDomainDecomposition.FEMDiscretizations
-using VariationalDomainDecomposition.Energies
-using VariationalDomainDecomposition.Solvers
+using VariationalDD.FEMDiscretizations
+using VariationalDD.Energies
+using VariationalDD.Solvers
 using Plots
 using LinearAlgebra
 using Tables

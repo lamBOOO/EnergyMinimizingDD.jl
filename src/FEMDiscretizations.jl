@@ -258,7 +258,7 @@ function create_dofs_partition(
   return dofsp
 end
 
-function create_elements_partition(partition::Vector{Int32}, npars::Integer) # Helper function from DDEigenlab
+function create_elements_partition(partition::Vector{Int32}, npars::Integer) # Helper function from VariationalDD
   nelems = length(partition)
   @debug nelems, length(partition)
   @assert nelems == length(partition)
@@ -271,7 +271,7 @@ function create_elements_partition(partition::Vector{Int32}, npars::Integer) # H
   return elemsp
 end
 
-function create_overlapping_elements_partition!(elemsp, g, npars::Integer, ol) # Helper function from DDEigenlab
+function create_overlapping_elements_partition!(elemsp, g, npars::Integer, ol) # Helper function from VariationalDD
   for iol = 1:ol
     @debug "overlap" iol
     Threads.@threads for ipar = 1:npars

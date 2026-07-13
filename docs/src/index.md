@@ -1,4 +1,4 @@
-# DDEigen
+# VariationalDD
 
 Domain Decomposition based subspace iteration for the generalized eigenproblem `K u = λ M u`.
 

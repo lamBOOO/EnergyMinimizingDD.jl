@@ -1,6 +1,6 @@
-using VariationalDomainDecomposition.Energies
-using VariationalDomainDecomposition.FEMDiscretizations
-using VariationalDomainDecomposition.Solvers
+using VariationalDD.Energies
+using VariationalDD.FEMDiscretizations
+using VariationalDD.Solvers
 
 N = 20
 m = 9

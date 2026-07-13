@@ -1,4 +1,4 @@
-module VariationalDomainDecomposition
+module VariationalDD
 
 include("./Energies.jl")
 include("./FEMDiscretizations.jl")
