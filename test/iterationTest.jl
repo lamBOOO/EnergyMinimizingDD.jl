@@ -1,6 +1,19 @@
 using VariationalDD.Energies
 using VariationalDD.FEMDiscretizations
 using VariationalDD.Solvers
+using Test
+
+function test_iteration_count(result, expected_iterations)
+  _, _, energy_history, solution_history, residual_history, local_update_history = result
+  actual_iterations = length(residual_history)
+
+  # Residuals and local updates are recorded once per completed iteration.
+  # Energy and solution histories additionally contain the initial state.
+  @test actual_iterations == expected_iterations
+  @test length(local_update_history) == actual_iterations
+  @test length(energy_history) == actual_iterations + 1
+  @test length(solution_history) == actual_iterations + 1
+end
 
 N = 20
 m = 9
@@ -19,9 +32,7 @@ result = Solvers.var_dd(
   tol = tol,
   save_local_updates = true,
 )
-u_approx, lambda_approx, lambda_history, solutions, resnorm_history, local_updates_history =
-  result
-@assert length(lambda_history) <= 26
+test_iteration_count(result, 25)
 println("✓ Iteration test for N=20 passed")
 
 N = 30
@@ -35,7 +46,5 @@ result = Solvers.var_dd(
   tol = tol,
   save_local_updates = true,
 )
-u_approx, lambda_approx, lambda_history, solutions, resnorm_history, local_updates_history =
-  result
-@assert length(lambda_history) <= 37
+test_iteration_count(result, 36)
 println("✓ Iteration test for N=30 passed")
