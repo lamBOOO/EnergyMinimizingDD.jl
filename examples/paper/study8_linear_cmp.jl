@@ -1,6 +1,8 @@
 # Study 8: Poisson — comparison against one-level Schwarz baselines on the
 # SAME overlapping partition:
-#   - var_dd (energy-optimal recombination of the m local solves)
+#   - var_dd_additive (m independent local solves)
+#   - var_dd_additive_history (additive plus the preceding global iterate)
+#   - var_dd_multiplicative (m sequential local solves)
 #   - damped additive Schwarz (theta = 1/max_multiplicity; undamped AS
 #     diverges as a stationary iteration)
 #   - restricted additive Schwarz (RAS, Cai-Sarkis), stationary
@@ -60,6 +62,19 @@ function pcg_as(K, b, S; maxiter, tol)
   return hist
 end
 
+function var_dd_linear_history(K, b, dofspar; maxiter, tol, kwargs...)
+  _, _, _, _, resnorm_hist = Solvers.var_dd(
+    Energies.QuadraticEnergy(K, b),
+    dofspar;
+    maxiter = maxiter,
+    tol = tol,
+    verbose = false,
+    kwargs...,
+  )
+  m = length(dofspar)
+  return [(k * m, rn) for (k, rn) in enumerate(resnorm_hist)]
+end
+
 function run_study8()
   files = ("study8_linear_cmp.csv", "study8_partitions.csv")
   if !needs_run(files...)
@@ -108,15 +123,37 @@ function run_study8()
       push!(part_rows.mult, mult[idx])
     end
 
-    # var_dd: resnorm_hist[k] = ||K u - b|| after sweep k (m solves per sweep)
-    _, _, _, _, resnorm_hist = Solvers.var_dd(
-      Energies.QuadraticEnergy(K, b),
-      dofspar;
-      maxiter = maxsweeps,
-      tol = tol,
-      verbose = false,
+    # Every sweep performs m local solves. The additive solves can run in
+    # parallel, while the multiplicative sweep has a serial critical path of m.
+    record(
+      "var_dd_additive",
+      m,
+      var_dd_linear_history(K, b, dofspar; maxiter = maxsweeps, tol = tol),
     )
-    record("var_dd", m, [(k * m, rn) for (k, rn) in enumerate(resnorm_hist)])
+    record(
+      "var_dd_additive_history",
+      m,
+      var_dd_linear_history(
+        K,
+        b,
+        dofspar;
+        maxiter = maxsweeps,
+        tol = tol,
+        history_depth = 1,
+      ),
+    )
+    record(
+      "var_dd_multiplicative",
+      m,
+      var_dd_linear_history(
+        K,
+        b,
+        dofspar;
+        maxiter = maxsweeps,
+        tol = tol,
+        sweep = :multiplicative,
+      ),
+    )
 
     theta = 1 / S.max_mult
     record("as", m, as_stationary(K, b, S; theta, maxsweeps, tol))

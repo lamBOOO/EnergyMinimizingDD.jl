@@ -46,6 +46,19 @@ function inf_step(
   u_cur::Vector{Float64},
   idx_sub::AbstractVector,
 )
+  α_new = quadratic_local_coefficients(e, u_cur, idx_sub)
+
+  # Return the actual minimizer in span{u_cur, e_j : j ∈ idx_sub}.
+  # Rescaling by α_new[1] would generate the same line when that coefficient is
+  # nonzero, but fails for valid local minimizers with α_new[1] == 0.
+  return reconstruct_implicit!(α_new, u_cur, idx_sub)
+end
+
+function quadratic_local_coefficients(
+  e::Energies.QuadraticEnergy{Float64},
+  u_cur::Vector{Float64},
+  idx_sub::AbstractVector,
+)
   localdim = 1 + length(idx_sub)
 
   A, b = e.A, e.b
@@ -90,13 +103,41 @@ function inf_step(
   # Solve the local quadratic minimization problem
   # min_{α} ½ α' A_local α - b_local' α
   # where α is the coefficient vector in the basis [u_cur, e_j1, e_j2, ...]
-  α_new = A_local \ b_local
+  return A_local \ b_local
+end
 
-  # Return the actual minimizer in span{u_cur, e_j : j ∈ idx_sub}.
-  # Rescaling by α_new[1] would generate the same line when that coefficient is
-  # nonzero, but fails for valid local minimizers with α_new[1] == 0.
-  x_new = reconstruct_implicit!(α_new, u_cur, idx_sub)
-  return x_new
+"""
+Apply one local step of the original multiplicative quadratic-energy sweep.
+
+The local Ritz vector is rescaled to retain coefficient one in front of the
+incoming iterate, then used immediately as the input to the next subdomain.
+This is deliberately separate from `inf_step`: it reproduces the historical
+serial algorithm without reintroducing mutation into the additive path.
+"""
+function multiplicative_inf_step(
+  e::Energies.QuadraticEnergy{Float64},
+  u_cur::Vector{Float64},
+  idx_sub::AbstractVector,
+)
+  α = quadratic_local_coefficients(e, u_cur, idx_sub)
+  iszero(α[1]) && throw(ArgumentError(
+    "multiplicative projective update is undefined because its current-iterate coefficient is zero",
+  ))
+  u_new = copy(u_cur)
+  for (k, j) in pairs(idx_sub)
+    u_new[j] += α[k+1] / α[1]
+  end
+  return u_new
+end
+
+function multiplicative_inf_step(
+  e::Energies.AbstractEnergy{Float64},
+  ::Vector{Float64},
+  ::AbstractVector,
+)
+  throw(ArgumentError(
+    "sweep=:multiplicative is currently implemented only for QuadraticEnergy, not $(typeof(e))",
+  ))
 end
 
 function inf_step(
@@ -727,6 +768,16 @@ Variational domain decomposition algorithm for solving various energy minimizati
 - `output_prefix::String="dd_local_update"`: Prefix for VTK files of local updates
 - `u0::Union{Nothing,Vector{Float64}}=nothing`: Initial guess (defaults to all-ones);
   useful for warm starts, e.g. across time steps of a gradient flow
+- `history_depth::Int=0`: Number of previous global iterates added to the
+  second-level trial space. `history_depth=1` adds `u_{k-1}` alongside `u_k`.
+- `mixing_omega::Float64=0.0`: Post-combination damping parameter in
+  `u_{k+1} = ω u_k + (1-ω) ũ_{k+1}`. The default zero keeps the exact
+  second-level minimizer.
+- `sweep::Symbol=:additive`: Local-update mode. `:additive` forms all local
+  candidates from `u_k`, so those `m` solves can run in parallel.
+  `:multiplicative` feeds each local update into the next subdomain and thus
+  has a serial critical path of `m` local solves. The latter currently supports
+  `QuadraticEnergy` and reproduces the original projectively rescaled sweep.
 - `verbose::Bool=true`: Print per-iteration convergence information
 """
 function var_dd(
@@ -736,10 +787,19 @@ function var_dd(
   tol::Float64 = 1e-8,
   save_local_updates::Bool = false,
   u0::Union{Nothing,Vector{Float64}} = nothing,
+  history_depth::Int = 0,
+  mixing_omega::Float64 = 0.0,
+  sweep::Symbol = :additive,
   verbose::Bool = true,
 )
-  # TODO: Add "sweep" option [3->1->5->7], multiplicative version [1->2->3]
   # TODO: Make local updates and other returns more elgant with info struct?
+
+  history_depth >= 0 || throw(ArgumentError("history_depth must be nonnegative"))
+  0.0 <= mixing_omega < 1.0 ||
+    throw(ArgumentError("mixing_omega must satisfy 0 <= mixing_omega < 1"))
+  sweep in (:additive, :multiplicative) || throw(ArgumentError(
+    "sweep must be :additive or :multiplicative",
+  ))
 
   # Initial guess, no need to normalize apparently
   u_cur = isnothing(u0) ? ones(Energies.dimension(e)) : copy(u0)
@@ -748,6 +808,7 @@ function var_dd(
   sol_hist = Vector{Vector{Float64}}()
   resnorm_hist = Float64[]
   local_update_hist = Vector{Vector{Vector{Float64}}}()
+  previous_iterates = Vector{Vector{Float64}}()
 
   e_cur = e(u_cur)
   push!(e_hist, e_cur)
@@ -758,13 +819,21 @@ function var_dd(
   local_updates = zeros(size(u_cur, 1), m)  # preallocate for efficiency
   for n = 1:maxiter
     current_local_updates = Vector{Vector{Float64}}()
+    multiplicative_iterate = copy(u_cur)
 
     for i = 1:m
-      u_next_i = inf_step(e, u_cur, subdomain_dofs[i])
+      local_base = sweep == :additive ? u_cur : multiplicative_iterate
+      u_next_i = if sweep == :additive
+        inf_step(e, u_cur, subdomain_dofs[i])
+      else
+        multiplicative_iterate = multiplicative_inf_step(
+          e, multiplicative_iterate, subdomain_dofs[i]
+        )
+      end
       local_updates[:, i] = u_next_i
 
       if save_local_updates
-        push!(current_local_updates, copy(u_next_i .- u_cur))
+        push!(current_local_updates, copy(u_next_i .- local_base))
       end
     end
 
@@ -772,8 +841,10 @@ function var_dd(
       push!(local_update_hist, current_local_updates)
     end
 
-    combined_matrix = hcat(u_cur, local_updates)
-    u_new = combine_step(e, combined_matrix)
+    combination_anchor = sweep == :additive ? u_cur : multiplicative_iterate
+    combined_matrix = hcat(combination_anchor, previous_iterates..., local_updates)
+    u_trial = combine_step(e, combined_matrix)
+    u_new = mix_iterates(e, u_cur, u_trial, mixing_omega)
 
     resnorm = Energies.residual_norm(e, u_new)
     push!(resnorm_hist, resnorm)
@@ -796,6 +867,10 @@ function var_dd(
       end
     end
 
+    if history_depth > 0
+      push!(previous_iterates, copy(u_cur))
+      length(previous_iterates) > history_depth && popfirst!(previous_iterates)
+    end
     u_cur = u_new
     e_cur = e_new
   end
@@ -806,6 +881,44 @@ function var_dd(
   else
     return u_cur, e_cur, e_hist, sol_hist, resnorm_hist
   end
+end
+
+function mix_iterates(
+  e::Energies.AbstractEnergy,
+  u_cur::AbstractVector,
+  u_trial::AbstractVector,
+  omega::Real,
+)
+  omega == 0 && return u_trial
+  return omega .* u_cur .+ (1 - omega) .* u_trial
+end
+
+function mix_iterates(
+  e::Energies.GeneralizedRayleighQuotient,
+  u_cur::AbstractVector,
+  u_trial::AbstractVector,
+  omega::Real,
+)
+  omega == 0 && return u_trial
+  # Ritz vectors are defined only up to sign. Align the trial vector with the
+  # current iterate before interpolation to avoid artificial cancellation.
+  aligned_trial = dot(u_cur, e.B * u_trial) < 0 ? -u_trial : u_trial
+  u_new = omega .* u_cur .+ (1 - omega) .* aligned_trial
+  Energies.normalize_M!(u_new, e.B)
+  return u_new
+end
+
+function mix_iterates(
+  e::Energies.RayleighQuotient,
+  u_cur::AbstractVector,
+  u_trial::AbstractVector,
+  omega::Real,
+)
+  omega == 0 && return u_trial
+  aligned_trial = dot(u_cur, u_trial) < 0 ? -u_trial : u_trial
+  u_new = omega .* u_cur .+ (1 - omega) .* aligned_trial
+  u_new ./= norm(u_new)
+  return u_new
 end
 
 end # module

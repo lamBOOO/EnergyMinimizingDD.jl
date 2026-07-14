@@ -627,14 +627,25 @@ function fig12_poisson_cmp()
   parts = loadtable("study8_partitions.csv")
   ms = sort(unique(tbl.m))
   labels = Dict(
-    "var_dd" => "varDD",
+    "var_dd_additive" => "additive varDD",
+    "var_dd_additive_history" => "additive varDD + history",
+    "var_dd_multiplicative" => "multiplicative varDD",
     "as" => "damped AS",
     "ras" => "RAS",
     "pcg_as" => "CG+AS",
   )
-  methods = ("var_dd", "as", "ras", "pcg_as")
+  methods = (
+    "var_dd_additive",
+    "var_dd_additive_history",
+    "var_dd_multiplicative",
+    "as",
+    "ras",
+    "pcg_as",
+  )
   markers = Dict(
-    "var_dd" => :circle,
+    "var_dd_additive" => :circle,
+    "var_dd_additive_history" => :hexagon,
+    "var_dd_multiplicative" => :star5,
     "as" => :rect,
     "ras" => :utriangle,
     "pcg_as" => :diamond,
@@ -687,12 +698,16 @@ function fig13_evp_cmp()
   ms = sort(unique(tbl.m))
   labels = Dict(
     "var_dd" => "varDD",
+    "var_dd_prev" => "varDD + previous",
+    "var_dd_mix_05" => "varDD, ω = 0.5",
     "lopsd_as" => "LOPSD+AS",
     "lobpcg_as" => "LOBPCG+AS",
   )
-  methods = ("var_dd", "lopsd_as", "lobpcg_as")
+  methods = ("var_dd", "var_dd_prev", "var_dd_mix_05", "lopsd_as", "lobpcg_as")
   markers = Dict(
     "var_dd" => :circle,
+    "var_dd_prev" => :hexagon,
+    "var_dd_mix_05" => :star5,
     "lopsd_as" => :rect,
     "lobpcg_as" => :utriangle,
   )

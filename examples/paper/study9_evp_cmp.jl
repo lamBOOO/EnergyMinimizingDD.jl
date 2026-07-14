@@ -1,6 +1,8 @@
 # Study 9: EVP -- comparison against a one-level additive-Schwarz-preconditioned
 # steepest-descent and LOBPCG baselines on the SAME overlapping partitions.
 #   - var_dd (energy-optimal recombination of the m local solves)
+#   - var_dd_prev (also retain the preceding global iterate)
+#   - var_dd_mix_05 (post-combination damping with omega = 0.5)
 #   - LOPSD + additive Schwarz preconditioner, memoryless
 #   - LOBPCG + additive Schwarz preconditioner
 # No shift-invert ARPACK curve is included.
@@ -71,6 +73,24 @@ function lobpcg_as_history(K, M, S; maxiter, tol)
   return hist
 end
 
+function var_dd_evp_history(K, M, dofspar; maxiter, tol, kwargs...)
+  _, _, e_hist, _, resnorm_hist = Solvers.var_dd(
+    Energies.GeneralizedRayleighQuotient(K, M),
+    dofspar;
+    maxiter = maxiter,
+    tol = tol,
+    verbose = false,
+    kwargs...,
+  )
+  m = length(dofspar)
+  hist = Tuple{Int,Float64,Float64}[]
+  for (k, lambda) in enumerate(e_hist)
+    rn = k == 1 ? NaN : resnorm_hist[k-1]
+    push!(hist, ((k - 1) * m, lambda, rn))
+  end
+  return hist
+end
+
 function run_study9()
   files = ("study9_evp_cmp.csv", "study9_partitions.csv")
   if !needs_run(files...)
@@ -124,19 +144,38 @@ function run_study9()
       push!(part_rows.mult, mult[idx])
     end
 
-    _, _, e_hist, _, resnorm_hist = Solvers.var_dd(
-      Energies.GeneralizedRayleighQuotient(K, M),
-      dofspar;
-      maxiter = maxiter,
-      tol = tol,
-      verbose = false,
+    record(
+      "var_dd",
+      m,
+      lambda_ref,
+      var_dd_evp_history(K, M, dofspar; maxiter = maxiter, tol = tol),
     )
-    var_hist = Tuple{Int,Float64,Float64}[]
-    for (k, lambda) in enumerate(e_hist)
-      rn = k == 1 ? NaN : resnorm_hist[k-1]
-      push!(var_hist, ((k - 1) * m, lambda, rn))
-    end
-    record("var_dd", m, lambda_ref, var_hist)
+    record(
+      "var_dd_prev",
+      m,
+      lambda_ref,
+      var_dd_evp_history(
+        K,
+        M,
+        dofspar;
+        maxiter = maxiter,
+        tol = tol,
+        history_depth = 1,
+      ),
+    )
+    record(
+      "var_dd_mix_05",
+      m,
+      lambda_ref,
+      var_dd_evp_history(
+        K,
+        M,
+        dofspar;
+        maxiter = maxiter,
+        tol = tol,
+        mixing_omega = 0.5,
+      ),
+    )
 
     record(
       "lopsd_as",
