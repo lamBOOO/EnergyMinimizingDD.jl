@@ -1,4 +1,5 @@
 include("./EnergiesTests.jl")
+include("./SubspaceSolverTests.jl")
 include("./SolversTests.jl")
 include("./iterationTest.jl")
 include("./convergencetest.jl")

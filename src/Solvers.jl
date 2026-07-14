@@ -92,8 +92,10 @@ function inf_step(
   # where α is the coefficient vector in the basis [u_cur, e_j1, e_j2, ...]
   α_new = A_local \ b_local
 
-  # Use helper function to reconstruct (no normalization needed for QuadraticEnergy)
-  x_new = reconstruct_implicit_affine!(α_new, u_cur, idx_sub)
+  # Return the actual minimizer in span{u_cur, e_j : j ∈ idx_sub}.
+  # Rescaling by α_new[1] would generate the same line when that coefficient is
+  # nonzero, but fails for valid local minimizers with α_new[1] == 0.
+  x_new = reconstruct_implicit!(α_new, u_cur, idx_sub)
   return x_new
 end
 
@@ -151,8 +153,8 @@ function inf_step(
   # Solve normal equations: A_local * α = b_local
   α_new = A_local \ b_local
 
-  # Reconstruct solution in original space
-  x_new = reconstruct_implicit_affine!(α_new, u_cur, idx_sub)
+  # Reconstruct the actual minimizer in the local trial subspace.
+  x_new = reconstruct_implicit!(α_new, u_cur, idx_sub)
   return x_new
 end
 
@@ -220,9 +222,9 @@ function inf_step(
   res =
     lobpcg(K_local_sym, M_local_sym, false, 1; P = F, tol = 1e-8, maxiter = 500)
 
-  # Use helper function to reconstruct, then normalize
-  x_new = reconstruct_implicit_affine!(res.X[:, 1], u_cur, idx_sub)
-  # Energies.normalize_M!(x_new, M)
+  # Return the Ritz vector itself. Its normalization is immaterial to the
+  # subsequent Rayleigh--Ritz combination and is performed there.
+  x_new = reconstruct_implicit!(res.X[:, 1], u_cur, idx_sub)
 
   return x_new
 end
@@ -350,6 +352,32 @@ function combine_step(
   throw(ErrorException("combine_step not implemented for $(typeof(e))"))
 end
 
+"""
+  orthonormal_basis(X; rtol=max(size(X)...)*eps(eltype(X)))
+
+Compute an orthonormal basis for the column space of `X` using a
+column-pivoted, rank-revealing QR factorization. Dependent candidate vectors
+must be removed before a combination step; otherwise the unused QR columns
+can introduce arbitrary directions that are not in the intended trial space.
+"""
+function orthonormal_basis(
+  X::AbstractMatrix{T};
+  rtol::Real = max(size(X)...) * eps(T),
+) where {T<:AbstractFloat}
+  F = qr(X, ColumnNorm())
+  diagonal = abs.(diag(F.R))
+  isempty(diagonal) &&
+    throw(ArgumentError("cannot form a basis from an empty matrix"))
+
+  scale = maximum(diagonal)
+  scale == zero(T) &&
+    throw(ArgumentError("candidate matrix has zero column space"))
+  rank = count(>(rtol * scale), diagonal)
+  rank == 0 && throw(ArgumentError("candidate matrix has zero numerical rank"))
+
+  return Matrix(F.Q)[:, 1:rank]
+end
+
 function combine_step(
   e::Energies.QuadraticEnergy{Float64},
   sspace::Matrix{Float64},
@@ -358,7 +386,7 @@ function combine_step(
   # => Just 1st order optimality in subspace?
   A, b = e.A, e.b
 
-  B = Matrix(qr(sspace).Q)
+  B = orthonormal_basis(sspace)
 
   localdim = size(B, 2)
   N = size(B, 1)
@@ -390,7 +418,7 @@ function combine_step(
 )
   K, M = e.A, e.B
 
-  B = Matrix(qr(sspace).Q)
+  B = orthonormal_basis(sspace)
 
   localdim = size(B, 2)
   N = size(B, 1)
@@ -422,7 +450,7 @@ function combine_step(
 
   A, b = e.A, e.b
 
-  B = Matrix(qr(sspace).Q)
+  B = orthonormal_basis(sspace)
 
   localdim = size(B, 2)
   N = size(B, 1)
@@ -453,7 +481,7 @@ function combine_step(
   e::Energies.NonlinearEnergy{Float64},
   sspace::Matrix{Float64},
 )
-  B = Matrix(qr(sspace).Q)
+  B = orthonormal_basis(sspace)
   localdim = size(B, 2)
 
   # Newton iteration in subspace
@@ -659,29 +687,6 @@ function restrict_matrix_block(
   n = length(indices)
   A_local = Matrix{eltype(A_global)}(undef, n, n)
   return restrict_matrix_block!(A_local, A_global, indices, indices)
-end
-
-"""
-  reconstruct_implicit_affine!(α::Vector{Float64}, u_cur::Vector{Float64}, idx_sub::AbstractVector)
-
-Builds x_new = 1 * u_cur + Σ α[k+1]/α[1] * e_jk (affine since u_curr has coeff 1)
-where e_j are standard basis vectors, without normalization.
-This avoids explicitly constructing the basis matrix.
-- Work directly with u_cur to avoid allocation
-- Mutates u_cur in-place
-"""
-function reconstruct_implicit_affine!(
-  α::Vector{Float64},
-  u_cur::Vector{Float64},
-  idx_sub::AbstractVector,
-)
-  # TODO: Avoid that function and the gloabl reconstruction
-  # => Work on local coeffs directly and only to global in the end
-  # Add contributions from standard basis vectors
-  for (k, j) in pairs(idx_sub)
-    u_cur[j] += α[k+1] / α[1] # Add coefficient for e_j
-  end
-  return u_cur
 end
 
 """
