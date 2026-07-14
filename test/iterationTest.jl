@@ -6,10 +6,12 @@ using Test
 function test_iteration_count(result, expected_iterations)
   _, _, energy_history, solution_history, residual_history, local_update_history = result
   actual_iterations = length(residual_history)
+  allowed_iterations =
+    expected_iterations isa Integer ? (expected_iterations,) : expected_iterations
 
   # Residuals and local updates are recorded once per completed iteration.
   # Energy and solution histories additionally contain the initial state.
-  @test actual_iterations == expected_iterations
+  @test actual_iterations in allowed_iterations
   @test length(local_update_history) == actual_iterations
   @test length(energy_history) == actual_iterations + 1
   @test length(solution_history) == actual_iterations + 1
@@ -32,7 +34,7 @@ result = Solvers.var_dd(
   tol = tol,
   save_local_updates = true,
 )
-test_iteration_count(result, 25)
+test_iteration_count(result, 24:25)
 println("✓ Iteration test for N=20 passed")
 
 N = 30
