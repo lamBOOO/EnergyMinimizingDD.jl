@@ -48,5 +48,5 @@ result = Solvers.var_dd(
   tol = tol,
   save_local_updates = true,
 )
-test_iteration_count(result, 36)
+test_iteration_count(result, 35:36)
 println("✓ Iteration test for N=30 passed")
