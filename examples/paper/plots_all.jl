@@ -628,7 +628,7 @@ function fig12_poisson_cmp()
   ms = sort(unique(tbl.m))
   labels = Dict(
     "var_dd_additive" => "additive varDD",
-    "var_dd_additive_history" => "additive varDD + history",
+    "var_dd_additive_history" => "additive varDD + previous",
     "var_dd_multiplicative" => "multiplicative varDD",
     "as" => "damped AS",
     "ras" => "RAS",
