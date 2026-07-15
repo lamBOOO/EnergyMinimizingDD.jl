@@ -98,12 +98,16 @@ function add_partition_boundaries!(ax, owner_grid; color = (:black, 0.55), linew
   lines!(ax, xs, ys; color = color, linewidth = linewidth)
 end
 
-function legend_line_marker_elements(methods, markers)
+function legend_line_marker_elements(
+  methods,
+  markers;
+  colors = [color_for(i) for i in eachindex(methods)],
+)
   return [
     [
-      LineElement(color = color_for(i), linewidth = 2.5),
+      LineElement(color = colors[i], linewidth = 2.5),
       MarkerElement(
-        color = color_for(i),
+        color = colors[i],
         marker = markers[method],
         markersize = MARKERSIZE,
       ),
@@ -629,6 +633,9 @@ function fig12_poisson_cmp()
   labels = Dict(
     "var_dd_additive" => "additive varDD",
     "var_dd_additive_history" => "additive varDD + previous",
+    "var_dd_additive_mix_025" => "additive varDD, ω = 0.25",
+    "var_dd_additive_mix_05" => "additive varDD, ω = 0.5",
+    "var_dd_additive_mix_075" => "additive varDD, ω = 0.75",
     "var_dd_multiplicative" => "multiplicative varDD",
     "as" => "damped AS",
     "ras" => "RAS",
@@ -637,6 +644,9 @@ function fig12_poisson_cmp()
   methods = (
     "var_dd_additive",
     "var_dd_additive_history",
+    "var_dd_additive_mix_025",
+    "var_dd_additive_mix_05",
+    "var_dd_additive_mix_075",
     "var_dd_multiplicative",
     "as",
     "ras",
@@ -645,11 +655,15 @@ function fig12_poisson_cmp()
   markers = Dict(
     "var_dd_additive" => :circle,
     "var_dd_additive_history" => :hexagon,
+    "var_dd_additive_mix_025" => :cross,
+    "var_dd_additive_mix_05" => :xcross,
+    "var_dd_additive_mix_075" => :dtriangle,
     "var_dd_multiplicative" => :star5,
     "as" => :rect,
     "ras" => :utriangle,
     "pcg_as" => :diamond,
   )
+  colors = Makie.resample_cmap(:tab10, length(methods))
   finite_res = tbl.resnorm[tbl.resnorm .> 0]
   ylims = (1e-10 * 0.5, maximum(finite_res) * 3)
   ytick_exps = sort(collect(floor(Int, log10(ylims[2])):-2:ceil(Int, log10(ylims[1]))))
@@ -658,7 +672,7 @@ function fig12_poisson_cmp()
   for (j, m) in enumerate(ms)
     ax = Axis(
       fig[1, j];
-      xlabel = "subdomain solves",
+      xlabel = "outer solves",
       ylabel = j == 1 ? "residual norm ‖Axₖ-b‖₂" : "",
       yscale = log10,
       yticks = yticks,
@@ -669,10 +683,10 @@ function fig12_poisson_cmp()
       mask = (tbl.m .== m) .& (tbl.method .== method) .& (tbl.resnorm .> 1e-14)
       add_series!(
         ax,
-        pick(tbl, :solves, mask),
+        pick(tbl, :solves, mask) ./ m,
         logfloor(pick(tbl, :resnorm, mask));
         label = labels[method],
-        color = color_for(i),
+        color = colors[i],
         marker = markers[method],
       )
     end
@@ -680,9 +694,10 @@ function fig12_poisson_cmp()
   end
   Legend(
     fig[2, 1:length(ms)],
-    legend_line_marker_elements(methods, markers),
+    legend_line_marker_elements(methods, markers; colors),
     [labels[method] for method in methods];
     orientation = :horizontal,
+    nbanks = 2,
     framevisible = true,
   )
   rowgap!(fig.layout, 8)
@@ -699,18 +714,31 @@ function fig13_evp_cmp()
   labels = Dict(
     "var_dd" => "varDD",
     "var_dd_prev" => "varDD + previous",
+    "var_dd_mix_025" => "varDD, ω = 0.25",
     "var_dd_mix_05" => "varDD, ω = 0.5",
+    "var_dd_mix_075" => "varDD, ω = 0.75",
     "lopsd_as" => "LOPSD+AS",
     "lobpcg_as" => "LOBPCG+AS",
   )
-  methods = ("var_dd", "var_dd_prev", "var_dd_mix_05", "lopsd_as", "lobpcg_as")
+  methods = (
+    "var_dd",
+    "var_dd_prev",
+    "var_dd_mix_025",
+    "var_dd_mix_05",
+    "var_dd_mix_075",
+    "lopsd_as",
+    "lobpcg_as",
+  )
   markers = Dict(
     "var_dd" => :circle,
     "var_dd_prev" => :hexagon,
+    "var_dd_mix_025" => :cross,
     "var_dd_mix_05" => :star5,
+    "var_dd_mix_075" => :dtriangle,
     "lopsd_as" => :rect,
     "lobpcg_as" => :utriangle,
   )
+  colors = Makie.resample_cmap(:tab10, length(methods))
   finite_res = tbl.resnorm[.!isnan.(tbl.resnorm) .& (tbl.resnorm .> 0)]
   ylims = (1e-6 * 0.5, maximum(finite_res) * 3)
   ytick_exps = sort(collect(floor(Int, log10(ylims[2])):-2:ceil(Int, log10(ylims[1]))))
@@ -719,7 +747,7 @@ function fig13_evp_cmp()
   for (j, m) in enumerate(ms)
     ax = Axis(
       fig[1, j];
-      xlabel = "subdomain solves",
+      xlabel = "outer solves",
       ylabel = j == 1 ? "residual norm ‖Axₖ-λₖxₖ‖₂" : "",
       yscale = log10,
       yticks = yticks,
@@ -734,10 +762,10 @@ function fig13_evp_cmp()
         (tbl.resnorm .> 0)
       add_series!(
         ax,
-        pick(tbl, :solves, mask),
+        pick(tbl, :solves, mask) ./ m,
         logfloor(pick(tbl, :resnorm, mask));
         label = labels[method],
-        color = color_for(i),
+        color = colors[i],
         marker = markers[method],
       )
     end
@@ -745,9 +773,10 @@ function fig13_evp_cmp()
   end
   Legend(
     fig[2, 1:length(ms)],
-    legend_line_marker_elements(methods, markers),
+    legend_line_marker_elements(methods, markers; colors),
     [labels[method] for method in methods];
     orientation = :horizontal,
+    nbanks = 2,
     framevisible = true,
   )
   rowgap!(fig.layout, 8)

@@ -2,6 +2,7 @@
 # SAME overlapping partition:
 #   - var_dd_additive (m independent local solves)
 #   - var_dd_additive_history (additive plus the preceding global iterate)
+#   - var_dd_additive_mix_* (post-combination damping with several weights)
 #   - var_dd_multiplicative (m sequential local solves)
 #   - damped additive Schwarz (theta = 1/max_multiplicity; undamped AS
 #     diverges as a stationary iteration)
@@ -142,6 +143,24 @@ function run_study8()
         history_depth = 1,
       ),
     )
+    for (method, omega) in (
+      ("var_dd_additive_mix_025", 0.25),
+      ("var_dd_additive_mix_05", 0.5),
+      ("var_dd_additive_mix_075", 0.75),
+    )
+      record(
+        method,
+        m,
+        var_dd_linear_history(
+          K,
+          b,
+          dofspar;
+          maxiter = maxsweeps,
+          tol = tol,
+          mixing_omega = omega,
+        ),
+      )
+    end
     record(
       "var_dd_multiplicative",
       m,

@@ -2,7 +2,7 @@
 # steepest-descent and LOBPCG baselines on the SAME overlapping partitions.
 #   - var_dd (energy-optimal recombination of the m local solves)
 #   - var_dd_prev (also retain the preceding global iterate)
-#   - var_dd_mix_05 (post-combination damping with omega = 0.5)
+#   - var_dd_mix_* (post-combination damping with several weights)
 #   - LOPSD + additive Schwarz preconditioner, memoryless
 #   - LOBPCG + additive Schwarz preconditioner
 # No shift-invert ARPACK curve is included.
@@ -163,19 +163,25 @@ function run_study9()
         history_depth = 1,
       ),
     )
-    record(
-      "var_dd_mix_05",
-      m,
-      lambda_ref,
-      var_dd_evp_history(
-        K,
-        M,
-        dofspar;
-        maxiter = maxiter,
-        tol = tol,
-        mixing_omega = 0.5,
-      ),
+    for (method, omega) in (
+      ("var_dd_mix_025", 0.25),
+      ("var_dd_mix_05", 0.5),
+      ("var_dd_mix_075", 0.75),
     )
+      record(
+        method,
+        m,
+        lambda_ref,
+        var_dd_evp_history(
+          K,
+          M,
+          dofspar;
+          maxiter = maxiter,
+          tol = tol,
+          mixing_omega = omega,
+        ),
+      )
+    end
 
     record(
       "lopsd_as",
