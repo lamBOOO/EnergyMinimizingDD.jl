@@ -4,6 +4,9 @@ using VariationalDD.Energies
 using VariationalDD.FEMDiscretizations
 using VariationalDD.Solvers
 
+include(joinpath(@__DIR__, "..", "examples", "paper", "common.jl"))
+include(joinpath(@__DIR__, "..", "examples", "paper", "study10_gp.jl"))
+
 @testset "Gross-Pitaevskii quotient" begin
   @testset "algebraic energy, gradient, and scale invariance" begin
     K = Symmetric([3.0 -0.4 0.0; -0.4 2.0 -0.2; 0.0 -0.2 4.0])
@@ -97,9 +100,8 @@ using VariationalDD.Solvers
   end
 
   @testset "finite-element nonlinear assembly" begin
-    K, M, quartic, cubic, parts, _ = FEMDiscretizations.FEM_GrossPitaevskii(
-      5, 2; overlap=1
-    )
+    K, M, quartic, cubic, density_matrix, parts, _ =
+      FEMDiscretizations.FEM_GrossPitaevskii(5, 2; overlap=1)
     e = Energies.GrossPitaevskiiRayleighQuotient(K, M, 1.0, quartic, cubic)
     u = collect(range(0.2, 1.0; length=size(K, 1)))
     direction = collect(range(-0.4, 0.3; length=length(u)))
@@ -107,6 +109,7 @@ using VariationalDD.Solvers
     quartic_directional =
       (quartic(u .+ h .* direction) - quartic(u .- h .* direction)) / (2h)
     @test quartic_directional ≈ 4 * dot(cubic(u), direction) rtol = 2e-6
+    @test density_matrix(u) * u ≈ cubic(u) rtol = 1e-12 atol = 1e-12
 
     solution, _, energies, _, residuals = Solvers.var_dd(
       e,
@@ -121,5 +124,30 @@ using VariationalDD.Solvers
     @test abs(dot(solution, M * solution) - 1) ≤ 1e-10
     @test last(residuals) ≤ first(residuals)
     @test last(residuals) < 1e-5
+
+    _, gfdn_history = gp_gfdn_au_as_history(
+      e,
+      density_matrix,
+      parts,
+      ones(length(u));
+      conjugate=false,
+      maxiter=12,
+      tol=1e-5,
+    )
+    _, cg_history = gp_gfdn_au_as_history(
+      e,
+      density_matrix,
+      parts,
+      ones(length(u));
+      conjugate=true,
+      maxiter=12,
+      tol=1e-5,
+    )
+    @test all(diff(getindex.(gfdn_history, 2)) .≤ 1e-10)
+    @test all(diff(getindex.(cg_history, 2)) .≤ 1e-10)
+    @test last(gfdn_history)[3] < first(gfdn_history)[3]
+    @test last(cg_history)[3] < first(cg_history)[3]
+    @test maximum(getindex.(gfdn_history, 4)) ≤ 1e-12
+    @test maximum(getindex.(cg_history, 4)) ≤ 1e-12
   end
 end

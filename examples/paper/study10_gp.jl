@@ -2,8 +2,11 @@
 # overlapping partitions as the linear EVP studies.
 #   - gp_additive: independent local nonlinear Rayleigh-quotient minimizations
 #   - gp_additive_history: additionally retain the preceding global iterate
+#   - gfdn_au_as: energy-adaptive Sobolev gradient with one-level AS
+#   - cg_gfdn_au_as: Fletcher--Reeves acceleration of the same direction
 # Cost unit: local subdomain minimizations; the additive local work can run in
-# parallel, so one sweep has m units of work but a one-solve critical path.
+# parallel, so one sweep has m units of work but a one-solve critical path. For
+# the GFDN baselines, one AS application likewise consists of m local solves.
 
 isdefined(Main, :PAPER_COMMON) || include("common.jl")
 
@@ -52,7 +55,112 @@ function gp_var_dd_history(e, dofspar, u0; maxiter, tol, kwargs...)
   return solution, history
 end
 
+function gp_history_entry(e, u, solves)
+  return (
+    solves,
+    Energies.physical_energy(e, u),
+    Energies.residual_norm(e, u),
+    abs(dot(u, e.M * u) - 1),
+    Energies.chemical_potential(e, u),
+  )
+end
+
+"""
+    gp_gfdn_au_as_history(e, density_matrix, dofspar, u0; conjugate, maxiter, tol)
+
+Apply an inexact energy-adaptive `a_u`-Sobolev gradient method. At every outer
+iteration, one-level additive Schwarz for
+
+    A_u = K + beta * C(u)
+
+approximates the inverse metric action. `conjugate=true` adds a transported
+Fletcher--Reeves direction, giving the CG-GFDN(a_u)+AS baseline. The existing
+GP `combine_step` performs the optimal normalized line search in the span of
+the current iterate and search direction.
+"""
+function gp_gfdn_au_as_history(
+  e,
+  density_matrix,
+  dofspar,
+  u0;
+  conjugate,
+  maxiter,
+  tol,
+)
+  m = length(dofspar)
+  u = copy(u0)
+  Energies.normalize_M!(u, e.M)
+  history = [gp_history_entry(e, u, 0)]
+  previous_direction = nothing
+  previous_gradient_norm = 0.0
+
+  for iteration = 1:maxiter
+    density = density_matrix(u)
+    A_u = sparse(e.K + e.beta .* density)
+    lambda = dot(u, A_u * u)
+    residual = A_u * u .- lambda .* (e.M * u)
+
+    # One inexact a_u-metric solve, realized by the same overlapping
+    # one-level AS construction as Studies 8 and 9.
+    schwarz = schwarz_setup(A_u, dofspar)
+    preconditioned = apply_AS(schwarz, residual)
+    projected = preconditioned .- u .* dot(u, e.M * preconditioned)
+    gradient_norm = dot(residual, projected)
+    gradient_norm > 0 || break
+
+    direction = -projected
+    if conjugate && !isnothing(previous_direction)
+      transported = previous_direction .-
+                    u .* dot(u, e.M * previous_direction)
+      beta_fr = gradient_norm / previous_gradient_norm
+      direction .+= beta_fr .* transported
+      # Changing metrics can destroy descent; restart with the Sobolev
+      # gradient whenever Fletcher--Reeves is not a descent direction.
+      dot(residual, direction) < 0 || (direction .= -projected)
+    end
+
+    u_new = Solvers.combine_step(
+      e,
+      hcat(u, direction);
+      initial=u,
+      maxiter=100,
+      tol=1e-10,
+    )
+    dot(u, e.M * u_new) < 0 && (u_new .*= -1)
+    previous_direction = direction
+    previous_gradient_norm = gradient_norm
+    u = u_new
+    push!(history, gp_history_entry(e, u, iteration * m))
+    last(history)[3] < tol && break
+  end
+  return u, history
+end
+
 function run_study10()
+  N = SMALL ? 8 : 16
+  ms = SMALL ? [2] : [2, 4, 8]
+  overlap = 2
+
+  # Keep the inexpensive visualization data available independently of the
+  # cached nonlinear solves.
+  partition_file = "study10_partitions.csv"
+  if !isfile(datafile(partition_file))
+    partition_rows = (
+      m=Int[], N=Int[], idx=Int[], owner=Int[], mult=Int[]
+    )
+    for m in ms
+      owner, mult = metis_cell_partition(N, m, overlap)
+      for idx in eachindex(owner)
+        push!(partition_rows.m, m)
+        push!(partition_rows.N, N)
+        push!(partition_rows.idx, idx)
+        push!(partition_rows.owner, owner[idx])
+        push!(partition_rows.mult, mult[idx])
+      end
+    end
+    savetable(partition_file, partition_rows)
+  end
+
   files = ("study10_gp_conv.csv", "study10_gp_solutions.csv")
   if !needs_run(files...)
     println("study10: cached, skipping")
@@ -60,10 +168,7 @@ function run_study10()
   end
   println("study10: Gross--Pitaevskii nonlinear eigenproblem")
 
-  N = SMALL ? 8 : 16
-  ms = SMALL ? [2] : [2, 4, 8]
   betas = SMALL ? [10.0] : [1.0, 10.0, 100.0]
-  overlap = 2
   tol = 1e-6
   maxiter = SMALL ? 15 : 80
 
@@ -82,9 +187,8 @@ function run_study10()
     beta=Float64[], N=Int[], idx=Int[], value=Float64[], density=Float64[]
   )
 
-  K_ref, M_ref, q_ref, g_ref, _, _ = FEMDiscretizations.FEM_GrossPitaevskii(
-    N, 1; overlap=overlap
-  )
+  K_ref, M_ref, q_ref, g_ref, _, _, _ =
+    FEMDiscretizations.FEM_GrossPitaevskii(N, 1; overlap=overlap)
   linear_initial = linear_ground_state(K_ref, M_ref)
   references = Dict{Float64,Tuple{Float64,Vector{Float64}}}()
   for beta in betas
@@ -126,9 +230,8 @@ function run_study10()
   end
 
   for m in ms
-    K, M, quartic, cubic, dofspar, _ = FEMDiscretizations.FEM_GrossPitaevskii(
-      N, m; overlap=overlap
-    )
+    K, M, quartic, cubic, density_matrix, dofspar, _ =
+      FEMDiscretizations.FEM_GrossPitaevskii(N, m; overlap=overlap)
     u0 = linear_ground_state(K, M)
     for beta in betas
       e = Energies.GrossPitaevskiiRayleighQuotient(K, M, beta, quartic, cubic)
@@ -139,6 +242,26 @@ function run_study10()
       )
       record("gp_additive", beta, m, reference_energy, additive)
       record("gp_additive_history", beta, m, reference_energy, with_history)
+      _, gfdn = gp_gfdn_au_as_history(
+        e,
+        density_matrix,
+        dofspar,
+        u0;
+        conjugate=false,
+        maxiter=maxiter,
+        tol=tol,
+      )
+      _, cg_gfdn = gp_gfdn_au_as_history(
+        e,
+        density_matrix,
+        dofspar,
+        u0;
+        conjugate=true,
+        maxiter=maxiter,
+        tol=tol,
+      )
+      record("gfdn_au_as", beta, m, reference_energy, gfdn)
+      record("cg_gfdn_au_as", beta, m, reference_energy, cg_gfdn)
       println("  beta = $beta, m = $m done")
     end
   end

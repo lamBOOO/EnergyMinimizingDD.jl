@@ -115,13 +115,21 @@ function legend_line_marker_elements(
   ]
 end
 
-function add_partition_inset!(figpos, parts, m; halign = 1.03, valign = 0.97)
+function add_partition_inset!(
+  figpos,
+  parts,
+  m;
+  halign = 1.03,
+  valign = 0.97,
+  inset_size = 0.3,
+  inset_title = "",
+)
   pmask = parts.m .== m
   N = parts.N[findfirst(pmask)]
   pax = Axis(
     figpos;
-    width = Relative(0.3),
-    height = Relative(0.3),
+    width = Relative(inset_size),
+    height = Relative(inset_size),
     halign = halign,
     valign = valign,
     tellwidth = false,
@@ -157,7 +165,65 @@ function add_partition_inset!(figpos, parts, m; halign = 1.03, valign = 0.97)
      for i in axes(mult_grid, 1), j in axes(mult_grid, 2)];
   )
   add_partition_boundaries!(pax, owner_grid)
+  if !isempty(inset_title)
+    text!(
+      pax,
+      0.5,
+      0.96;
+      text=inset_title,
+      align=(:center, :top),
+      fontsize=9,
+      color=:white,
+      font=:bold,
+    )
+  end
   return pax
+end
+
+function add_gp_solution_inset!(
+  figpos,
+  solutions,
+  beta;
+  halign = 0.68,
+  valign = 0.97,
+  inset_size = 0.23,
+)
+  smask = solutions.beta .== beta
+  N = solutions.N[findfirst(smask)]
+  sax = Axis(
+    figpos;
+    width = Relative(inset_size),
+    height = Relative(inset_size),
+    halign = halign,
+    valign = valign,
+    tellwidth = false,
+    tellheight = false,
+    aspect = DataAspect(),
+    limits = (0, 1, 0, 1),
+  )
+  translate!(sax.blockscene, 0, 0, 150)
+  hidedecorations!(sax)
+  hidespines!(sax)
+  xs = collect(all_nodes(N))
+  heatmap!(
+    sax,
+    xs,
+    xs,
+    field_matrix_with_bc(pick(solutions, :density, smask), N);
+    colormap = :viridis,
+    colorrange = (0, maximum(solutions.density)),
+  )
+  text!(
+    sax,
+    0.5,
+    0.96;
+    text="density",
+    align=(:center, :top),
+    fontsize=9,
+    color=:white,
+    font=:bold,
+  )
+  return sax
 end
 
 # ---------------------------------------------------------------------------
@@ -784,32 +850,49 @@ function fig13_evp_cmp()
 end
 
 # ---------------------------------------------------------------------------
-# Figs 14--15: Gross--Pitaevskii convergence and ground-state densities
+# Figs 14--16: Gross--Pitaevskii convergence and ground-state densities
 # ---------------------------------------------------------------------------
 function fig14_gp_convergence()
   tbl = loadtable("study10_gp_conv.csv")
+  parts = loadtable("study10_partitions.csv")
+  solutions = loadtable("study10_gp_solutions.csv")
   betas = sort(unique(tbl.beta))
   ms = sort(unique(tbl.m))
-  methods = ("gp_additive", "gp_additive_history")
+  methods = (
+    "gp_additive",
+    "gp_additive_history",
+    "gfdn_au_as",
+    "cg_gfdn_au_as",
+  )
   labels = Dict(
     "gp_additive" => "additive GP-varDD",
     "gp_additive_history" => "additive GP-varDD + history",
+    "gfdn_au_as" => "GFDN(aᵤ)+AS (optimal step)",
+    "cg_gfdn_au_as" => "CG-GFDN(aᵤ)+AS (optimal step)",
   )
   markers = Dict(
     "gp_additive" => :circle,
     "gp_additive_history" => :hexagon,
+    "gfdn_au_as" => :rect,
+    "cg_gfdn_au_as" => :utriangle,
   )
+  colors = Makie.resample_cmap(:tab10, length(methods))
   positive_residuals = tbl.resnorm[tbl.resnorm .> 0]
   ylimits = (1e-7, maximum(positive_residuals) * 2)
+  ytick_exps = sort(
+    collect(floor(Int, log10(ylimits[2])):-2:ceil(Int, log10(ylimits[1])))
+  )
+  yticks = LogTicks(ytick_exps)
 
-  fig = Figure(size = (max(700, 330 * length(ms)), 275 * length(betas) + 90))
+  fig = Figure(size = (330 * length(ms), 275 * length(betas) + 90))
   for (row, beta) in enumerate(betas), (column, m) in enumerate(ms)
     ax = Axis(
       fig[row, column];
-      xlabel = row == length(betas) ? "local solves (work)" : "",
-      ylabel = column == 1 ? "beta = $(Int(beta))\nprojected residual" : "",
+      xlabel = row == length(betas) ? "iteration" : "",
+      ylabel = column == 1 ? "β = $(Int(beta))\nresidual norm ‖rₖ‖₂" : "",
       title = row == 1 ? "m = $m" : "",
       yscale = log10,
+      yticks = yticks,
       limits = (nothing, ylimits),
     )
     for (i, method) in enumerate(methods)
@@ -820,22 +903,117 @@ function fig14_gp_convergence()
         (tbl.resnorm .> 0)
       add_series!(
         ax,
-        pick(tbl, :solves, mask),
+        pick(tbl, :solves, mask) ./ m,
         logfloor(pick(tbl, :resnorm, mask));
         label = labels[method],
-        color = color_for(i),
+        color = colors[i],
         marker = markers[method],
       )
     end
+    add_gp_solution_inset!(
+      fig[row, column], solutions, beta; halign=0.68, inset_size=0.23
+    )
+    add_partition_inset!(
+      fig[row, column],
+      parts,
+      m;
+      halign=0.99,
+      inset_size=0.23,
+      inset_title="partition",
+    )
   end
   Legend(
     fig[length(betas)+1, 1:length(ms)],
-    legend_line_marker_elements(methods, markers),
+    legend_line_marker_elements(methods, markers; colors),
     [labels[method] for method in methods];
     orientation = :horizontal,
+    nbanks = 2,
     framevisible = true,
   )
+  rowgap!(fig.layout, 8)
   savefigs(fig, "fig14_gp_convergence")
+end
+
+function fig16_gp_energy_gap()
+  tbl = loadtable("study10_gp_conv.csv")
+  parts = loadtable("study10_partitions.csv")
+  solutions = loadtable("study10_gp_solutions.csv")
+  betas = sort(unique(tbl.beta))
+  ms = sort(unique(tbl.m))
+  methods = (
+    "gp_additive",
+    "gp_additive_history",
+    "gfdn_au_as",
+    "cg_gfdn_au_as",
+  )
+  labels = Dict(
+    "gp_additive" => "additive GP-varDD",
+    "gp_additive_history" => "additive GP-varDD + history",
+    "gfdn_au_as" => "GFDN(aᵤ)+AS (optimal step)",
+    "cg_gfdn_au_as" => "CG-GFDN(aᵤ)+AS (optimal step)",
+  )
+  markers = Dict(
+    "gp_additive" => :circle,
+    "gp_additive_history" => :hexagon,
+    "gfdn_au_as" => :rect,
+    "cg_gfdn_au_as" => :utriangle,
+  )
+  colors = Makie.resample_cmap(:tab10, length(methods))
+  positive_gaps = tbl.energy_gap[tbl.energy_gap .> 0]
+  ylimits = (max(minimum(positive_gaps) / 2, 1e-14), maximum(positive_gaps) * 2)
+  ytick_exps = sort(
+    collect(floor(Int, log10(ylimits[2])):-2:ceil(Int, log10(ylimits[1])))
+  )
+  yticks = LogTicks(ytick_exps)
+
+  fig = Figure(size = (330 * length(ms), 275 * length(betas) + 90))
+  for (row, beta) in enumerate(betas), (column, m) in enumerate(ms)
+    ax = Axis(
+      fig[row, column];
+      xlabel = row == length(betas) ? "iteration" : "",
+      ylabel = column == 1 ? "β = $(Int(beta))\nenergy gap E(uₖ)−E(u★)" : "",
+      title = row == 1 ? "m = $m" : "",
+      yscale = log10,
+      yticks = yticks,
+      limits = (nothing, ylimits),
+    )
+    for (i, method) in enumerate(methods)
+      mask =
+        (tbl.method .== method) .&
+        (tbl.beta .== beta) .&
+        (tbl.m .== m) .&
+        (tbl.energy_gap .> 0)
+      add_series!(
+        ax,
+        pick(tbl, :solves, mask) ./ m,
+        logfloor(pick(tbl, :energy_gap, mask));
+        label = labels[method],
+        color = colors[i],
+        marker = markers[method],
+      )
+    end
+    add_gp_solution_inset!(
+      fig[row, column], solutions, beta; halign=0.68, inset_size=0.23
+    )
+    add_partition_inset!(
+      fig[row, column],
+      parts,
+      m;
+      halign=0.99,
+      inset_size=0.23,
+      inset_title="partition",
+    )
+  end
+  Legend(
+    fig[length(betas)+1, 1:length(ms)],
+    legend_line_marker_elements(methods, markers; colors),
+    [labels[method] for method in methods];
+    orientation = :horizontal,
+    nbanks = 2,
+    framevisible = true,
+  )
+  rowgap!(fig.layout, 8)
+  savefigs(fig, "fig16_gp_energy_gap")
 end
 
 function fig15_gp_ground_states()
@@ -849,9 +1027,9 @@ function fig15_gp_ground_states()
     mask = tbl.beta .== beta
     ax = Axis(
       fig[1, column];
-      title = "beta = $(Int(beta))",
-      xlabel = "x1",
-      ylabel = column == 1 ? "x2" : "",
+      title = "β = $(Int(beta))",
+      xlabel = "x₁",
+      ylabel = column == 1 ? "x₂" : "",
       aspect = DataAspect(),
     )
     heatmap!(
@@ -891,6 +1069,7 @@ function make_all_figures()
   fig13_evp_cmp()
   fig14_gp_convergence()
   fig15_gp_ground_states()
+  fig16_gp_energy_gap()
   println("plots: done -> $(FIG_DIR)")
 end
 

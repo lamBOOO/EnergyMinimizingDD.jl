@@ -51,10 +51,11 @@ end
 
 Assemble the linear Schrödinger matrices and thread-local finite-element
 evaluators required by `GrossPitaevskiiRayleighQuotient`. Returns
-`K, M, quartic, cubic_gradient, dofspar, U`, where
+`K, M, quartic, cubic_gradient, density_matrix, dofspar, U`, where
 
     quartic(u) = integral(u_h^4),
-    cubic_gradient(u)_i = integral(u_h^3 phi_i).
+    cubic_gradient(u)_i = integral(u_h^3 phi_i),
+    density_matrix(u)_ij = integral(u_h^2 phi_i phi_j).
 """
 function FEM_GrossPitaevskii(
   N::Int,
@@ -110,7 +111,13 @@ function FEM_GrossPitaevskii(
     return assemble_vector(cubic_form, V)
   end
 
-  return K, M, quartic, cubic_gradient, dofspar, U
+  function density_matrix(u::AbstractVector)
+    uh = cached_fe_function(u)
+    density_form(w, v) = ∫(uh * uh * w * v)dOmega
+    return assemble_matrix(density_form, V, U)
+  end
+
+  return K, M, quartic, cubic_gradient, density_matrix, dofspar, U
 end
 
 """
