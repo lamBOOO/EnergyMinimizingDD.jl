@@ -47,6 +47,73 @@ function FEM_Schroedinger(
 end
 
 """
+    FEM_GrossPitaevskii(N, m=9; P, overlap=2)
+
+Assemble the linear Schrödinger matrices and thread-local finite-element
+evaluators required by `GrossPitaevskiiRayleighQuotient`. Returns
+`K, M, quartic, cubic_gradient, dofspar, U`, where
+
+    quartic(u) = integral(u_h^4),
+    cubic_gradient(u)_i = integral(u_h^3 phi_i).
+"""
+function FEM_GrossPitaevskii(
+  N::Int,
+  m::Int = 9;
+  P::F = (x -> exp(sqrt((x.data[1])^2 + (x.data[2])^2))),
+  overlap::Int = 2,
+) where {F<:Function}
+  domain = (0, 1.0, 0, 1.0)
+  partition = (1.0 * N, 1.0 * N)
+  model = CartesianDiscreteModel(
+    domain,
+    partition;
+    isperiodic = (false, false),
+  )
+  reffe = ReferenceFE(lagrangian, Float64, 1)
+  V = TestFESpace(model, reffe, dirichlet_tags = ["boundary"])
+  U = TrialFESpace(V, 0)
+  omega = Triangulation(model)
+  dOmega = Measure(omega, 2)
+
+  linear_form(u, v) =
+    ∫(∇(u) ⋅ ∇(v) + (x -> P(x)) * u * v)dOmega
+  mass_form(u, v) = ∫(u * v)dOmega
+  K = assemble_matrix(linear_form, V, U)
+  M = assemble_matrix(mass_form, V, U)
+
+  graph = GridapDistributed.compute_cell_graph(model)
+  owners = Metis.partition(graph, m)
+  element_partition = create_elements_partition(owners, m)
+  create_overlapping_elements_partition!(element_partition, graph, m, overlap)
+  dofspar = create_dofs_partition(element_partition, V)
+
+  ndofs = num_free_dofs(U)
+  dirichlet_values = get_dirichlet_dof_values(U)
+  caches = [
+    FEFunction(U, zeros(ndofs), dirichlet_values) for _ = 1:Threads.nthreads()
+  ]
+
+  function cached_fe_function(u::AbstractVector)
+    uh = caches[Threads.threadid()]
+    copyto!(get_free_dof_values(uh), u)
+    return uh
+  end
+
+  function quartic(u::AbstractVector)
+    uh = cached_fe_function(u)
+    return sum(∫(uh * uh * uh * uh)dOmega)
+  end
+
+  function cubic_gradient(u::AbstractVector)
+    uh = cached_fe_function(u)
+    cubic_form(v) = ∫(uh * uh * uh * v)dOmega
+    return assemble_vector(cubic_form, V)
+  end
+
+  return K, M, quartic, cubic_gradient, dofspar, U
+end
+
+"""
   FEM_PLaplacian(N::Int, m::Int, p::Float64)
 
 Set up a p-Laplacian problem using Gridap FEM on a unit square domain.

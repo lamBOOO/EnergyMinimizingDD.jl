@@ -1,6 +1,7 @@
 module Energies
 
-export AbstractEnergy, QuadraticEnergy, RayleighQuotient, GeneralizedRayleighQuotient, NonlinearEnergy, LinearRegressionEnergy
+export AbstractEnergy, QuadraticEnergy, RayleighQuotient, GeneralizedRayleighQuotient, GrossPitaevskiiRayleighQuotient, NonlinearEnergy, LinearRegressionEnergy
+export physical_energy, chemical_potential, projected_residual
 
 using LinearAlgebra
 using FiniteDiff
@@ -257,6 +258,109 @@ function hessian!(
     ),
   )
 end
+
+"""
+    GrossPitaevskiiRayleighQuotient(K, M, beta, quartic, cubic_gradient)
+
+Scale-invariant Gross--Pitaevskii objective
+
+    R_beta(u) = (u'Ku)/(u'Mu) + (beta/2) quartic(u)/(u'Mu)^2,
+
+where `quartic(u) = integral(u_h^4)` and `cubic_gradient(u)` has entries
+`integral(u_h^3 phi_i)`. Thus `R_beta(u)` is twice the physical GP energy of
+the M-normalized state. At a normalized stationary point,
+
+    K*u + beta*cubic_gradient(u) = lambda*M*u.
+"""
+struct GrossPitaevskiiRayleighQuotient{
+  T,
+  MK<:AbstractMatrix{T},
+  MM<:AbstractMatrix{T},
+  FQ<:Function,
+  FG<:Function,
+} <: AbstractEnergy{T}
+  K::MK
+  M::MM
+  beta::T
+  quartic::FQ
+  cubic_gradient::FG
+end
+
+function GrossPitaevskiiRayleighQuotient(
+  K::AbstractMatrix{T},
+  M::AbstractMatrix{T},
+  beta::Real,
+  quartic::FQ,
+  cubic_gradient::FG,
+) where {T,FQ<:Function,FG<:Function}
+  beta_T = T(beta)
+  beta_T >= zero(T) || throw(ArgumentError("beta must be nonnegative"))
+  size(K) == size(M) || throw(DimensionMismatch("K and M must have equal size"))
+  return GrossPitaevskiiRayleighQuotient{
+    T,typeof(K),typeof(M),FQ,FG,
+  }(K, M, beta_T, quartic, cubic_gradient)
+end
+
+dimension(e::GrossPitaevskiiRayleighQuotient) = size(e.K, 1)
+
+function energy(
+  e::GrossPitaevskiiRayleighQuotient{T},
+  u::AbstractVector{T},
+) where {T}
+  Mu = e.M * u
+  mass = dot(u, Mu)
+  mass > eps(T) || throw(ArgumentError("GP quotient is undefined at a zero-mass vector"))
+  return dot(u, e.K * u) / mass +
+         (e.beta / 2) * e.quartic(u) / mass^2
+end
+
+physical_energy(e::GrossPitaevskiiRayleighQuotient, u::AbstractVector) =
+  energy(e, u) / 2
+
+function gradient(
+  e::GrossPitaevskiiRayleighQuotient{T},
+  u::AbstractVector{T},
+) where {T}
+  Ku = e.K * u
+  Mu = e.M * u
+  mass = dot(u, Mu)
+  mass > eps(T) || throw(
+    ArgumentError("GP quotient gradient is undefined at a zero-mass vector"),
+  )
+  kinetic = dot(u, Ku)
+  quartic = e.quartic(u)
+  cubic = e.cubic_gradient(u)
+  return 2 .* (
+    Ku ./ mass .+
+    e.beta .* cubic ./ mass^2 .-
+    (kinetic / mass^2 + e.beta * quartic / mass^3) .* Mu
+  )
+end
+
+function chemical_potential(
+  e::GrossPitaevskiiRayleighQuotient,
+  u::AbstractVector,
+)
+  mass = dot(u, e.M * u)
+  mass > eps(eltype(u)) ||
+    throw(ArgumentError("chemical potential is undefined at zero mass"))
+  return dot(u, e.K * u) / mass + e.beta * e.quartic(u) / mass^2
+end
+
+function projected_residual(
+  e::GrossPitaevskiiRayleighQuotient,
+  u::AbstractVector,
+)
+  mass = dot(u, e.M * u)
+  mass > eps(eltype(u)) ||
+    throw(ArgumentError("GP residual is undefined at zero mass"))
+  v = u ./ sqrt(mass)
+  lambda = chemical_potential(e, v)
+  return e.K * v .+ e.beta .* e.cubic_gradient(v) .- lambda .* (e.M * v)
+end
+
+residual_norm(e::GrossPitaevskiiRayleighQuotient, u::AbstractVector) =
+  norm(projected_residual(e, u))
 
 
 

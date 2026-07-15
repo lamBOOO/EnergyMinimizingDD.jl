@@ -755,6 +755,95 @@ function fig13_evp_cmp()
 end
 
 # ---------------------------------------------------------------------------
+# Figs 14--15: Gross--Pitaevskii convergence and ground-state densities
+# ---------------------------------------------------------------------------
+function fig14_gp_convergence()
+  tbl = loadtable("study10_gp_conv.csv")
+  betas = sort(unique(tbl.beta))
+  ms = sort(unique(tbl.m))
+  methods = ("gp_additive", "gp_additive_history")
+  labels = Dict(
+    "gp_additive" => "additive GP-varDD",
+    "gp_additive_history" => "additive GP-varDD + history",
+  )
+  markers = Dict(
+    "gp_additive" => :circle,
+    "gp_additive_history" => :hexagon,
+  )
+  positive_residuals = tbl.resnorm[tbl.resnorm .> 0]
+  ylimits = (1e-7, maximum(positive_residuals) * 2)
+
+  fig = Figure(size = (max(700, 330 * length(ms)), 275 * length(betas) + 90))
+  for (row, beta) in enumerate(betas), (column, m) in enumerate(ms)
+    ax = Axis(
+      fig[row, column];
+      xlabel = row == length(betas) ? "local solves (work)" : "",
+      ylabel = column == 1 ? "beta = $(Int(beta))\nprojected residual" : "",
+      title = row == 1 ? "m = $m" : "",
+      yscale = log10,
+      limits = (nothing, ylimits),
+    )
+    for (i, method) in enumerate(methods)
+      mask =
+        (tbl.method .== method) .&
+        (tbl.beta .== beta) .&
+        (tbl.m .== m) .&
+        (tbl.resnorm .> 0)
+      add_series!(
+        ax,
+        pick(tbl, :solves, mask),
+        logfloor(pick(tbl, :resnorm, mask));
+        label = labels[method],
+        color = color_for(i),
+        marker = markers[method],
+      )
+    end
+  end
+  Legend(
+    fig[length(betas)+1, 1:length(ms)],
+    legend_line_marker_elements(methods, markers),
+    [labels[method] for method in methods];
+    orientation = :horizontal,
+    framevisible = true,
+  )
+  savefigs(fig, "fig14_gp_convergence")
+end
+
+function fig15_gp_ground_states()
+  tbl = loadtable("study10_gp_solutions.csv")
+  betas = sort(unique(tbl.beta))
+  N = tbl.N[1]
+  xs = collect(interior_nodes(N))
+  density_max = maximum(tbl.density)
+  fig = Figure(size = (330 * length(betas), 330))
+  for (column, beta) in enumerate(betas)
+    mask = tbl.beta .== beta
+    ax = Axis(
+      fig[1, column];
+      title = "beta = $(Int(beta))",
+      xlabel = "x1",
+      ylabel = column == 1 ? "x2" : "",
+      aspect = DataAspect(),
+    )
+    heatmap!(
+      ax,
+      xs,
+      xs,
+      field_matrix(pick(tbl, :density, mask), N);
+      colormap = :viridis,
+      colorrange = (0, density_max),
+    )
+  end
+  Colorbar(
+    fig[1, length(betas)+1];
+    limits = (0, density_max),
+    colormap = :viridis,
+    label = "ground-state density |u|^2",
+  )
+  savefigs(fig, "fig15_gp_ground_states")
+end
+
+# ---------------------------------------------------------------------------
 
 function make_all_figures()
   println("plots: generating all figures from data/*.csv")
@@ -771,6 +860,8 @@ function make_all_figures()
   fig11_local3d()
   fig12_poisson_cmp()
   fig13_evp_cmp()
+  fig14_gp_convergence()
+  fig15_gp_ground_states()
   println("plots: done -> $(FIG_DIR)")
 end
 

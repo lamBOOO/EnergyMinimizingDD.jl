@@ -10,6 +10,7 @@ using Arpack
 using Printf
 using Random
 using LineSearches
+using Optim
 
 using VariationalDD.Energies
 
@@ -271,6 +272,29 @@ function inf_step(
 end
 
 function inf_step(
+  e::Energies.GrossPitaevskiiRayleighQuotient{Float64},
+  u_cur::Vector{Float64},
+  idx_sub::AbstractVector,
+)
+  if iszero(e.beta)
+    return inf_step(
+      Energies.GeneralizedRayleighQuotient(e.K, e.M),
+      u_cur,
+      idx_sub,
+    )
+  end
+
+  n = length(u_cur)
+  local_space = zeros(Float64, n, 1 + length(idx_sub))
+  local_space[:, 1] .= u_cur
+  zero_out_local!(view(local_space, :, 1), idx_sub)
+  for (k, j) in pairs(idx_sub)
+    local_space[j, k+1] = 1.0
+  end
+  return _minimize_subspace(e, local_space; initial = u_cur)
+end
+
+function inf_step(
   e::Energies.NonlinearEnergy{Float64},
   u_cur::Vector{Float64},
   idx_sub::AbstractVector,
@@ -419,6 +443,82 @@ function orthonormal_basis(
   return Matrix(F.Q)[:, 1:rank]
 end
 
+"""
+    m_orthonormal_basis(X, M)
+
+Return a basis `Q` for `range(X)` satisfying `Q' * M * Q = I`. The initial
+Euclidean rank-revealing QR removes dependent candidates before the reduced
+mass matrix is factored.
+"""
+function m_orthonormal_basis(X::AbstractMatrix, M::AbstractMatrix)
+  B = orthonormal_basis(X)
+  reduced_mass = Symmetric(B' * M * B)
+  F = cholesky(reduced_mass)
+  return B / F.U
+end
+
+"""
+    _minimize_subspace(e, X; initial=X[:, 1], maxiter=200, tol=1e-9)
+
+Minimize the scale-invariant Gross--Pitaevskii quotient in `range(X)` using
+unconstrained L-BFGS in reduced coordinates. Since the quotient itself is
+scale invariant, no normalization constraint is imposed during optimization;
+only the returned representative is M-normalized.
+"""
+function _minimize_subspace(
+  e::Energies.GrossPitaevskiiRayleighQuotient{Float64},
+  X::AbstractMatrix{Float64};
+  initial::AbstractVector{Float64} = X[:, 1],
+  maxiter::Int = 200,
+  tol::Float64 = 1e-9,
+)
+  maxiter > 0 || throw(ArgumentError("maxiter must be positive"))
+  tol > 0 || throw(ArgumentError("tol must be positive"))
+
+  Q = m_orthonormal_basis(X, e.M)
+  alpha = Q' * (e.M * initial)
+  if norm(alpha) <= 100 * eps(Float64)
+    alpha = zeros(size(Q, 2))
+    alpha[1] = 1.0
+  else
+    alpha ./= norm(alpha)
+  end
+
+  function objective(alpha)
+    dot(alpha, alpha) > eps(Float64) || return Inf
+    return Energies.energy(e, Q * alpha)
+  end
+
+  function reduced_gradient!(storage, alpha)
+    dot(alpha, alpha) > eps(Float64) || throw(
+      ArgumentError("reduced GP quotient is undefined at the zero vector"),
+    )
+    storage .= Q' * Energies.gradient(e, Q * alpha)
+    return storage
+  end
+
+  result = Optim.optimize(
+    objective,
+    reduced_gradient!,
+    alpha,
+    Optim.LBFGS(),
+    Optim.Options(
+      iterations = maxiter,
+      g_abstol = tol,
+      allow_f_increases = false,
+      show_warnings = false,
+    ),
+  )
+  u = Q * Optim.minimizer(result)
+
+  # Fix the arbitrary sign for stable histories and post-processing.
+  if dot(initial, e.M * u) < 0
+    u .*= -1
+  end
+  Energies.normalize_M!(u, e.M)
+  return u
+end
+
 function combine_step(
   e::Energies.QuadraticEnergy{Float64},
   sspace::Matrix{Float64},
@@ -479,6 +579,28 @@ function combine_step(
   x_new = B * eigvecs[:, 1]  # a[1] * u + a[2] * v1
   Energies.normalize_M!(x_new, M)
   return x_new
+end
+
+function combine_step(
+  e::Energies.GrossPitaevskiiRayleighQuotient{Float64},
+  sspace::Matrix{Float64};
+  initial::AbstractVector{Float64} = view(sspace, :, 1),
+  maxiter::Int = 200,
+  tol::Float64 = 1e-9,
+)
+  if iszero(e.beta)
+    return combine_step(
+      Energies.GeneralizedRayleighQuotient(e.K, e.M),
+      sspace,
+    )
+  end
+  return _minimize_subspace(
+    e,
+    sspace;
+    initial = initial,
+    maxiter = maxiter,
+    tol = tol,
+  )
 end
 
 function combine_step(
@@ -905,6 +1027,19 @@ function mix_iterates(
   aligned_trial = dot(u_cur, e.B * u_trial) < 0 ? -u_trial : u_trial
   u_new = omega .* u_cur .+ (1 - omega) .* aligned_trial
   Energies.normalize_M!(u_new, e.B)
+  return u_new
+end
+
+function mix_iterates(
+  e::Energies.GrossPitaevskiiRayleighQuotient,
+  u_cur::AbstractVector,
+  u_trial::AbstractVector,
+  omega::Real,
+)
+  omega == 0 && return u_trial
+  aligned_trial = dot(u_cur, e.M * u_trial) < 0 ? -u_trial : u_trial
+  u_new = omega .* u_cur .+ (1 - omega) .* aligned_trial
+  Energies.normalize_M!(u_new, e.M)
   return u_new
 end
 
