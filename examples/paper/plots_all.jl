@@ -672,7 +672,7 @@ function fig12_poisson_cmp()
   for (j, m) in enumerate(ms)
     ax = Axis(
       fig[1, j];
-      xlabel = "outer solves",
+      xlabel = "iteration",
       ylabel = j == 1 ? "residual norm ‖Axₖ-b‖₂" : "",
       yscale = log10,
       yticks = yticks,
@@ -747,7 +747,7 @@ function fig13_evp_cmp()
   for (j, m) in enumerate(ms)
     ax = Axis(
       fig[1, j];
-      xlabel = "outer solves",
+      xlabel = "iteration",
       ylabel = j == 1 ? "residual norm ‖Axₖ-λₖxₖ‖₂" : "",
       yscale = log10,
       yticks = yticks,
