@@ -867,8 +867,8 @@ function fig14_gp_convergence()
   labels = Dict(
     "gp_additive" => "additive GP-varDD",
     "gp_additive_history" => "additive GP-varDD + history",
-    "gfdn_au_as" => "GFDN(aᵤ)+AS (optimal step)",
-    "cg_gfdn_au_as" => "CG-GFDN(aᵤ)+AS (optimal step)",
+    "gfdn_au_as" => "AS-inexact GFDN(aᵤ) (optimal step)",
+    "cg_gfdn_au_as" => "AS-inexact CG-GFDN(aᵤ) (optimal step)",
   )
   markers = Dict(
     "gp_additive" => :circle,
@@ -949,8 +949,8 @@ function fig16_gp_energy_gap()
   labels = Dict(
     "gp_additive" => "additive GP-varDD",
     "gp_additive_history" => "additive GP-varDD + history",
-    "gfdn_au_as" => "GFDN(aᵤ)+AS (optimal step)",
-    "cg_gfdn_au_as" => "CG-GFDN(aᵤ)+AS (optimal step)",
+    "gfdn_au_as" => "AS-inexact GFDN(aᵤ) (optimal step)",
+    "cg_gfdn_au_as" => "AS-inexact CG-GFDN(aᵤ) (optimal step)",
   )
   markers = Dict(
     "gp_additive" => :circle,

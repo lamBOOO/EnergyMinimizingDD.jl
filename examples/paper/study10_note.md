@@ -19,11 +19,13 @@ one-local-minimization critical path. Retaining the preceding global iterate
 changes only the small second-level problem and requires no additional local
 minimizations.
 
-The monolithic comparison uses the current energy operator
+The monolithic comparison, labeled **AS-inexact GFDN(a_u)**, uses the current energy operator
 `A_u = K + beta*C(u)` as a changing Sobolev metric. One-level additive Schwarz
-approximates its inverse with the same overlapping partitions as varDD. The
-memoryless GFDN(a_u)+AS curve uses the projected preconditioned gradient; the
-CG-GFDN(a_u)+AS curve adds the transported preceding direction with a
+approximates its inverse with the same overlapping partitions as varDD. Only
+one AS application is performed per outer iteration; the `A_u` system is not
+solved to a prescribed global tolerance. The memoryless AS-inexact GFDN(a_u)
+curve uses the projected preconditioned gradient; the AS-inexact CG-GFDN(a_u)
+curve adds the transported preceding direction with a
 Fletcher--Reeves coefficient and restarts whenever it ceases to be a descent
 direction. In both cases the existing GP `combine_step` supplies an
 energy-optimal normalized line search. Each baseline iteration uses `m` local
