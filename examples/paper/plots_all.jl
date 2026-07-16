@@ -211,7 +211,7 @@ function add_gp_solution_inset!(
     xs,
     field_matrix_with_bc(pick(solutions, :density, smask), N);
     colormap = :viridis,
-    colorrange = (0, maximum(solutions.density)),
+    colorrange = (0, maximum(pick(solutions, :density, smask))),
   )
   text!(
     sax,
@@ -861,18 +861,24 @@ function fig14_gp_convergence()
   methods = (
     "gp_additive",
     "gp_additive_history",
+    "gfdn_au_exact",
+    "cg_gfdn_au_exact",
     "gfdn_au_as",
     "cg_gfdn_au_as",
   )
   labels = Dict(
     "gp_additive" => "additive GP-varDD",
     "gp_additive_history" => "additive GP-varDD + history",
+    "gfdn_au_exact" => "exact GFDN(aᵤ) (optimal step)",
+    "cg_gfdn_au_exact" => "exact CG-GFDN(aᵤ) (optimal step)",
     "gfdn_au_as" => "AS-inexact GFDN(aᵤ) (optimal step)",
     "cg_gfdn_au_as" => "AS-inexact CG-GFDN(aᵤ) (optimal step)",
   )
   markers = Dict(
     "gp_additive" => :circle,
     "gp_additive_history" => :hexagon,
+    "gfdn_au_exact" => :diamond,
+    "cg_gfdn_au_exact" => :cross,
     "gfdn_au_as" => :rect,
     "cg_gfdn_au_as" => :utriangle,
   )
@@ -889,7 +895,7 @@ function fig14_gp_convergence()
     ax = Axis(
       fig[row, column];
       xlabel = row == length(betas) ? "iteration" : "",
-      ylabel = column == 1 ? "β = $(Int(beta))\nresidual norm ‖rₖ‖₂" : "",
+      ylabel = column == 1 ? "κ = $(Int(beta))\nresidual norm ‖rₖ‖₂" : "",
       title = row == 1 ? "m = $m" : "",
       yscale = log10,
       yticks = yticks,
@@ -903,7 +909,7 @@ function fig14_gp_convergence()
         (tbl.resnorm .> 0)
       add_series!(
         ax,
-        pick(tbl, :solves, mask) ./ m,
+        pick(tbl, :iteration, mask),
         logfloor(pick(tbl, :resnorm, mask));
         label = labels[method],
         color = colors[i],
@@ -943,18 +949,24 @@ function fig16_gp_energy_gap()
   methods = (
     "gp_additive",
     "gp_additive_history",
+    "gfdn_au_exact",
+    "cg_gfdn_au_exact",
     "gfdn_au_as",
     "cg_gfdn_au_as",
   )
   labels = Dict(
     "gp_additive" => "additive GP-varDD",
     "gp_additive_history" => "additive GP-varDD + history",
+    "gfdn_au_exact" => "exact GFDN(aᵤ) (optimal step)",
+    "cg_gfdn_au_exact" => "exact CG-GFDN(aᵤ) (optimal step)",
     "gfdn_au_as" => "AS-inexact GFDN(aᵤ) (optimal step)",
     "cg_gfdn_au_as" => "AS-inexact CG-GFDN(aᵤ) (optimal step)",
   )
   markers = Dict(
     "gp_additive" => :circle,
     "gp_additive_history" => :hexagon,
+    "gfdn_au_exact" => :diamond,
+    "cg_gfdn_au_exact" => :cross,
     "gfdn_au_as" => :rect,
     "cg_gfdn_au_as" => :utriangle,
   )
@@ -971,7 +983,7 @@ function fig16_gp_energy_gap()
     ax = Axis(
       fig[row, column];
       xlabel = row == length(betas) ? "iteration" : "",
-      ylabel = column == 1 ? "β = $(Int(beta))\nenergy gap E(uₖ)−E(u★)" : "",
+      ylabel = column == 1 ? "κ = $(Int(beta))\nenergy gap E(uₖ)−E(u★)" : "",
       title = row == 1 ? "m = $m" : "",
       yscale = log10,
       yticks = yticks,
@@ -985,7 +997,7 @@ function fig16_gp_energy_gap()
         (tbl.energy_gap .> 0)
       add_series!(
         ax,
-        pick(tbl, :solves, mask) ./ m,
+        pick(tbl, :iteration, mask),
         logfloor(pick(tbl, :energy_gap, mask));
         label = labels[method],
         color = colors[i],
@@ -1020,19 +1032,19 @@ function fig15_gp_ground_states()
   tbl = loadtable("study10_gp_solutions.csv")
   betas = sort(unique(tbl.beta))
   N = tbl.N[1]
-  xs = collect(interior_nodes(N))
-  density_max = maximum(tbl.density)
-  fig = Figure(size = (330 * length(betas), 330))
+  xs = collect(range(-8 + 16 / N, 8 - 16 / N; length=N - 1))
+  fig = Figure(size = (330 * length(betas), 410))
   for (column, beta) in enumerate(betas)
     mask = tbl.beta .== beta
     ax = Axis(
       fig[1, column];
-      title = "β = $(Int(beta))",
+      title = "κ = $(Int(beta))",
       xlabel = "x₁",
       ylabel = column == 1 ? "x₂" : "",
       aspect = DataAspect(),
     )
-    heatmap!(
+    density_max = maximum(pick(tbl, :density, mask))
+    hm = heatmap!(
       ax,
       xs,
       xs,
@@ -1040,13 +1052,15 @@ function fig15_gp_ground_states()
       colormap = :viridis,
       colorrange = (0, density_max),
     )
+    Colorbar(
+      fig[2, column],
+      hm;
+      vertical=false,
+      label="density |u|²",
+      width=Relative(0.85),
+    )
   end
-  Colorbar(
-    fig[1, length(betas)+1];
-    limits = (0, density_max),
-    colormap = :viridis,
-    label = "ground-state density |u|^2",
-  )
+  rowgap!(fig.layout, 5)
   savefigs(fig, "fig15_gp_ground_states")
 end
 

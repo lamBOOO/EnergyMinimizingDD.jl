@@ -47,7 +47,7 @@ function FEM_Schroedinger(
 end
 
 """
-    FEM_GrossPitaevskii(N, m=9; P, overlap=2)
+    FEM_GrossPitaevskii(N, m=9; P, overlap=2, domain, quadrature_degree=4)
 
 Assemble the linear Schrödinger matrices and thread-local finite-element
 evaluators required by `GrossPitaevskiiRayleighQuotient`. Returns
@@ -56,14 +56,19 @@ evaluators required by `GrossPitaevskiiRayleighQuotient`. Returns
     quartic(u) = integral(u_h^4),
     cubic_gradient(u)_i = integral(u_h^3 phi_i),
     density_matrix(u)_ij = integral(u_h^2 phi_i phi_j).
+
+`domain` sets the rectangular computational domain. The default quadrature
+degree exactly integrates the quartic term for affine `P1` elements; higher
+orders can be selected for nonpolynomial trapping potentials.
 """
 function FEM_GrossPitaevskii(
   N::Int,
   m::Int = 9;
   P::F = (x -> exp(sqrt((x.data[1])^2 + (x.data[2])^2))),
   overlap::Int = 2,
+  domain::NTuple{4,<:Real} = (0.0, 1.0, 0.0, 1.0),
+  quadrature_degree::Int = 4,
 ) where {F<:Function}
-  domain = (0, 1.0, 0, 1.0)
   partition = (1.0 * N, 1.0 * N)
   model = CartesianDiscreteModel(
     domain,
@@ -74,7 +79,7 @@ function FEM_GrossPitaevskii(
   V = TestFESpace(model, reffe, dirichlet_tags = ["boundary"])
   U = TrialFESpace(V, 0)
   omega = Triangulation(model)
-  dOmega = Measure(omega, 2)
+  dOmega = Measure(omega, quadrature_degree)
 
   linear_form(u, v) =
     ∫(∇(u) ⋅ ∇(v) + (x -> P(x)) * u * v)dOmega

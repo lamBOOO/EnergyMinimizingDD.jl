@@ -143,11 +143,50 @@ include(joinpath(@__DIR__, "..", "examples", "paper", "study10_gp.jl"))
       maxiter=12,
       tol=1e-5,
     )
+    _, exact_cg_history = gp_cg_gfdn_au_exact_history(
+      e,
+      density_matrix,
+      ones(length(u));
+      maxiter=12,
+      tol=1e-5,
+    )
     @test all(diff(getindex.(gfdn_history, 2)) .≤ 1e-10)
     @test all(diff(getindex.(cg_history, 2)) .≤ 1e-10)
+    @test all(diff(getindex.(exact_cg_history, 2)) .≤ 1e-10)
     @test last(gfdn_history)[3] < first(gfdn_history)[3]
     @test last(cg_history)[3] < first(cg_history)[3]
+    @test last(exact_cg_history)[3] < first(exact_cg_history)[3]
     @test maximum(getindex.(gfdn_history, 4)) ≤ 1e-12
     @test maximum(getindex.(cg_history, 4)) ≤ 1e-12
+    @test maximum(getindex.(exact_cg_history, 4)) ≤ 1e-12
+  end
+
+  @testset "Henning--Jarlebring exact GFDN benchmark" begin
+    N = 32
+    K, M, quartic, cubic, density_matrix, _, U =
+      FEMDiscretizations.FEM_GrossPitaevskii(
+        N,
+        1;
+        P=hj_gp_potential,
+        domain=HJ_GP_DOMAIN,
+        quadrature_degree=8,
+      )
+    e = Energies.GrossPitaevskiiRayleighQuotient(
+      K, M, HJ_GP_KAPPA, quartic, cubic
+    )
+    u0 = hj_gp_initial_vector(U, M)
+    solution, history, taus = gp_gfdn_au_exact_history(
+      e, density_matrix, u0; maxiter=30
+    )
+
+    energies = getindex.(history, 2)
+    @test length(history) == 31
+    @test length(taus) == 30
+    @test all(0 .<= taus .<= 2)
+    @test all(diff(energies) .<= 1e-11)
+    @test abs(dot(solution, M * solution) - 1) <= 1e-11
+    # Discrete 32x32 Q1 reference. Figure 6 of the paper likewise reaches an
+    # energy error of order 1e-9 after 30 adaptive exact-GFDN iterations.
+    @test abs(last(energies) - 10.929093809728007) <= 3e-9
   end
 end
