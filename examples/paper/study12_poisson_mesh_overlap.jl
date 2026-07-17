@@ -30,7 +30,7 @@ function run_study12()
   println("study12: Poisson mesh size versus overlap")
   Random.seed!(1)
 
-  Ns = parse_int_list("POISSON_N", SMALL ? [20, 40] : [20, 40, 80, 160])
+  Ns = parse_int_list("POISSON_N", SMALL ? [20, 40] : [20, 40, 80])
   overlaps = parse_int_list("POISSON_O", SMALL ? [1, 2] : [1, 2, 4, 8])
   m = 4
   reltol = 1e-8
