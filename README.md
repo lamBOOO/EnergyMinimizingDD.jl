@@ -1,5 +1,17 @@
 # VariationalDD.jl
 
+## Homogeneous p-Laplacian benchmark
+
+Study 5 compares varDD and varDD with one-vector history against
+optimally damped one-level nonlinear AS and nonlinear RAS for `p=2,3,4` on a
+triangular P1 mesh and irregular METIS decompositions with `m=2,4,8`
+subdomains and two triangle-edge layers of overlap. All four methods use the same parallel batch of nonlinear
+local minimizers per outer iteration; only their correction-combination rule
+differs. The experiment intentionally uses a constant coefficient and no
+coarse level. See [`examples/paper/study5_note.md`](examples/paper/study5_note.md)
+for the formulation, fairness convention, and Heinlein--Klawonn--Lanser
+reference.
+
 ## Henning--Jarlebring GPE benchmark
 
 Study 10 reproduces the illustrative Gross--Pitaevskii example in section 2.3

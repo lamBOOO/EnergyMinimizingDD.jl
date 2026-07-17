@@ -226,6 +226,118 @@ function add_gp_solution_inset!(
   return sax
 end
 
+function add_plap_solution_inset!(
+  figpos,
+  solutions,
+  p;
+  halign = 0.68,
+  valign = 0.97,
+  inset_size = 0.23,
+)
+  smask = solutions.p .== p
+  N = solutions.N[findfirst(smask)]
+  values = pick(solutions, :value, smask)
+  sax = Axis(
+    figpos;
+    width = Relative(inset_size),
+    height = Relative(inset_size),
+    halign = halign,
+    valign = valign,
+    tellwidth = false,
+    tellheight = false,
+    aspect = DataAspect(),
+    limits = (0, 1, 0, 1),
+  )
+  translate!(sax.blockscene, 0, 0, 150)
+  hidedecorations!(sax)
+  hidespines!(sax)
+  xs = collect(all_nodes(N))
+  heatmap!(
+    sax,
+    xs,
+    xs,
+    field_matrix_with_bc(values, N);
+    colormap = :viridis,
+    colorrange = (0, maximum(values)),
+  )
+  text!(
+    sax,
+    0.5,
+    0.96;
+    text="solution",
+    align=(:center, :top),
+    fontsize=9,
+    color=:white,
+    font=:bold,
+  )
+  return sax
+end
+
+function add_triangle_partition_inset!(
+  figpos,
+  parts,
+  m;
+  halign = 0.99,
+  valign = 0.97,
+  inset_size = 0.23,
+  inset_title = "partition",
+)
+  pmask = parts.m .== m
+  pax = Axis(
+    figpos;
+    width=Relative(inset_size),
+    height=Relative(inset_size),
+    halign=halign,
+    valign=valign,
+    tellwidth=false,
+    tellheight=false,
+    aspect=DataAspect(),
+    limits=(0, 1, 0, 1),
+  )
+  translate!(pax.blockscene, 0, 0, 150)
+  hidedecorations!(pax)
+  hidespines!(pax)
+
+  polygons = [
+    Point2f[
+      (parts.x1[i], parts.y1[i]),
+      (parts.x2[i], parts.y2[i]),
+      (parts.x3[i], parts.y3[i]),
+    ] for i in eachindex(parts.m) if pmask[i]
+  ]
+  owners = Float64.(pick(parts, :owner, pmask))
+  multiplicities = Int.(pick(parts, :mult, pmask))
+  poly!(
+    pax,
+    polygons;
+    color=owners,
+    colormap=:Spectral_9,
+    colorrange=(1, m),
+    strokecolor=(:black, 0.18),
+    strokewidth=0.2,
+  )
+  poly!(
+    pax,
+    polygons;
+    color=[
+      RGBAf(0, 0, 0, value > 1 ? 0.1f0 * value : 0.0f0) for
+      value in multiplicities
+    ],
+    strokewidth=0,
+  )
+  text!(
+    pax,
+    0.5,
+    0.96;
+    text=inset_title,
+    align=(:center, :top),
+    fontsize=9,
+    color=:white,
+    font=:bold,
+  )
+  return pax
+end
+
 # ---------------------------------------------------------------------------
 # Fig 1: problem setup illustration (partition, overlap, solutions)
 # ---------------------------------------------------------------------------
@@ -542,43 +654,91 @@ function fig07_poisson()
 end
 
 # ---------------------------------------------------------------------------
-# Fig 8: p-Laplacian convergence and accuracy
+# Fig 8: p-Laplacian one-level nonlinear DD comparison
 # ---------------------------------------------------------------------------
 function fig08_plaplacian()
   conv = loadtable("study5_conv.csv")
-  summ = loadtable("study5_summary.csv")
+  solutions = loadtable("study5_solutions.csv")
+  parts = loadtable("study5_partitions.csv")
   ps = sort(unique(conv.p))
-  fig = Figure(size = (900, 350))
-  ax1 = Axis(
-    fig[1, 1];
-    xlabel = "iteration",
-    ylabel = "energy gap to Newton reference",
-    yscale = log10,
+  ms = sort(unique(conv.m))
+  methods = (
+    "nonlinear_as",
+    "nonlinear_ras",
+    "var_dd",
+    "var_dd_history",
   )
-  for (i, p) in enumerate(ps)
-    mask = (conv.p .== p) .& (abs.(conv.energy_gap) .> 1e-13)
-    add_series!(
-      ax1,
-      pick(conv, :iter, mask),
-      logfloor(abs.(pick(conv, :energy_gap, mask)));
-      label = "p = $p",
-      color = color_for(i),
+  labels = Dict(
+    "nonlinear_as" => "nonlinear AS, optimal damping",
+    "nonlinear_ras" => "nonlinear RAS, optimal damping",
+    "var_dd" => "varDD",
+    "var_dd_history" => "varDD + history",
+  )
+  markers = Dict(
+    "nonlinear_as" => :circle,
+    "nonlinear_ras" => :rect,
+    "var_dd" => :diamond,
+    "var_dd_history" => :utriangle,
+  )
+  colors = Makie.resample_cmap(:tab10, length(methods))
+  positive_residuals = conv.relative_residual[conv.relative_residual .> 0]
+  ylimits = (1e-8, maximum(positive_residuals) * 2)
+  ytick_exps = sort(
+    collect(floor(Int, log10(ylimits[2])):-2:ceil(Int, log10(ylimits[1])))
+  )
+  yticks = LogTicks(ytick_exps)
+
+  fig = Figure(size = (330 * length(ms), 275 * length(ps) + 90))
+  for (row, p) in enumerate(ps), (column, m) in enumerate(ms)
+    ax = Axis(
+      fig[row, column];
+      xlabel = row == length(ps) ? "outer iteration" : "",
+      ylabel = column == 1 ? "p = $(Int(p))\nrelative residual" : "",
+      title = row == 1 ? "m = $m" : "",
+      yscale = log10,
+      yticks = yticks,
+      limits = (nothing, ylimits),
+    )
+    for (index, method) in enumerate(methods)
+      mask =
+        (conv.p .== p) .&
+        (conv.m .== m) .&
+        (conv.method .== method) .&
+        (conv.relative_residual .> 0)
+      residual_values = logfloor(pick(conv, :relative_residual, mask); floor=1e-16)
+      outer = pick(conv, :outer, mask)
+      add_series!(
+        ax,
+        outer,
+        residual_values;
+        label=labels[method],
+        color=colors[index],
+        marker=markers[method],
+      )
+    end
+    hlines!(ax, [1e-7]; color=:black, linestyle=:dot, linewidth=1.2)
+    add_plap_solution_inset!(
+      fig[row, column], solutions, p; halign=0.68, inset_size=0.23
+    )
+    add_triangle_partition_inset!(
+      fig[row, column],
+      parts,
+      m;
+      halign=0.99,
+      inset_size=0.23,
+      inset_title="partition",
     )
   end
-  add_legend!(ax1; position = :rt)
 
-  ax2 = Axis(
-    fig[1, 2];
-    xlabel = "exponent p",
-    ylabel = "rel. dof error vs Newton",
-    yscale = log10,
-    xticks = collect(summ.p),
-    limits = ((minimum(summ.p) - 0.5, maximum(summ.p) + 0.5), (1e-7, 1e-4)),
+  Legend(
+    fig[length(ps)+1, 1:length(ms)],
+    legend_line_marker_elements(methods, markers; colors),
+    [labels[m] for m in methods];
+    orientation=:horizontal,
+    nbanks=1,
+    framevisible=true,
   )
-  scatter!(ax2, collect(summ.p), collect(summ.relerr); color = color_for(1), markersize = 12)
-  for (pv, it, re) in zip(summ.p, summ.iters, summ.relerr)
-    text!(ax2, pv, re * 3; text = "$it iters", align = (:center, :center), fontsize = 14)
-  end
+  rowgap!(fig.layout, 8)
   savefigs(fig, "fig08_plaplacian")
 end
 

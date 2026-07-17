@@ -1,6 +1,7 @@
 module FEMDiscretizations
 
 using LinearAlgebra
+using SparseArrays
 using FiniteDiff
 using Gridap
 using GridapDistributed
@@ -126,11 +127,20 @@ function FEM_GrossPitaevskii(
 end
 
 """
-  FEM_PLaplacian(N::Int, m::Int, p::Float64)
+    FEM_PLaplacian(N, m=9, p=3.0, f=x->1.0, overlap=2;
+                   alpha=x->1.0, epsilon=1e-8)
 
-Set up a p-Laplacian problem using Gridap FEM on a unit square domain.
-Returns the necessary components for domain decomposition including
-optimized energy and gradient assemblers using cached FEFunction pattern.
+Assemble the regularized weighted p-Laplacian energy on a triangular P1 mesh
+of the unit square,
+
+    E(u) = integral(alpha/p * (epsilon^2 + |grad u|^2)^(p/2) - f*u).
+
+The triangular cells are partitioned with METIS using edge adjacency and
+enlarged by `overlap` triangle layers. In addition to the energy and gradient
+assemblers, this routine returns an analytic sparse Hessian assembler for
+local and reduced Newton solves. The final return value is the DOF partition
+induced by the original, nonoverlapping METIS element partition; it can be
+used to construct a restricted prolongation independently of the overlap.
 """
 function FEM_PLaplacian(
   N::Int,
@@ -138,91 +148,108 @@ function FEM_PLaplacian(
   p::Float64 = 3.0,
   f::F = (x -> 1.0),
   overlap::Int = 2,
-) where {F<:Function}
+  ;
+  alpha::A = (x -> 1.0),
+  epsilon::Float64 = 1e-8,
+) where {F<:Function,A<:Function}
+
+  p >= 2 || throw(ArgumentError("the study supports p >= 2"))
+  epsilon > 0 || throw(ArgumentError("epsilon must be positive"))
+  m > 0 || throw(ArgumentError("m must be positive"))
 
   domain = (0, 1.0, 0, 1.0)
-  partition1 = (1.0 * N, 1.0 * N)
-  model =
-    CartesianDiscreteModel(domain, partition1; isperiodic = (false, false))
-  reffe = ReferenceFE(lagrangian, Float64, 1)
-  VV = TestFESpace(model, reffe, dirichlet_tags = ["boundary"])
-  Ω = Triangulation(model)
-  dΩ = Measure(Ω, 2)
-  U = TrialFESpace(VV, 0)
-
-  # Domain decomposition setup
-  g = GridapDistributed.compute_cell_graph(model)
-  par = Metis.partition(g, m)
-  elpar = create_elements_partition(par, m)
-  create_overlapping_elements_partition!(elpar, g, m, overlap)
-  dofspar = create_dofs_partition(elpar, VV)
-
-  # Cache setup for zero-allocation energy/gradient evaluation
-  ndofs = num_free_dofs(U)
-
-  # Cache FEFunction that we will reuse by mutating its DOF array
-  ufe_cache = FEFunction(U, zeros(ndofs), get_dirichlet_dof_values(U))
-
-  # Use smooth, branch-free ε-regularization
-  eps2 = 1e-24
-  half_p = p / 2
-
-  # Prebuild load pieces: ∫ f u = b_free⋅u_free + c_dirichlet
-  rhs_form(v) = ∫(v * (x -> f(x)))dΩ
-  b_free = assemble_vector(rhs_form, VV)
-  c_dirichlet = sum(
-    ∫(FEFunction(U, zero(b_free), get_dirichlet_dof_values(U)) * (x -> f(x)))dΩ,
+  background = CartesianDiscreteModel(
+    domain, (N, N); isperiodic = (false, false)
   )
+  model = simplexify(background)
+  reffe = ReferenceFE(lagrangian, Float64, 1)
+  V = TestFESpace(model, reffe, dirichlet_tags = ["boundary"])
+  U = TrialFESpace(V, 0)
+  omega = Triangulation(model)
+  dOmega = Measure(omega, max(2, ceil(Int, p)))
 
-  # Energy density: (|∇u|^2 + eps2)^(p/2) / p
-  e_density = (∇u) -> ((∇u ⊙ ∇u + eps2)^half_p) / p
+  # Partition the actual P1 triangle graph and reuse the existing element-to-
+  # dof conversion. Edge adjacency gives the usual dual graph of the mesh.
+  triangle_graph = GridapDistributed.compute_cell_graph(model, 1)
+  triangle_owners = Metis.partition(triangle_graph, m)
+  element_partition = create_elements_partition(triangle_owners, m)
+  core_dofspar = create_dofs_partition(element_partition, V)
+  create_overlapping_elements_partition!(
+    element_partition, triangle_graph, m, overlap
+  )
+  dofspar = create_dofs_partition(element_partition, V)
 
-  # Optimized energy assembler using cached FEFunction
-  function energy_assembler(u_vec::Vector{Float64})
-    # Mutate the cached FEFunction instead of constructing a new one
-    copyto!(get_free_dof_values(ufe_cache), u_vec)
-
-    E_grad = sum(∫(e_density ∘ ∇(ufe_cache))dΩ)
-    # ∫ f u = b_free⋅u_free + c_dirichlet
-    return E_grad - (dot(b_free, u_vec) + c_dirichlet)
+  ndofs = num_free_dofs(U)
+  dirichlet_values = get_dirichlet_dof_values(U)
+  caches = [
+    FEFunction(U, zeros(ndofs), dirichlet_values) for _ = 1:Threads.nthreads()
+  ]
+  function cached_fe_function(values)
+    uh = caches[Threads.threadid()]
+    copyto!(get_free_dof_values(uh), values)
+    return uh
   end
 
-  # Set up algebraic operator for gradient evaluation
-  # p-Laplacian weak form following Gridap tutorial
-  flux(∇u) = begin
-    gnorm_sq = ∇u ⊙ ∇u + eps2
-    return gnorm_sq^((p - 2) / 2) * ∇u
+  eps2 = epsilon^2
+  half_p = p / 2
+  load(v) = ∫((x -> f(x)) * v)dOmega
+  b = assemble_vector(load, V)
+  stiffness(du, v) = ∫((x -> alpha(x)) * ∇(du) ⋅ ∇(v))dOmega
+  K = assemble_matrix(stiffness, V, U)
+
+  density(gradient) = (gradient ⊙ gradient + eps2)^half_p / p
+  function energy_assembler(values::Vector{Float64})
+    uh = cached_fe_function(values)
+    nonlinear = sum(∫((x -> alpha(x)) * (density ∘ ∇(uh)))dOmega)
+    return nonlinear - dot(b, values)
   end
 
-  # Jacobian for Newton method
-  dflux(∇du, ∇u) = begin
-    gnorm_sq = ∇u ⊙ ∇u + eps2
-    gnorm = sqrt(gnorm_sq)
-    if gnorm < 1e-12  # Additional safety
-      return zero(∇du)
-    end
-    return (p - 2) * gnorm^(p - 4) * (∇u ⊙ ∇du) * ∇u + gnorm^(p - 2) * ∇du
+  flux(gradient) = begin
+    norm_squared = gradient ⊙ gradient + eps2
+    return norm_squared^((p - 2) / 2) * gradient
+  end
+  tangent(gradient_du, gradient_u) = begin
+    norm_squared = gradient_u ⊙ gradient_u + eps2
+    isotropic = norm_squared^((p - 2) / 2) * gradient_du
+    anisotropic =
+      (p - 2) * norm_squared^((p - 4) / 2) *
+      (gradient_u ⊙ gradient_du) * gradient_u
+    return isotropic + anisotropic
   end
 
-  # Weak residual and Jacobian
-  res(u, v) = ∫(∇(v) ⊙ (flux ∘ ∇(u)) - v * (x -> f(x)))dΩ
-  jac(u, du, v) = ∫(∇(v) ⊙ (dflux ∘ (∇(du), ∇(u))))dΩ
-
-  # Create FE operator and get algebraic view
-  feop = FEOperator(res, jac, U, VV)
-  alg_op = Gridap.FESpaces.get_algebraic_operator(feop)
-
-  # Pre-allocate vectors for efficiency
-  r_temp = zeros(Float64, ndofs)
-
-  # Optimized gradient assembler using algebraic operator (avoids FEFunction creation)
-  function gradient_assembler(u_vec::Vector{Float64})
-    # Use pre-allocated residual vector
-    Gridap.Algebra.residual!(r_temp, alg_op, u_vec)
-    return copy(r_temp)  # Return a copy to avoid mutation issues
+  function gradient_assembler(values::Vector{Float64})
+    uh = cached_fe_function(values)
+    residual(v) = ∫(
+      (x -> alpha(x)) * (∇(v) ⊙ (flux ∘ ∇(uh))) -
+      (x -> f(x)) * v
+    )dOmega
+    return assemble_vector(residual, V)
   end
 
-  return energy_assembler, gradient_assembler, dofspar, U, ndofs
+  function hessian_assembler(values::Vector{Float64})
+    uh = cached_fe_function(values)
+    jacobian(du, v) = ∫(
+      (x -> alpha(x)) *
+      (∇(v) ⊙ (tangent ∘ (∇(du), ∇(uh))))
+    )dOmega
+    return sparse(assemble_matrix(jacobian, V, U))
+  end
+
+  initial_fe = interpolate_everywhere(
+    x -> 0.1 * x[1] * (1 - x[1]) * x[2] * (1 - x[2]), U
+  )
+  initial = collect(get_free_dof_values(initial_fe))
+  return (
+    energy_assembler,
+    gradient_assembler,
+    hessian_assembler,
+    dofspar,
+    U,
+    ndofs,
+    sparse(K),
+    initial,
+    core_dofspar,
+  )
 end
 
 """
@@ -242,8 +269,9 @@ function solve_p_laplacian_gridap(
   # Setup domain and FE space (same as DD version for consistency)
   domain = (0, 1.0, 0, 1.0)
   partition1 = (1.0 * N, 1.0 * N)
-  model =
+  background =
     CartesianDiscreteModel(domain, partition1; isperiodic = (false, false))
+  model = simplexify(background)
   reffe = ReferenceFE(lagrangian, Float64, 1)
   V0 = TestFESpace(model, reffe, dirichlet_tags = ["boundary"])
   Ug = TrialFESpace(V0, 0)
@@ -255,7 +283,7 @@ function solve_p_laplacian_gridap(
 
   # p-Laplacian weak form with consistent regularization
   # Use same smooth, branch-free ε-regularization as DD version
-  eps2 = 1e-24
+  eps2 = 1e-16
 
   flux(∇u) = begin
     gnorm_sq = ∇u ⊙ ∇u + eps2
@@ -265,11 +293,9 @@ function solve_p_laplacian_gridap(
   # Jacobian for Newton method
   dflux(∇du, ∇u) = begin
     gnorm_sq = ∇u ⊙ ∇u + eps2
-    gnorm = sqrt(gnorm_sq)
-    if gnorm < 1e-12  # Additional safety
-      return zero(∇du)
-    end
-    return (p - 2) * gnorm^(p - 4) * (∇u ⊙ ∇du) * ∇u + gnorm^(p - 2) * ∇du
+    return (p - 2) * gnorm_sq^((p - 4) / 2) *
+           (∇u ⊙ ∇du) * ∇u +
+           gnorm_sq^((p - 2) / 2) * ∇du
   end
 
   # Weak residual and Jacobian
@@ -289,10 +315,9 @@ function solve_p_laplacian_gridap(
   )
   solver = FESolver(nls)
 
-  # Initial guess - small random perturbation
-  Random.seed!(123)
-  x0 = 0.01 * randn(Float64, num_free_dofs(Ug))
-  uh0 = FEFunction(Ug, x0)
+  uh0 = interpolate_everywhere(
+    x -> 0.1 * x[1] * (1 - x[1]) * x[2] * (1 - x[2]), Ug
+  )
 
   # Solve the nonlinear problem
   uh, = solve!(uh0, solver, op)
@@ -335,6 +360,33 @@ function create_dofs_partition(
   end
   dofsp = [reverse_map[freenodesp[ipar]] for ipar = 1:npars]
   return dofsp
+end
+
+"""
+    create_balanced_disjoint_dofs_partition(core_dofs, ndofs)
+
+Assign every degree of freedom to exactly one adjacent nonoverlapping element
+core. Interface ties are assigned to the currently least-loaded admissible
+core, retaining the METIS partition while avoiding a subdomain-index bias.
+"""
+function create_balanced_disjoint_dofs_partition(core_dofs, ndofs::Int)
+  memberships = [Int[] for _ = 1:ndofs]
+  for (subdomain, degrees) in enumerate(core_dofs), degree in degrees
+    push!(memberships[degree], subdomain)
+  end
+
+  owned = [Int[] for _ in core_dofs]
+  loads = zeros(Int, length(core_dofs))
+  # Assign forced/interior DOFs first. Flexible interface DOFs are then used
+  # to equalize the loads instead of inheriting the ordering of global DOFs.
+  for degree in sortperm(length.(memberships))
+    candidates = memberships[degree]
+    isempty(candidates) && error("DOF $degree has no METIS core owner")
+    owner = candidates[argmin(view(loads, candidates))]
+    push!(owned[owner], degree)
+    loads[owner] += 1
+  end
+  return owned
 end
 
 function create_elements_partition(partition::Vector{Int32}, npars::Integer) # Helper function from VariationalDD

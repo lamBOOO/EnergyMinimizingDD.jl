@@ -367,10 +367,11 @@ residual_norm(e::GrossPitaevskiiRayleighQuotient, u::AbstractVector) =
 # 4) Generic Nonlinear Energy: E(u) for general nonlinear problems
 #    Can represent PDE problems like p-Laplacian: E(u) = ∫(|∇u|^p/p)dΩ - ∫f*u dΩ
 #    Or simple algebraic systems: E(x) = ½||F(x)||² where F(x) = 0 is the root problem
-struct NonlinearEnergy{T,F1<:Function,F2<:Function} <: AbstractEnergy{T}
+struct NonlinearEnergy{T,F1<:Function,F2<:Function,F3} <: AbstractEnergy{T}
   name::String   # Descriptive name (e.g., "p-Laplacian", "Circle-Cubic System")
   assembler::F1  # Function that assembles the energy given u: (u) -> energy_value
   grad_assembler::F2  # Function that assembles the gradient: (u) -> gradient_vector
+  hess_assembler::F3  # Optional analytic Hessian assembler
   N::Int        # Problem dimension
 end
 
@@ -380,7 +381,20 @@ NonlinearEnergy(
   grad_assembler::F2,
   N::Int;
 ) where {F1,F2} =
-  NonlinearEnergy{Float64,F1,F2}(name, assembler, grad_assembler, N)
+  NonlinearEnergy{Float64,F1,F2,Nothing}(
+    name, assembler, grad_assembler, nothing, N
+  )
+
+NonlinearEnergy(
+  name::String,
+  assembler::F1,
+  grad_assembler::F2,
+  hess_assembler::F3,
+  N::Int;
+) where {F1,F2,F3} =
+  NonlinearEnergy{Float64,F1,F2,F3}(
+    name, assembler, grad_assembler, hess_assembler, N
+  )
 
 # E(u) - energy evaluation
 energy(e::NonlinearEnergy{T}, u::AbstractVector{T}) where {T} = e.assembler(u)
@@ -392,7 +406,12 @@ dimension(e::NonlinearEnergy) = e.N
 gradient(e::NonlinearEnergy{T}, u::AbstractVector{T}) where {T} =
   e.grad_assembler(u)
 
-
+function hessian(e::NonlinearEnergy{T}, u::AbstractVector{T}) where {T}
+  isnothing(e.hess_assembler) && error(
+    "analytic Hessian not available for nonlinear energy $(e.name)",
+  )
+  return e.hess_assembler(u)
+end
 
 # 6) Linear Regression Energy: E(x) = ||Ax - b||² for least squares problems
 #    Minimizing this energy leads to solving the normal equations A'Ax = A'b

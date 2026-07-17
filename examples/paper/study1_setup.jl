@@ -56,17 +56,19 @@ function run_study1()
   )
 
   # p-Laplacian solution (p = 3)
-  Np = SMALL ? 12 : 20
+  Np = SMALL ? 12 : 18
   mp = SMALL ? 4 : 9
   p = 3.0
-  ea, ga, dofspar_p, Up, ndofs_p =
+  ea, ga, ha, dofspar_p, Up, ndofs_p, _, u0_p =
     FEMDiscretizations.FEM_PLaplacian(Np, mp, p, x -> 1.0, overlap)
-  e_plap = Energies.NonlinearEnergy("p-Laplacian", ea, ga, ndofs_p)
+  e_plap = Energies.NonlinearEnergy("p-Laplacian", ea, ga, ha, ndofs_p)
+  initial_residual = Energies.residual_norm(e_plap, u0_p)
   u_plap, = Solvers.var_dd(
     e_plap,
     dofspar_p;
+    u0 = u0_p,
     maxiter = 50,
-    tol = 1e-6,
+    tol = 1e-6 * initial_residual,
     verbose = false,
   )
   savetable(

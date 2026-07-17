@@ -187,15 +187,14 @@ println("✓ passed.")
 # p-Laplacian nonlinear problem example
 println("\n=== p-Laplacian Nonlinear FEM Example ===")
 p_val = 3.0
-N_small = 20  # Use smaller problem size for testing
+N_small = 18  # Divisible by sqrt(m_small) for the regular decomposition
 m_small = 9   # Fewer subdomains
-energy_assembler, grad_assembler, part_pl, U_pl, n_dofs = FEMDiscretizations.FEM_PLaplacian(
-  N_small, m_small, p_val
-)
+energy_assembler, grad_assembler, hess_assembler, part_pl, U_pl, n_dofs, _, u0_pl =
+  FEMDiscretizations.FEM_PLaplacian(N_small, m_small, p_val)
 
 # Create p-Laplacian energy functional using the generic NonlinearEnergy
 energy_pl = Energies.NonlinearEnergy(
-  "p-Laplacian", energy_assembler, grad_assembler, n_dofs
+  "p-Laplacian", energy_assembler, grad_assembler, hess_assembler, n_dofs
 )
 
 # Test energy and gradient evaluation with better initial guess
@@ -207,10 +206,17 @@ try
   println("Initial energy: $E_test")
   println("Initial gradient norm: $(norm(grad_test))")
 
-  # Domain decomposition solution with more relaxed tolerance
-  u_pl, E_pl, E_hist_pl, sols_pl, resnorm_hist_pl = Solvers.var_dd(
-    energy_pl, part_pl; maxiter=30, tol=1e-5, save_local_updates=false
+  # Domain decomposition solution through the common var_dd interface
+  initial_residual = Energies.residual_norm(energy_pl, u0_pl)
+  u_pl, = Solvers.var_dd(
+    energy_pl,
+    part_pl;
+    u0=u0_pl,
+    maxiter=30,
+    tol=1e-5 * initial_residual,
+    verbose=false,
   )
+  E_pl = Energies.energy(energy_pl, u_pl)
 
   println("Final p-Laplacian energy: $E_pl")
   println("Final gradient norm: $(Energies.residual_norm(energy_pl, u_pl))")
