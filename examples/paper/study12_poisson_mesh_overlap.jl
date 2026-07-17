@@ -66,12 +66,12 @@ function run_study12()
         energy,
         dofspar;
         maxiter = maxiter,
-        tol = 1e-14,
+        tol = reltol * norm(b),
         verbose = false,
       )
     end
 
-    relative_residuals = residuals ./ first(residuals)
+    relative_residuals = residuals ./ norm(b)
     hit = findfirst(<=(reltol), relative_residuals)
     converged = !isnothing(hit)
     iterations = converged ? hit : -1
