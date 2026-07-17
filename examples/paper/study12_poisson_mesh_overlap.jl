@@ -3,7 +3,7 @@
 # Runs the variational DD solver for a fixed number of subdomains while varying
 # the Cartesian mesh resolution N and overlap width in element layers. The
 # summary CSV contains the first outer iteration at which the residual has been
-# reduced by RELTOL relative to the first recorded residual.
+# reduced by RELTOL relative to the zero-guess residual norm ‖b‖₂.
 #
 # Run locally:
 #   julia --project=. examples/paper/study12_poisson_mesh_overlap.jl
