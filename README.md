@@ -1,5 +1,15 @@
 # VariationalDD.jl
 
+## Generic semilinear Poisson benchmark
+
+Study 11 solves `-Delta u = exp(-u) + f` on a triangular P1 mesh with a
+manufactured sine solution. The exponential is supplied as one instance of
+the generic `FEM_SemilinearPoisson` potential interface; the package does not
+define a PDE-specific energy type. Nonlinear AS, nonlinear RAS, varDD, and
+varDD with one-vector history use the same METIS partition, overlap, local
+energy minimizers, and relative-gradient stopping criterion. See
+[`examples/paper/study11_note.md`](examples/paper/study11_note.md).
+
 ## Homogeneous p-Laplacian benchmark
 
 Study 5 compares varDD and varDD with one-vector history against

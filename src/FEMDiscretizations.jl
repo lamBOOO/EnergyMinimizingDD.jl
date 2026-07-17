@@ -126,6 +126,39 @@ function FEM_GrossPitaevskii(
   return K, M, quartic, cubic_gradient, density_matrix, dofspar, U
 end
 
+"Build the common triangular P1 space and METIS core/overlap partitions."
+function _partitioned_triangular_p1_space(N::Int, m::Int, overlap::Int)
+  m > 0 || throw(ArgumentError("m must be positive"))
+  overlap >= 0 || throw(ArgumentError("overlap must be nonnegative"))
+
+  model = simplexify(CartesianDiscreteModel(
+    (0, 1.0, 0, 1.0), (N, N); isperiodic = (false, false)
+  ))
+  reffe = ReferenceFE(lagrangian, Float64, 1)
+  V = TestFESpace(model, reffe, dirichlet_tags = ["boundary"])
+  U = TrialFESpace(V, 0)
+  omega = Triangulation(model)
+
+  triangle_graph = GridapDistributed.compute_cell_graph(model, 1)
+  triangle_owners = Metis.partition(triangle_graph, m)
+  element_partition = create_elements_partition(triangle_owners, m)
+  core_dofs = create_dofs_partition(element_partition, V)
+  create_overlapping_elements_partition!(
+    element_partition, triangle_graph, m, overlap
+  )
+  overlapping_dofs = create_dofs_partition(element_partition, V)
+
+  return (
+    model=model,
+    V=V,
+    U=U,
+    omega=omega,
+    overlapping_dofs=overlapping_dofs,
+    core_dofs=core_dofs,
+    ndofs=num_free_dofs(U),
+  )
+end
+
 """
     FEM_PLaplacian(N, m=9, p=3.0, f=x->1.0, overlap=2;
                    alpha=x->1.0, epsilon=1e-8)
@@ -155,31 +188,12 @@ function FEM_PLaplacian(
 
   p >= 2 || throw(ArgumentError("the study supports p >= 2"))
   epsilon > 0 || throw(ArgumentError("epsilon must be positive"))
-  m > 0 || throw(ArgumentError("m must be positive"))
-
-  domain = (0, 1.0, 0, 1.0)
-  background = CartesianDiscreteModel(
-    domain, (N, N); isperiodic = (false, false)
-  )
-  model = simplexify(background)
-  reffe = ReferenceFE(lagrangian, Float64, 1)
-  V = TestFESpace(model, reffe, dirichlet_tags = ["boundary"])
-  U = TrialFESpace(V, 0)
-  omega = Triangulation(model)
+  setup = _partitioned_triangular_p1_space(N, m, overlap)
+  V, U, omega = setup.V, setup.U, setup.omega
   dOmega = Measure(omega, max(2, ceil(Int, p)))
-
-  # Partition the actual P1 triangle graph and reuse the existing element-to-
-  # dof conversion. Edge adjacency gives the usual dual graph of the mesh.
-  triangle_graph = GridapDistributed.compute_cell_graph(model, 1)
-  triangle_owners = Metis.partition(triangle_graph, m)
-  element_partition = create_elements_partition(triangle_owners, m)
-  core_dofspar = create_dofs_partition(element_partition, V)
-  create_overlapping_elements_partition!(
-    element_partition, triangle_graph, m, overlap
-  )
-  dofspar = create_dofs_partition(element_partition, V)
-
-  ndofs = num_free_dofs(U)
+  dofspar = setup.overlapping_dofs
+  core_dofspar = setup.core_dofs
+  ndofs = setup.ndofs
   dirichlet_values = get_dirichlet_dof_values(U)
   caches = [
     FEFunction(U, zeros(ndofs), dirichlet_values) for _ = 1:Threads.nthreads()
@@ -249,6 +263,92 @@ function FEM_PLaplacian(
     sparse(K),
     initial,
     core_dofspar,
+  )
+end
+
+"""
+    FEM_SemilinearPoisson(N, m=9; potential, potential_gradient,
+                          potential_hessian, forcing=x->1.0, overlap=2,
+                          quadrature_degree=6, initial_guess=x->0.0)
+
+Assemble the triangular P1 discretization of the generic semilinear energy
+
+    E(u) = integral(1/2 * |grad u|^2 + V(u) - f*u),
+
+whose Euler equation is `-Delta u + V'(u) = f`. The three potential callbacks
+provide `V`, `V'`, and `V''`; consequently the returned `NonlinearEnergy`
+assemblers use an analytic residual and sparse Hessian. Local overlapping DOFs
+and the original METIS core DOFs are returned in the same positions as for
+`FEM_PLaplacian`.
+"""
+function FEM_SemilinearPoisson(
+  N::Int,
+  m::Int = 9;
+  potential::V,
+  potential_gradient::DV,
+  potential_hessian::DDV,
+  forcing::F = (x -> 1.0),
+  overlap::Int = 2,
+  quadrature_degree::Int = 6,
+  initial_guess::I = (x -> 0.0),
+) where {V<:Function,DV<:Function,DDV<:Function,F<:Function,I<:Function}
+  quadrature_degree > 0 ||
+    throw(ArgumentError("quadrature_degree must be positive"))
+
+  setup = _partitioned_triangular_p1_space(N, m, overlap)
+  Vh, Uh, omega = setup.V, setup.U, setup.omega
+  dOmega = Measure(omega, quadrature_degree)
+  ndofs = setup.ndofs
+  dirichlet_values = get_dirichlet_dof_values(Uh)
+  caches = [
+    FEFunction(Uh, zeros(ndofs), dirichlet_values) for _ = 1:Threads.nthreads()
+  ]
+  function cached_fe_function(values)
+    uh = caches[Threads.threadid()]
+    copyto!(get_free_dof_values(uh), values)
+    return uh
+  end
+
+  load(v) = ∫((x -> forcing(x)) * v)dOmega
+  b = assemble_vector(load, Vh)
+  stiffness(du, v) = ∫(∇(du) ⋅ ∇(v))dOmega
+  K = sparse(assemble_matrix(stiffness, Vh, Uh))
+
+  function energy_assembler(values::Vector{Float64})
+    uh = cached_fe_function(values)
+    return 0.5 * dot(values, K * values) +
+           sum(∫(potential ∘ uh)dOmega) - dot(b, values)
+  end
+
+  function gradient_assembler(values::Vector{Float64})
+    uh = cached_fe_function(values)
+    residual(v) = ∫(
+      ∇(uh) ⋅ ∇(v) + (potential_gradient ∘ uh) * v -
+      (x -> forcing(x)) * v
+    )dOmega
+    return assemble_vector(residual, Vh)
+  end
+
+  function hessian_assembler(values::Vector{Float64})
+    uh = cached_fe_function(values)
+    tangent(du, v) = ∫(
+      ∇(du) ⋅ ∇(v) + (potential_hessian ∘ uh) * du * v
+    )dOmega
+    return sparse(assemble_matrix(tangent, Vh, Uh))
+  end
+
+  initial_fe = interpolate_everywhere(initial_guess, Uh)
+  initial = collect(get_free_dof_values(initial_fe))
+  return (
+    energy_assembler,
+    gradient_assembler,
+    hessian_assembler,
+    setup.overlapping_dofs,
+    Uh,
+    ndofs,
+    K,
+    initial,
+    setup.core_dofs,
   )
 end
 

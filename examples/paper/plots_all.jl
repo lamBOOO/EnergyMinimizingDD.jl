@@ -273,6 +273,76 @@ function add_plap_solution_inset!(
   return sax
 end
 
+function add_semilinear_solution_inset!(
+  figpos,
+  solutions;
+  halign=0.68,
+  valign=0.97,
+  inset_size=0.23,
+)
+  N = solutions.N[1]
+  values = solutions.value
+  sax = Axis(
+    figpos;
+    width=Relative(inset_size),
+    height=Relative(inset_size),
+    halign=halign,
+    valign=valign,
+    tellwidth=false,
+    tellheight=false,
+    aspect=DataAspect(),
+    limits=(0, 1, 0, 1),
+  )
+  translate!(sax.blockscene, 0, 0, 150)
+  hidedecorations!(sax)
+  hidespines!(sax)
+  nodal_values = field_matrix_with_bc(values, N)
+  vertices = Point2f[]
+  vertex_values = Float64[]
+  for iy = 0:N, ix = 0:N
+    push!(vertices, Point2f(ix / N, iy / N))
+    push!(vertex_values, nodal_values[iy+1, ix+1])
+  end
+  node(ix, iy) = iy * (N + 1) + ix + 1
+  TriangleFace = CairoMakie.GeometryBasics.TriangleFace
+  faces = TriangleFace{Int}[]
+  for iy = 0:N-1, ix = 0:N-1
+    lower_left = node(ix, iy)
+    lower_right = node(ix + 1, iy)
+    upper_left = node(ix, iy + 1)
+    upper_right = node(ix + 1, iy + 1)
+    push!(faces, TriangleFace(lower_left, lower_right, upper_left))
+    push!(faces, TriangleFace(lower_right, upper_right, upper_left))
+  end
+  color_limit = maximum(abs, values)
+  mesh!(
+    sax,
+    vertices,
+    faces;
+    color=vertex_values,
+    colormap=:balance,
+    colorrange=(-color_limit, color_limit),
+    shading=NoShading,
+  )
+  wireframe!(
+    sax,
+    CairoMakie.GeometryBasics.Mesh(vertices, faces);
+    color=(:black, 0.14),
+    linewidth=0.18,
+  )
+  text!(
+    sax,
+    0.5,
+    0.96;
+    text="exact u★",
+    align=(:center, :top),
+    fontsize=9,
+    color=:white,
+    font=:bold,
+  )
+  return sax
+end
+
 function add_triangle_partition_inset!(
   figpos,
   parts,
@@ -1225,6 +1295,95 @@ function fig15_gp_ground_states()
 end
 
 # ---------------------------------------------------------------------------
+# Fig 17: manufactured exponential semilinear Poisson comparison
+# ---------------------------------------------------------------------------
+function fig17_semilinear_poisson()
+  conv = loadtable("study11_semilinear_conv.csv")
+  solutions = loadtable("study11_semilinear_solution.csv")
+  parts = loadtable("study11_semilinear_partitions.csv")
+  ms = sort(unique(conv.m))
+  methods = (
+    "nonlinear_as",
+    "nonlinear_ras",
+    "var_dd",
+    "var_dd_history",
+  )
+  labels = Dict(
+    "nonlinear_as" => "nonlinear AS, optimal damping",
+    "nonlinear_ras" => "nonlinear RAS, optimal damping",
+    "var_dd" => "varDD",
+    "var_dd_history" => "varDD + history",
+  )
+  markers = Dict(
+    "nonlinear_as" => :circle,
+    "nonlinear_ras" => :rect,
+    "var_dd" => :diamond,
+    "var_dd_history" => :utriangle,
+  )
+  colors = Makie.resample_cmap(:tab10, length(methods))
+  positive_residuals = conv.relative_residual[conv.relative_residual .> 0]
+  ylimits = (1e-8, maximum(positive_residuals) * 2)
+  ytick_exps = sort(
+    collect(floor(Int, log10(ylimits[2])):-2:ceil(Int, log10(ylimits[1])))
+  )
+
+  fig = Figure(size=(330 * length(ms), 430))
+  Label(
+    fig[0, 1:length(ms)],
+    "−Δu = exp(−u) + f  in Ω,    u = 0  on ∂Ω";
+    fontsize=22,
+    font=:bold,
+  )
+  for (column, m) in enumerate(ms)
+    ax = Axis(
+      fig[1, column];
+      xlabel="outer iteration",
+      ylabel=column == 1 ? "relative residual" : "",
+      title="m = $m",
+      yscale=log10,
+      yticks=LogTicks(ytick_exps),
+      limits=(nothing, ylimits),
+    )
+    for (index, method) in enumerate(methods)
+      mask =
+        (conv.m .== m) .&
+        (conv.method .== method) .&
+        (conv.relative_residual .> 0)
+      add_series!(
+        ax,
+        pick(conv, :outer, mask),
+        logfloor(pick(conv, :relative_residual, mask); floor=1e-16);
+        label=labels[method],
+        color=colors[index],
+        marker=markers[method],
+      )
+    end
+    hlines!(ax, [1e-7]; color=:black, linestyle=:dot, linewidth=1.2)
+    add_semilinear_solution_inset!(
+      fig[1, column], solutions; halign=0.68, inset_size=0.23
+    )
+    add_triangle_partition_inset!(
+      fig[1, column],
+      parts,
+      m;
+      halign=0.99,
+      inset_size=0.23,
+      inset_title="partition",
+    )
+  end
+  Legend(
+    fig[2, 1:length(ms)],
+    legend_line_marker_elements(methods, markers; colors),
+    [labels[method] for method in methods];
+    orientation=:horizontal,
+    nbanks=1,
+    framevisible=true,
+  )
+  rowgap!(fig.layout, 8)
+  savefigs(fig, "fig17_semilinear_poisson")
+end
+
+# ---------------------------------------------------------------------------
 
 function make_all_figures()
   println("plots: generating all figures from data/*.csv")
@@ -1244,6 +1403,7 @@ function make_all_figures()
   fig14_gp_convergence()
   fig15_gp_ground_states()
   fig16_gp_energy_gap()
+  fig17_semilinear_poisson()
   println("plots: done -> $(FIG_DIR)")
 end
 
