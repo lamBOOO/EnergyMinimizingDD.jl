@@ -64,6 +64,15 @@ function quadratic_local_coefficients(
 
   A, b = e.A, e.b
 
+  # At a zero initial iterate, the first basis vector is identically zero.
+  # Remove that null direction analytically and solve only in the active local
+  # space. This is the usual first additive-Schwarz correction from u0 = 0.
+  if all(iszero, u_cur)
+    alpha = zeros(localdim)
+    alpha[2:end] .= A[idx_sub, idx_sub] \ b[idx_sub]
+    return alpha
+  end
+
   # u_cur = copy(u_cur)
   # zero_out_local!(u_cur, idx_sub)
 
