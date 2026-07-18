@@ -96,6 +96,7 @@ function run_study13()
         dofspar;
         maxiter = maxiter,
         tol = reltol * norm(b),
+        u0 = zeros(size(K, 1)),
         verbose = false,
       )
     end
