@@ -1,0 +1,45 @@
+name: Poisson structured-overlap study
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "examples/paper/study13_poisson_structured_overlap.jl"
+      - ".github/workflows/poisson-structured-overlap.yml"
+  workflow_dispatch:
+
+jobs:
+  run-study:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      JULIA_PKG_PRECOMPILE_AUTO: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: "1.11"
+      - uses: julia-actions/cache@v2
+      - name: Instantiate project
+        run: julia --project=. -e 'import Pkg; Pkg.instantiate()'
+      - name: Run structured Poisson overlap study
+        env:
+          FORCE: "1"
+        run: julia --project=. examples/paper/study13_poisson_structured_overlap.jl
+      - name: Print iteration table
+        run: |
+          julia --project=. -e '
+            using CSV, Tables
+            file = "examples/paper/data/study13_poisson_structured_overlap_summary.csv"
+            for row in Tables.rowtable(CSV.File(file))
+              println((delta=row.delta, N=row.N, layers=row.overlap_layers,
+                       H_over_delta=row.H_over_delta,
+                       iterations=row.iterations,
+                       converged=row.converged))
+            end
+          '
+      - uses: actions/upload-artifact@v4
+        with:
+          name: poisson-structured-overlap-results
+          path: examples/paper/data/study13_poisson_structured_overlap_*.csv
+          if-no-files-found: error
