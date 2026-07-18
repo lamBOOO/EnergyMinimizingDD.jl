@@ -57,7 +57,9 @@ function pcg_as_diagnostic(K, b, S, reference; maxiter, tolerance)
   return iterations, residuals, energy_gaps, A_errors
 end
 
-function vardd_diagnostic(K, b, dofspar, reference; maxiter, tolerance)
+function vardd_diagnostic(
+  K, b, dofspar, reference; maxiter, tolerance, history_depth=0
+)
   u0 = zeros(size(K, 1))
   initial_residual = norm(b)
   initial_error = u0 - reference
@@ -69,6 +71,7 @@ function vardd_diagnostic(K, b, dofspar, reference; maxiter, tolerance)
     maxiter=maxiter,
     tol=tolerance * initial_residual,
     u0=u0,
+    history_depth=history_depth,
     verbose=false,
   )
 
@@ -144,6 +147,15 @@ function run_study14()
     for (method, runner) in (
       ("varDD", () -> vardd_diagnostic(
         K, b, dofspar, reference; maxiter=maxiter, tolerance=tolerance
+      )),
+      ("varDD+previous", () -> vardd_diagnostic(
+        K,
+        b,
+        dofspar,
+        reference;
+        maxiter=maxiter,
+        tolerance=tolerance,
+        history_depth=1,
       )),
       ("PCG+AS", () -> pcg_as_diagnostic(
         K, b, schwarz, reference; maxiter=maxiter, tolerance=tolerance
