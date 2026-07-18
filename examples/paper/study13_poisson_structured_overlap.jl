@@ -89,19 +89,25 @@ function run_study13()
     K, _, b, _, _ = laplace_setup(N, m, 0)
     dofspar = structured_quadrant_dofs(N, layers)
     energy = Energies.QuadraticEnergy(K, b)
+    nodes = collect(interior_nodes(N))
+    u0 = vec([
+      x * (1 - x) * y * (1 - y)
+      for x in nodes, y in nodes
+    ])
+    initial_residual = norm(K * u0 - b)
 
     elapsed = @elapsed begin
       _, _, _, _, residuals = Solvers.var_dd(
         energy,
         dofspar;
         maxiter = maxiter,
-        tol = reltol * norm(b),
-        u0 = zeros(size(K, 1)),
+        tol = reltol * initial_residual,
+        u0 = u0,
         verbose = false,
       )
     end
 
-    relative_residuals = residuals ./ norm(b)
+    relative_residuals = residuals ./ initial_residual
     hit = findfirst(<=(reltol), relative_residuals)
     converged = !isnothing(hit)
     iterations = converged ? hit : -1
