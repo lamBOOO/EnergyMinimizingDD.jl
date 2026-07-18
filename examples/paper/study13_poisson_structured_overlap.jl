@@ -89,11 +89,7 @@ function run_study13()
     K, _, b, _, _ = laplace_setup(N, m, 0)
     dofspar = structured_quadrant_dofs(N, layers)
     energy = Energies.QuadraticEnergy(K, b)
-    nodes = collect(interior_nodes(N))
-    u0 = vec([
-      x * (1 - x) * y * (1 - y)
-      for x in nodes, y in nodes
-    ])
+    u0 = zeros(size(K, 1))
     initial_residual = norm(K * u0 - b)
 
     elapsed = @elapsed begin
