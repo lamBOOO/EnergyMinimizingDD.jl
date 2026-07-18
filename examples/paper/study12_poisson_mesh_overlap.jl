@@ -3,7 +3,7 @@
 # Runs the variational DD solver for a fixed number of subdomains while varying
 # the Cartesian mesh resolution N and overlap width in element layers. The
 # summary CSV contains the first outer iteration at which the residual has been
-# reduced by RELTOL relative to the zero-guess residual norm ‖b‖₂.
+# reduced by RELTOL relative to the zero-start residual norm ‖r₀‖₂=‖b‖₂.
 #
 # Run locally:
 #   julia --project=. examples/paper/study12_poisson_mesh_overlap.jl
@@ -60,18 +60,21 @@ function run_study12()
   for N in Ns, overlap in overlaps
     K, _, b, dofspar, _ = laplace_setup(N, m, overlap)
     energy = Energies.QuadraticEnergy(K, b)
+    u0 = zeros(size(K, 1))
+    initial_residual = norm(K * u0 - b)
 
     elapsed = @elapsed begin
       _, _, _, _, residuals = Solvers.var_dd(
         energy,
         dofspar;
         maxiter = maxiter,
-        tol = reltol * norm(b),
+        tol = reltol * initial_residual,
+        u0 = u0,
         verbose = false,
       )
     end
 
-    relative_residuals = residuals ./ norm(b)
+    relative_residuals = residuals ./ initial_residual
     hit = findfirst(<=(reltol), relative_residuals)
     converged = !isnothing(hit)
     iterations = converged ? hit : -1
