@@ -2,11 +2,11 @@
 #
 #   -Delta u = exp(-u) + f,  u = 0 on the boundary,
 #
-# with a manufactured sine solution. All four methods use the same triangular
-# P1 mesh, METIS partition, overlap, and parallel local energy minimizers.
+# with a manufactured sine solution. All methods use the same triangular P1
+# mesh, METIS partition, overlap, initial iterate, and true residual test.
 
 isdefined(Main, :PAPER_COMMON) || include("common.jl")
-isdefined(Main, :NONLINEAR_SOURCE_METHODS) ||
+isdefined(Main, :SEMILINEAR_SOURCE_METHODS) ||
   include("nonlinear_source_common.jl")
 
 const SEMILINEAR_MODES = (
@@ -32,6 +32,7 @@ function run_study11()
     "study11_semilinear_summary.csv",
     "study11_semilinear_solution.csv",
     "study11_semilinear_partitions.csv",
+    "study11_semilinear_work.csv",
   )
   if !needs_run(files...)
     println("study11: cached, skipping")
@@ -42,7 +43,7 @@ function run_study11()
   N = SMALL ? 8 : 16
   ms = SMALL ? [2] : [2, 4, 8]
   overlap = 2
-  maxiter = SMALL ? 8 : 30
+  maxiter = SMALL ? 6 : 40
   tolerance = SMALL ? 1e-6 : 1e-7
 
   convergence = (
@@ -59,6 +60,14 @@ function run_study11()
     final_relative_residual=Float64[],
     relative_discrete_error=Float64[],
     relative_nodal_error=Float64[],
+  )
+  work = (
+    m=Int[],
+    method=String[],
+    outer_iterations=Int[],
+    nonlinear_local_batches=Int[],
+    linear_as_batches=Int[],
+    global_jacobian_products=Int[],
   )
   solutions = (N=Int[], idx=Int[], value=Float64[])
 
@@ -116,9 +125,10 @@ function run_study11()
     dofspar,
     _,
     _,
-    _,
+    stiffness,
     initial,
-    core_dofspar = FEMDiscretizations.FEM_SemilinearPoisson(
+    core_dofspar,
+    mass = FEMDiscretizations.FEM_SemilinearPoisson(
       N,
       m;
       potential=s -> exp(-s),
@@ -128,6 +138,7 @@ function run_study11()
       overlap=overlap,
       quadrature_degree=8,
       initial_guess=x -> 0.0,
+      return_mass_matrix=true,
     )
     energy = Energies.NonlinearEnergy(
       "exponential semilinear Poisson",
@@ -137,7 +148,7 @@ function run_study11()
       ndofs,
     )
 
-    for method in NONLINEAR_SOURCE_METHODS
+    for method in SEMILINEAR_SOURCE_METHODS
       result = if method in (:nonlinear_as, :nonlinear_ras)
         nonlinear_source_schwarz_baseline(
           energy,
@@ -147,6 +158,59 @@ function run_study11()
           u0=initial,
           maxiter=maxiter,
           tolerance=tolerance,
+        )
+      elseif method == :anderson_ras
+        nonlinear_source_anderson_ras(
+          energy,
+          dofspar,
+          core_dofspar;
+          u0=initial,
+          maxiter=maxiter,
+          tolerance=tolerance,
+          history_depth=4,
+        )
+      elseif method in (:newton_pcg_as_4, :newton_pcg_as_8)
+        nonlinear_source_newton_pcg_as(
+          energy,
+          dofspar;
+          u0=initial,
+          maxiter=maxiter,
+          tolerance=tolerance,
+          inner_iterations=(method == :newton_pcg_as_4 ? 4 : 8),
+        )
+      elseif method == :energy_imex_pcg_as
+        nonlinear_source_energy_imex_pcg_as(
+          energy,
+          stiffness,
+          mass,
+          dofspar;
+          u0=initial,
+          maxiter=maxiter,
+          tolerance=tolerance,
+          timestep=1.0,
+          inner_maxiter=SMALL ? 30 : 200,
+          inner_relative_tolerance=1e-10,
+        )
+      elseif method == :raspen
+        nonlinear_source_raspen(
+          energy,
+          dofspar,
+          core_dofspar;
+          u0=initial,
+          maxiter=maxiter,
+          tolerance=tolerance,
+          inner_maxiter=SMALL ? 8 : 40,
+          inner_relative_tolerance=1e-6,
+        )
+      elseif method == :aspin
+        nonlinear_source_aspin(
+          energy,
+          dofspar;
+          u0=initial,
+          maxiter=maxiter,
+          tolerance=tolerance,
+          inner_maxiter=SMALL ? 8 : 40,
+          inner_relative_tolerance=1e-6,
         )
       else
         nonlinear_source_vardd(
@@ -189,6 +253,12 @@ function run_study11()
         summary.relative_nodal_error,
         norm(result.u - exact_values) / norm(exact_values),
       )
+      push!(work.m, m)
+      push!(work.method, string(method))
+      push!(work.outer_iterations, length(result.energy_history) - 1)
+      push!(work.nonlinear_local_batches, result.nonlinear_local_batches)
+      push!(work.linear_as_batches, result.linear_as_batches)
+      push!(work.global_jacobian_products, result.global_jacobian_products)
       @printf(
         "  m = %d, %-21s: %2d outer, relres %.2e, nodal error %.2e\n",
         m,
@@ -203,6 +273,7 @@ function run_study11()
   savetable("study11_semilinear_conv.csv", convergence)
   savetable("study11_semilinear_summary.csv", summary)
   savetable("study11_semilinear_solution.csv", solutions)
+  savetable("study11_semilinear_work.csv", work)
   savetable(
     "study11_semilinear_partitions.csv",
     triangle_partition_rows(N, ms, overlap),

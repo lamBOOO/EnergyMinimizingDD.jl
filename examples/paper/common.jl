@@ -55,12 +55,13 @@ end
 # ---------------------------------------------------------------------------
 
 "Laplacian (P ≡ 0) setup on the unit square; also used for Poisson and heat."
-laplace_setup(N, m, overlap) = FEMDiscretizations.FEM_Schroedinger(
+laplace_setup(N, m, overlap; kwargs...) = FEMDiscretizations.FEM_Schroedinger(
   N,
   m;
   P = (x -> 0.0),
   f = (x -> 1.0),
   overlap = overlap,
+  kwargs...,
 )
 
 "Schroedinger setup with the repo's default exponential potential."
@@ -134,16 +135,29 @@ end
 
 nsub(S::SchwarzData) = length(S.dofs)
 
-function schwarz_setup(K, dofspar)
+function schwarz_setup(K, dofspar; core_dofs = nothing)
   dofs = [collect(Int, d) for d in dofspar]
   facts = [cholesky(Symmetric(sparse(K[d, d]))) for d in dofs]
-  owner = zeros(Int, size(K, 1))
   mult = zeros(Int, size(K, 1))
-  for (i, d) in enumerate(dofs), j in d
-    owner[j] == 0 && (owner[j] = i)
+  for d in dofs, j in d
     mult[j] += 1
   end
+  ownership_candidates = isnothing(core_dofs) ? dofspar : core_dofs
+  owned = FEMDiscretizations.create_balanced_disjoint_dofs_partition(
+    ownership_candidates, size(K, 1)
+  )
+  owner = zeros(Int, size(K, 1))
+  for (i, d) in enumerate(owned), j in d
+    owner[j] = i
+  end
   masks = [owner[d] .== i for (i, d) in enumerate(dofs)]
+  all(owner .> 0) || error("RAS ownership does not cover every free DOF")
+  coverage = zeros(Int, size(K, 1))
+  for (d, mask) in zip(dofs, masks)
+    coverage[d[mask]] .+= 1
+  end
+  all(coverage .== 1) ||
+    error("RAS ownership must restrict every free DOF exactly once")
   return SchwarzData(dofs, facts, masks, maximum(mult))
 end
 

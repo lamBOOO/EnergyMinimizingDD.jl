@@ -936,6 +936,7 @@ function fig12_poisson_cmp()
     "as" => "damped AS",
     "ras" => "RAS",
     "pcg_as" => "CG+AS",
+    "gmres_ras" => "GMRES+RAS",
   )
   methods = (
     "var_dd_additive",
@@ -947,6 +948,7 @@ function fig12_poisson_cmp()
     "as",
     "ras",
     "pcg_as",
+    "gmres_ras",
   )
   markers = Dict(
     "var_dd_additive" => :circle,
@@ -958,13 +960,14 @@ function fig12_poisson_cmp()
     "as" => :rect,
     "ras" => :utriangle,
     "pcg_as" => :diamond,
+    "gmres_ras" => :pentagon,
   )
   colors = Makie.resample_cmap(:tab10, length(methods))
   finite_res = tbl.resnorm[tbl.resnorm .> 0]
   ylims = (1e-10 * 0.5, maximum(finite_res) * 3)
   ytick_exps = sort(collect(floor(Int, log10(ylims[2])):-2:ceil(Int, log10(ylims[1]))))
   yticks = LogTicks(ytick_exps)
-  fig = Figure(size = (330 * length(ms), 330))
+  fig = Figure(size = (max(330 * length(ms), 1000), 330))
   for (j, m) in enumerate(ms)
     ax = Axis(
       fig[1, j];
@@ -973,7 +976,7 @@ function fig12_poisson_cmp()
       yscale = log10,
       yticks = yticks,
       title = "m = $m",
-      limits = (nothing, ylims),
+      limits = ((0, 100), ylims),
     )
     for (i, method) in enumerate(methods)
       mask = (tbl.m .== m) .& (tbl.method .== method) .& (tbl.resnorm .> 1e-14)
@@ -1305,18 +1308,36 @@ function fig17_semilinear_poisson()
   methods = (
     "nonlinear_as",
     "nonlinear_ras",
+    "anderson_ras",
+    "newton_pcg_as_4",
+    "newton_pcg_as_8",
+    "energy_imex_pcg_as",
+    "aspin",
+    "raspen",
     "var_dd",
     "var_dd_history",
   )
   labels = Dict(
-    "nonlinear_as" => "nonlinear AS, optimal damping",
-    "nonlinear_ras" => "nonlinear RAS, optimal damping",
+    "nonlinear_as" => "nAS + optimal damping",
+    "nonlinear_ras" => "nRAS + optimal damping",
+    "anderson_ras" => "Anderson–RAS (q = 4)",
+    "newton_pcg_as_4" => "Newton–PCG(AS, 4)",
+    "newton_pcg_as_8" => "Newton–PCG(AS, 8)",
+    "energy_imex_pcg_as" => "energy-IMEX–PCG(AS), Δt = 1",
+    "aspin" => "ASPIN",
+    "raspen" => "RASPEN",
     "var_dd" => "varDD",
-    "var_dd_history" => "varDD + history",
+    "var_dd_history" => "varDD + history (1)",
   )
   markers = Dict(
     "nonlinear_as" => :circle,
     "nonlinear_ras" => :rect,
+    "anderson_ras" => :cross,
+    "newton_pcg_as_4" => :dtriangle,
+    "newton_pcg_as_8" => :hexagon,
+    "energy_imex_pcg_as" => :star5,
+    "aspin" => :xcross,
+    "raspen" => :pentagon,
     "var_dd" => :diamond,
     "var_dd_history" => :utriangle,
   )
@@ -1327,7 +1348,7 @@ function fig17_semilinear_poisson()
     collect(floor(Int, log10(ylimits[2])):-2:ceil(Int, log10(ylimits[1])))
   )
 
-  fig = Figure(size=(330 * length(ms), 430))
+  fig = Figure(size=(max(990, 330 * length(ms)), 540))
   Label(
     fig[0, 1:length(ms)],
     "−Δu = exp(−u) + f  in Ω,    u = 0  on ∂Ω";
@@ -1376,11 +1397,416 @@ function fig17_semilinear_poisson()
     legend_line_marker_elements(methods, markers; colors),
     [labels[method] for method in methods];
     orientation=:horizontal,
-    nbanks=1,
+    nbanks=3,
     framevisible=true,
   )
   rowgap!(fig.layout, 8)
   savefigs(fig, "fig17_semilinear_poisson")
+end
+
+# ---------------------------------------------------------------------------
+# Figs 18--20: linear-source sensitivity studies
+# ---------------------------------------------------------------------------
+
+function study8_terminal_series(tbl, mask, parameter)
+  xs = sort(unique(getproperty(tbl, parameter)[mask]))
+  ys = Float64[]
+  for x in xs
+    indices = findall(mask .& (getproperty(tbl, parameter) .== x))
+    terminal = indices[argmax(tbl.local_batches[indices])]
+    push!(ys, tbl.local_batches[terminal])
+  end
+  return xs, ys
+end
+
+function fig18_poisson_scaling()
+  tbl = loadtable("study8_sensitivity.csv")
+  methods = [
+    "var_dd_additive",
+    "var_dd_additive_history",
+    "pcg_as",
+    "gmres_ras",
+  ]
+  labels = Dict(
+    "var_dd_additive" => "additive varDD",
+    "var_dd_additive_history" => "additive varDD + history",
+    "pcg_as" => "CG+AS",
+    "gmres_ras" => "GMRES+RAS",
+  )
+  markers = Dict(
+    "var_dd_additive" => :circle,
+    "var_dd_additive_history" => :hexagon,
+    "pcg_as" => :diamond,
+    "gmres_ras" => :pentagon,
+  )
+  colors = Makie.resample_cmap(:tab10, length(methods))
+  panels = (
+    ("mesh", "fixed_layers", :N, "fixed overlap layers, ℓ = 2"),
+    ("mesh", "fixed_delta_over_H", :N, "fixed relative overlap, δ/H = 0.1"),
+    ("overlap", "layer_sweep", :overlap, "overlap sweep, N = 64"),
+  )
+  fig = Figure(size=(430 * length(panels), 390))
+  for (column, (experiment, regime, parameter, title)) in enumerate(panels)
+    ax = Axis(
+      fig[1, column];
+      xlabel=parameter == :N ? "elements per direction, 1/h" : "overlap layers ℓ",
+      ylabel=column == 1 ? "parallel local-solve batches to tolerance" : "",
+      title,
+    )
+    for (index, method) in enumerate(methods)
+      mask =
+        (tbl.experiment .== experiment) .&
+        (tbl.regime .== regime) .&
+        (tbl.method .== method)
+      xs, ys = study8_terminal_series(tbl, mask, parameter)
+      add_series!(
+        ax, xs, ys;
+        label=labels[method], color=colors[index], marker=markers[method],
+      )
+    end
+  end
+  Legend(
+    fig[2, 1:length(panels)],
+    legend_line_marker_elements(methods, markers; colors),
+    [labels[method] for method in methods];
+    orientation=:horizontal,
+    nbanks=1,
+  )
+  rowgap!(fig.layout, 8)
+  savefigs(fig, "fig18_poisson_scaling")
+end
+
+function fig19_poisson_contrast()
+  tbl = loadtable("study8_sensitivity.csv")
+  inner = loadtable("study8_inner_systems.csv")
+  methods = [
+    "var_dd_additive",
+    "var_dd_additive_history",
+    "pcg_as",
+    "gmres_ras",
+  ]
+  labels = Dict(
+    "var_dd_additive" => "additive varDD",
+    "var_dd_additive_history" => "additive varDD + history",
+    "pcg_as" => "CG+AS",
+    "gmres_ras" => "GMRES+RAS",
+  )
+  markers = Dict(
+    "var_dd_additive" => :circle,
+    "var_dd_additive_history" => :hexagon,
+    "pcg_as" => :diamond,
+    "gmres_ras" => :pentagon,
+  )
+  colors = Makie.resample_cmap(:tab10, length(methods))
+  fig = Figure(size=(1420, 410))
+  ax_iterations = Axis(
+    fig[1, 1];
+    xlabel="diffusion contrast κ",
+    ylabel="parallel local-solve batches to tolerance",
+    xscale=log10,
+    title="outer convergence",
+  )
+  for (index, method) in enumerate(methods)
+    mask = (tbl.experiment .== "contrast") .& (tbl.method .== method)
+    xs, ys = study8_terminal_series(tbl, mask, :contrast)
+    add_series!(
+      ax_iterations, xs, ys;
+      label=labels[method], color=colors[index], marker=markers[method],
+    )
+  end
+
+  ax_condition = Axis(
+    fig[1, 2];
+    xlabel="diffusion contrast κ",
+    ylabel="estimated κ₂",
+    xscale=log10,
+    yscale=log10,
+    title="first-sweep condition estimates",
+  )
+  system_specs = (
+    ("schwarz_local", "Kᵢ = Rᵢ K Rᵢᵀ", PALETTE[7], :rect, :solid),
+    (
+      "vardd_local_orthonormal",
+      "Qᵢᵀ K Qᵢ (local varDD)",
+      PALETTE[5],
+      :utriangle,
+      :dash,
+    ),
+    (
+      "combine_first_sweep",
+      "Qᴄᵀ K Qᴄ (combination)",
+      PALETTE[6],
+      :diamond,
+      :solid,
+    ),
+  )
+  for (system, label, color, marker, linestyle) in system_specs
+    system_mask =
+      (inner.experiment .== "contrast") .&
+      (inner.system .== system)
+    contrasts = sort(unique(inner.contrast[system_mask]))
+    maxima = [
+      maximum(inner.condition_estimate[
+        system_mask .& (inner.contrast .== contrast)
+      ]) for contrast in contrasts
+    ]
+    add_series!(
+      ax_condition, contrasts, maxima;
+      label,
+      color,
+      marker,
+      linestyle,
+    )
+  end
+  axislegend(ax_condition; position=:lt)
+
+  ax_inner = Axis(
+    fig[1, 3];
+    xlabel="diffusion contrast κ",
+    ylabel="local CG iterations",
+    xscale=log10,
+    title="iterative local-solve work (censored)",
+    limits=(nothing, (0, 2200)),
+  )
+  mask =
+    (inner.experiment .== "contrast") .&
+    (inner.system .== "schwarz_local")
+  contrasts = sort(unique(inner.contrast[mask]))
+  medians = Float64[]
+  maxima = Float64[]
+  for contrast in contrasts
+    values = inner.cg_iterations[mask .& (inner.contrast .== contrast)]
+    push!(medians, median(values))
+    push!(maxima, maximum(values))
+  end
+  add_series!(
+    ax_inner, contrasts, medians;
+    label="median subdomain", color=PALETTE[5], marker=:rect,
+  )
+  add_series!(
+    ax_inner, contrasts, maxima;
+    label="most difficult subdomain", color=PALETTE[6], marker=:diamond,
+  )
+  iteration_cap = 2000
+  censored = unique(vcat(
+    contrasts[medians .>= iteration_cap],
+    contrasts[maxima .>= iteration_cap],
+  ))
+  hlines!(
+    ax_inner,
+    [iteration_cap];
+    color=(:black, 0.55),
+    linestyle=:dot,
+    linewidth=1.4,
+  )
+  scatter!(
+    ax_inner,
+    censored,
+    fill(iteration_cap, length(censored));
+    label="censored (≥ 2000)",
+    color=:black,
+    marker=:utriangle,
+    markersize=14,
+  )
+  axislegend(ax_inner; position=:lt)
+  Legend(
+    fig[2, 1:3],
+    legend_line_marker_elements(methods, markers; colors),
+    [labels[method] for method in methods];
+    orientation=:horizontal,
+    nbanks=1,
+  )
+  rowgap!(fig.layout, 8)
+  savefigs(fig, "fig19_poisson_contrast")
+end
+
+function fig20_poisson_history()
+  tbl = loadtable("study8_sensitivity.csv")
+  regimes = ("homogeneous", "contrast_1e4")
+  titles = Dict(
+    "homogeneous" => "homogeneous diffusion",
+    "contrast_1e4" => "inclusion contrast κ = 10⁴",
+  )
+  fig = Figure(size=(850, 370))
+  Label(
+    fig[0, 1:2],
+    "One previous iterate provides nearly all of the history benefit";
+    fontsize=22,
+    font=:bold,
+  )
+  for (column, regime) in enumerate(regimes)
+    mask =
+      (tbl.experiment .== "history") .&
+      (tbl.regime .== regime)
+    depths, batches = study8_terminal_series(tbl, mask, :history_depth)
+    ax_batches = Axis(
+      fig[1, column];
+      xlabel="history depth q",
+      ylabel=column == 1 ? "parallel local-solve batches to tolerance" : "",
+      title=titles[regime],
+    )
+    add_series!(
+      ax_batches, depths, batches;
+      color=PALETTE[2], marker=:hexagon,
+    )
+    vlines!(ax_batches, [1]; color=(:black, 0.45), linestyle=:dash)
+  end
+  savefigs(fig, "fig20_poisson_history")
+end
+
+# ---------------------------------------------------------------------------
+# Figs 21--23: semilinear sensitivity studies
+# ---------------------------------------------------------------------------
+
+const SEMILINEAR_BENCHMARK_LABELS = Dict(
+  "nonlinear_ras" => "nonlinear RAS",
+  "anderson_ras" => "Anderson–RAS (q = 4)",
+  "newton_pcg_as" => "Newton–PCG(AS, 4)",
+  "energy_imex_pcg_as" => "energy-IMEX–PCG(AS)",
+  "aspin" => "ASPIN",
+  "raspen" => "RASPEN",
+  "var_dd" => "varDD",
+  "var_dd_history" => "varDD + history",
+)
+
+const SEMILINEAR_BENCHMARK_METHODS = (
+  "nonlinear_ras",
+  "anderson_ras",
+  "newton_pcg_as",
+  "energy_imex_pcg_as",
+  "aspin",
+  "raspen",
+  "var_dd",
+  "var_dd_history",
+)
+
+const SEMILINEAR_BENCHMARK_MARKERS = Dict(
+  "nonlinear_ras" => :rect,
+  "anderson_ras" => :cross,
+  "newton_pcg_as" => :dtriangle,
+  "energy_imex_pcg_as" => :star5,
+  "aspin" => :xcross,
+  "raspen" => :pentagon,
+  "var_dd" => :diamond,
+  "var_dd_history" => :utriangle,
+)
+
+function fig21_semilinear_mesh_scaling()
+  tbl = loadtable("study11_semilinear_sensitivity.csv")
+  methods = collect(SEMILINEAR_BENCHMARK_METHODS)
+  mask_mesh = tbl.experiment .== "mesh"
+  Ns = sort(unique(tbl.N[mask_mesh]))
+  colors = Makie.resample_cmap(:tab10, length(methods))
+  fig = Figure(size=(1120, 500))
+  Label(
+    fig[0, 1:3],
+    "Mesh refinement h, h/2, h/4 with fixed physical overlap";
+    fontsize=22,
+    font=:bold,
+  )
+  specifications = (
+    (:outer_iterations, "outer iterations"),
+    (:nonlinear_local_batches, "nonlinear local batches"),
+    (:linear_as_batches, "linear AS batches"),
+  )
+  for (column, (quantity, ylabel)) in enumerate(specifications)
+    ax = Axis(fig[1, column]; xlabel="cells per coordinate direction N", ylabel)
+    for (index, method) in enumerate(methods)
+      mask = mask_mesh .& (tbl.method .== method)
+      any(mask) || continue
+      values = pick(tbl, quantity, mask)
+      all(iszero, values) && quantity != :outer_iterations && continue
+      add_series!(
+        ax,
+        pick(tbl, :N, mask),
+        values;
+        color=colors[index],
+        marker=SEMILINEAR_BENCHMARK_MARKERS[method],
+      )
+    end
+    ax.xticks = Ns
+  end
+  Legend(
+    fig[2, 1:3],
+    legend_line_marker_elements(methods, SEMILINEAR_BENCHMARK_MARKERS; colors),
+    [SEMILINEAR_BENCHMARK_LABELS[method] for method in methods];
+    orientation=:horizontal,
+    nbanks=2,
+  )
+  rowgap!(fig.layout, 8)
+  savefigs(fig, "fig21_semilinear_mesh_scaling")
+end
+
+function fig22_semilinear_newton_inner()
+  tbl = loadtable("study11_semilinear_sensitivity.csv")
+  mask = tbl.experiment .== "newton_inner"
+  parameters = [1, 2, 4, 8, 0]
+  labels = ["1", "2", "4", "8", "accurate"]
+  positions = collect(eachindex(parameters))
+  outer = [only(tbl.outer_iterations[mask .& (tbl.parameter .== p)]) for p in parameters]
+  batches = [only(tbl.linear_as_batches[mask .& (tbl.parameter .== p)]) for p in parameters]
+  converged = [only(tbl.converged[mask .& (tbl.parameter .== p)]) == 1 for p in parameters]
+  fig = Figure(size=(780, 350))
+  Label(
+    fig[0, 1:2],
+    "Inexact Newton trades outer steps for inner PCG(AS) work";
+    fontsize=22,
+    font=:bold,
+  )
+  for (column, (values, ylabel)) in enumerate((
+    (outer, "outer Newton iterations"),
+    (batches, "total linear AS batches"),
+  ))
+    ax = Axis(
+      fig[1, column];
+      xlabel="PCG(AS) steps per Newton update",
+      ylabel,
+      xticks=(positions, labels),
+    )
+    add_series!(ax, positions, values; color=PALETTE[3], marker=:dtriangle)
+    failed = positions[.!converged]
+    if !isempty(failed)
+      scatter!(
+        ax,
+        failed,
+        values[.!converged];
+        color=:black,
+        marker=:utriangle,
+        markersize=14,
+        label="iteration budget reached",
+      )
+      column == 1 && axislegend(ax; position=:rt)
+    end
+  end
+  savefigs(fig, "fig22_semilinear_newton_inner")
+end
+
+function fig23_semilinear_history()
+  tbl = loadtable("study11_semilinear_sensitivity.csv")
+  algorithms = ("anderson_ras", "var_dd_history")
+  titles = ("Anderson–RAS", "varDD")
+  fig = Figure(size=(780, 350))
+  Label(
+    fig[0, 1:2],
+    "Effect of multisecant and iterate history depth";
+    fontsize=22,
+    font=:bold,
+  )
+  for (column, (method, title)) in enumerate(zip(algorithms, titles))
+    mask = (tbl.experiment .== "history") .& (tbl.method .== method)
+    order = sortperm(tbl.parameter[mask])
+    depths = tbl.parameter[mask][order]
+    iterations = tbl.outer_iterations[mask][order]
+    ax = Axis(
+      fig[1, column];
+      xlabel="history depth q",
+      ylabel=column == 1 ? "outer iterations to tolerance" : "",
+      title,
+      xticks=depths,
+    )
+    add_series!(ax, depths, iterations; color=PALETTE[column+1], marker=:hexagon)
+  end
+  savefigs(fig, "fig23_semilinear_history")
 end
 
 # ---------------------------------------------------------------------------
@@ -1404,6 +1830,12 @@ function make_all_figures()
   fig15_gp_ground_states()
   fig16_gp_energy_gap()
   fig17_semilinear_poisson()
+  fig18_poisson_scaling()
+  fig19_poisson_contrast()
+  fig20_poisson_history()
+  fig21_semilinear_mesh_scaling()
+  fig22_semilinear_newton_inner()
+  fig23_semilinear_history()
   println("plots: done -> $(FIG_DIR)")
 end
 

@@ -18,8 +18,11 @@ function FEM_Schroedinger(
   P::F1 = (x -> exp(sqrt((x.data[1])^2 + (x.data[2])^2))),
   # also return RHS to solve source problem
   f::F2 = (x -> 1.0),
+  diffusion::F3 = (x -> 1.0),
   overlap::Int = 2,
-) where {F1<:Function,F2<:Function}
+  partitioning::Symbol = :metis,
+  return_core_partition::Bool = false,
+) where {F1<:Function,F2<:Function,F3<:Function}
 
   domain = (0, 1.0, 0, 1.0)
   partition1 = (1.0 * N, 1.0 * N)
@@ -30,21 +33,43 @@ function FEM_Schroedinger(
   Ω = Triangulation(model)
   dΩ = Measure(Ω, 2)
   U = TrialFESpace(VV, 0)
-  a1(u, v) = ∫(∇(u) ⋅ ∇(v) + (x -> P(x)) * u * v)dΩ
+  a1(u, v) =
+    ∫((x -> diffusion(x)) * (∇(u) ⋅ ∇(v)) + (x -> P(x)) * u * v)dΩ
   a2(u, v) = ∫(u * v)dΩ
   b(v) = ∫((x -> f(x)) * v)dΩ
   K = assemble_matrix(a1, VV, U)
   M = assemble_matrix(a2, VV, U)
   b = assemble_vector(b, VV)
   g = GridapDistributed.compute_cell_graph(model)
-  par = Metis.partition(g, m)
+  par = if partitioning == :metis
+    Metis.partition(g, m)
+  elseif partitioning == :cartesian
+    nsub_direction = round(Int, sqrt(m))
+    nsub_direction^2 == m || throw(ArgumentError(
+      "partitioning=:cartesian requires m to be a perfect square",
+    ))
+    owners = Vector{Int32}(undef, N^2)
+    for cell = 1:N^2
+      xcell = mod1(cell, N)
+      ycell = cld(cell, N)
+      xowner = min(nsub_direction, (xcell - 1) * nsub_direction ÷ N + 1)
+      yowner = min(nsub_direction, (ycell - 1) * nsub_direction ÷ N + 1)
+      owners[cell] = xowner + nsub_direction * (yowner - 1)
+    end
+    owners
+  else
+    throw(ArgumentError("partitioning must be :metis or :cartesian"))
+  end
   elpar = create_elements_partition(par, m)
+  core_dofs =
+    return_core_partition ? create_dofs_partition(elpar, VV) : nothing
   create_overlapping_elements_partition!(elpar, g, m, overlap)
   t1 = time()
   dofspar = create_dofs_partition(elpar, VV)
   elapsed = time() - t1
   println("create_dofs_partition finished in $elapsed seconds")
-  return K, M, b, dofspar, U
+  result = (K, M, b, dofspar, U)
+  return return_core_partition ? (result..., core_dofs) : result
 end
 
 """
@@ -269,7 +294,8 @@ end
 """
     FEM_SemilinearPoisson(N, m=9; potential, potential_gradient,
                           potential_hessian, forcing=x->1.0, overlap=2,
-                          quadrature_degree=6, initial_guess=x->0.0)
+                          quadrature_degree=6, initial_guess=x->0.0,
+                          return_mass_matrix=false)
 
 Assemble the triangular P1 discretization of the generic semilinear energy
 
@@ -279,7 +305,9 @@ whose Euler equation is `-Delta u + V'(u) = f`. The three potential callbacks
 provide `V`, `V'`, and `V''`; consequently the returned `NonlinearEnergy`
 assemblers use an analytic residual and sparse Hessian. Local overlapping DOFs
 and the original METIS core DOFs are returned in the same positions as for
-`FEM_PLaplacian`.
+`FEM_PLaplacian`. With `return_mass_matrix=true`, the consistent mass matrix
+is appended to the return tuple; this supports stabilized pseudo-time
+linearizations without changing the common nine-value interface.
 """
 function FEM_SemilinearPoisson(
   N::Int,
@@ -288,9 +316,10 @@ function FEM_SemilinearPoisson(
   potential_gradient::DV,
   potential_hessian::DDV,
   forcing::F = (x -> 1.0),
-  overlap::Int = 2,
-  quadrature_degree::Int = 6,
-  initial_guess::I = (x -> 0.0),
+    overlap::Int = 2,
+    quadrature_degree::Int = 6,
+    initial_guess::I = (x -> 0.0),
+    return_mass_matrix::Bool = false,
 ) where {V<:Function,DV<:Function,DDV<:Function,F<:Function,I<:Function}
   quadrature_degree > 0 ||
     throw(ArgumentError("quadrature_degree must be positive"))
@@ -313,6 +342,8 @@ function FEM_SemilinearPoisson(
   b = assemble_vector(load, Vh)
   stiffness(du, v) = ∫(∇(du) ⋅ ∇(v))dOmega
   K = sparse(assemble_matrix(stiffness, Vh, Uh))
+  mass(du, v) = ∫(du * v)dOmega
+  M = return_mass_matrix ? sparse(assemble_matrix(mass, Vh, Uh)) : nothing
 
   function energy_assembler(values::Vector{Float64})
     uh = cached_fe_function(values)
@@ -339,7 +370,7 @@ function FEM_SemilinearPoisson(
 
   initial_fe = interpolate_everywhere(initial_guess, Uh)
   initial = collect(get_free_dof_values(initial_fe))
-  return (
+  result = (
     energy_assembler,
     gradient_assembler,
     hessian_assembler,
@@ -350,6 +381,7 @@ function FEM_SemilinearPoisson(
     initial,
     setup.core_dofs,
   )
+  return return_mass_matrix ? (result..., M) : result
 end
 
 """

@@ -1076,6 +1076,9 @@ Variational domain decomposition algorithm for solving various energy minimizati
   `:multiplicative` feeds each local update into the next subdomain and thus
   has a serial critical path of `m` local solves. The latter currently supports
   `QuadraticEnergy` and reproduces the original projectively rescaled sweep.
+- `subspace_callback=nothing`: Optional study/diagnostic hook called as
+  `subspace_callback(iteration, combined_matrix)` immediately before the
+  second-level minimization. It does not alter the algorithm.
 - `verbose::Bool=true`: Print per-iteration convergence information
 """
 function var_dd(
@@ -1088,6 +1091,7 @@ function var_dd(
   history_depth::Int = 0,
   mixing_omega::Float64 = 0.0,
   sweep::Symbol = :additive,
+  subspace_callback = nothing,
   verbose::Bool = true,
 )
   # TODO: Make local updates and other returns more elgant with info struct?
@@ -1141,6 +1145,7 @@ function var_dd(
 
     combination_anchor = sweep == :additive ? u_cur : multiplicative_iterate
     combined_matrix = hcat(combination_anchor, previous_iterates..., local_updates)
+    !isnothing(subspace_callback) && subspace_callback(n, combined_matrix)
     u_trial = combine_step(e, combined_matrix)
     u_new = mix_iterates(e, u_cur, u_trial, mixing_omega)
 

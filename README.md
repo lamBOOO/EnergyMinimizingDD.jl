@@ -5,10 +5,14 @@
 Study 11 solves `-Delta u = exp(-u) + f` on a triangular P1 mesh with a
 manufactured sine solution. The exponential is supplied as one instance of
 the generic `FEM_SemilinearPoisson` potential interface; the package does not
-define a PDE-specific energy type. Nonlinear AS, nonlinear RAS, varDD, and
-varDD with one-vector history use the same METIS partition, overlap, local
-energy minimizers, and relative-gradient stopping criterion. See
-[`examples/paper/study11_note.md`](examples/paper/study11_note.md).
+define a PDE-specific energy type. The study compares nonlinear AS/RAS,
+Anderson--RAS, Newton--PCG(AS), the Spicher--Wihler energy-IMEX iteration,
+ASPIN, RASPEN, varDD, and varDD with history using the same discretization,
+partition, initial iterate, and true relative-residual stopping criterion. See
+[`examples/paper/study11_note.md`](examples/paper/study11_note.md) for the
+method definitions and
+[`examples/paper/references.bib`](examples/paper/references.bib) for reusable
+BibTeX records.
 
 ## Homogeneous p-Laplacian benchmark
 

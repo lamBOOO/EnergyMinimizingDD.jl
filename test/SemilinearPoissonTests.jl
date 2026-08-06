@@ -72,6 +72,22 @@ const SPSolvers = VariationalDD.Solvers
           SPEnergies.gradient(energy, initial) ≈ H0 * perturbation rtol=1e-12
   end
 
+  @testset "optional consistent mass matrix" begin
+    result = SPFEM.FEM_SemilinearPoisson(
+      4,
+      2;
+      potential=s -> exp(-s),
+      potential_gradient=s -> -exp(-s),
+      potential_hessian=s -> exp(-s),
+      overlap=1,
+      return_mass_matrix=true,
+    )
+    @test length(result) == 10
+    mass = result[end]
+    @test issymmetric(mass)
+    @test minimum(eigvals(Symmetric(Matrix(mass)))) > 0
+  end
+
   @testset "shared nonlinear DD interface" begin
     exact(x) = sinpi(x[1]) * sinpi(x[2])
     forcing(x) = 2pi^2 * exact(x) - exp(-exact(x))
