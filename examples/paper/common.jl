@@ -65,11 +65,12 @@ laplace_setup(N, m, overlap; kwargs...) = FEMDiscretizations.FEM_Schroedinger(
 )
 
 "Schroedinger setup with the repo's default exponential potential."
-schroedinger_setup(N, m, overlap) = FEMDiscretizations.FEM_Schroedinger(
+schroedinger_setup(N, m, overlap; kwargs...) = FEMDiscretizations.FEM_Schroedinger(
   N,
   m;
   f = (x -> 1.0),
   overlap = overlap,
+  kwargs...,
 )
 
 "Non-overlapping METIS cell owner and overlap multiplicity on the N x N mesh."

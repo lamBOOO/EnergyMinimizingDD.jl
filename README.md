@@ -1,5 +1,19 @@
 # VariationalDD.jl
 
+## Generalized eigenvalue benchmark
+
+Study 9 solves `K*u = lambda*M*u` with the same initial vector, overlapping
+partition, and relative true-residual test for varDD, history-enhanced varDD,
+LOPSD+AS, LOBPCG+AS, Jacobi--Davidson--GMRES(AS), and shift-and-invert
+Lanczos--PCG(AS). Its sensitivity runs vary `m=2,4,8`, refine through
+`h,h/2,h/4` with both fixed overlap layers and fixed `delta/H`, sweep a
+resolved oscillatory diffusion coefficient, and vary the varDD history depth.
+Local eigenproblem batches, linear AS batches, local LOBPCG critical-path
+iterations, factor storage, and global operator applications are reported in
+separate units. See
+[`examples/paper/study89_note.md`](examples/paper/study89_note.md) for the
+formulations and fairness conventions.
+
 ## Generic semilinear Poisson benchmark
 
 Study 11 solves `-Delta u = exp(-u) + f` on a triangular P1 mesh with a

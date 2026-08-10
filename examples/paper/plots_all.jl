@@ -1004,7 +1004,7 @@ function fig12_poisson_cmp()
 end
 
 # ---------------------------------------------------------------------------
-# Fig 13: EVP residual -- comparison against one-level LOPSD/LOBPCG+AS baselines
+# Fig 13: EVP residual -- comparison against one-level preconditioned baselines
 # ---------------------------------------------------------------------------
 function fig13_evp_cmp()
   tbl = loadtable("study9_evp_cmp.csv")
@@ -1012,42 +1012,39 @@ function fig13_evp_cmp()
   ms = sort(unique(tbl.m))
   labels = Dict(
     "var_dd" => "varDD",
-    "var_dd_prev" => "varDD + previous",
-    "var_dd_mix_025" => "varDD, ω = 0.25",
-    "var_dd_mix_05" => "varDD, ω = 0.5",
-    "var_dd_mix_075" => "varDD, ω = 0.75",
+    "var_dd_history" => "varDD + history (1)",
     "lopsd_as" => "LOPSD+AS",
     "lobpcg_as" => "LOBPCG+AS",
+    "jd_gmres_as" => "JD–GMRES(AS)",
+    "si_lanczos_pcg_as" => "SI-Lanczos–PCG(AS)",
   )
   methods = (
     "var_dd",
-    "var_dd_prev",
-    "var_dd_mix_025",
-    "var_dd_mix_05",
-    "var_dd_mix_075",
+    "var_dd_history",
     "lopsd_as",
     "lobpcg_as",
+    "jd_gmres_as",
+    "si_lanczos_pcg_as",
   )
   markers = Dict(
     "var_dd" => :circle,
-    "var_dd_prev" => :hexagon,
-    "var_dd_mix_025" => :cross,
-    "var_dd_mix_05" => :star5,
-    "var_dd_mix_075" => :dtriangle,
+    "var_dd_history" => :hexagon,
     "lopsd_as" => :rect,
     "lobpcg_as" => :utriangle,
+    "jd_gmres_as" => :diamond,
+    "si_lanczos_pcg_as" => :pentagon,
   )
   colors = Makie.resample_cmap(:tab10, length(methods))
-  finite_res = tbl.resnorm[.!isnan.(tbl.resnorm) .& (tbl.resnorm .> 0)]
-  ylims = (1e-6 * 0.5, maximum(finite_res) * 3)
+  finite_res = tbl.relative_residual[tbl.relative_residual .> 0]
+  ylims = (1e-6 * 0.5, maximum(finite_res) * 1.5)
   ytick_exps = sort(collect(floor(Int, log10(ylims[2])):-2:ceil(Int, log10(ylims[1]))))
   yticks = LogTicks(ytick_exps)
-  fig = Figure(size = (330 * length(ms), 330))
+  fig = Figure(size = (max(990, 330 * length(ms)), 390))
   for (j, m) in enumerate(ms)
     ax = Axis(
       fig[1, j];
       xlabel = "iteration",
-      ylabel = j == 1 ? "residual norm ‖Axₖ-λₖxₖ‖₂" : "",
+      ylabel = j == 1 ? "relative residual" : "",
       yscale = log10,
       yticks = yticks,
       title = "m = $m",
@@ -1057,12 +1054,11 @@ function fig13_evp_cmp()
       mask =
         (tbl.m .== m) .&
         (tbl.method .== method) .&
-        .!isnan.(tbl.resnorm) .&
-        (tbl.resnorm .> 0)
+        (tbl.relative_residual .> 0)
       add_series!(
         ax,
-        pick(tbl, :solves, mask) ./ m,
-        logfloor(pick(tbl, :resnorm, mask));
+        pick(tbl, :iteration, mask),
+        logfloor(pick(tbl, :relative_residual, mask));
         label = labels[method],
         color = colors[i],
         marker = markers[method],
@@ -1810,6 +1806,273 @@ function fig23_semilinear_history()
 end
 
 # ---------------------------------------------------------------------------
+# Figs 24--27: generalized-eigenproblem sensitivity and work diagnostics
+# ---------------------------------------------------------------------------
+
+const EVP_SENSITIVITY_LABELS = Dict(
+  "var_dd" => "varDD",
+  "var_dd_history" => "varDD + history (1)",
+  "lobpcg_as" => "LOBPCG+AS",
+  "jd_gmres_as" => "JD–GMRES(AS)",
+  "si_lanczos_pcg_as" => "SI-Lanczos–PCG(AS)",
+)
+
+const EVP_SENSITIVITY_METHODS = (
+  "var_dd",
+  "var_dd_history",
+  "lobpcg_as",
+  "jd_gmres_as",
+  "si_lanczos_pcg_as",
+)
+
+const EVP_SENSITIVITY_MARKERS = Dict(
+  "var_dd" => :circle,
+  "var_dd_history" => :hexagon,
+  "lobpcg_as" => :utriangle,
+  "jd_gmres_as" => :diamond,
+  "si_lanczos_pcg_as" => :pentagon,
+)
+
+function evp_terminal_series(tbl, mask, parameter, quantity)
+  parameters = sort(unique(getproperty(tbl, parameter)[mask]))
+  values = Float64[]
+  for value in parameters
+    indices = findall(mask .& (getproperty(tbl, parameter) .== value))
+    terminal = indices[argmax(tbl.iteration[indices])]
+    push!(values, getproperty(tbl, quantity)[terminal])
+  end
+  return parameters, values
+end
+
+function fig24_evp_scaling()
+  tbl = loadtable("study9_evp_sensitivity.csv")
+  methods = collect(EVP_SENSITIVITY_METHODS)
+  colors = Makie.resample_cmap(:tab10, length(methods))
+  panels = (
+    ("mesh", "fixed_layers", :N, "fixed overlap layers, ℓ = 2"),
+    ("mesh", "fixed_delta_over_H", :N, "fixed relative overlap, δ/H = 0.1"),
+    (
+      "oscillation",
+      "frequency_sweep",
+      :frequency,
+      "oscillatory diffusion, contrast κ = 10³",
+    ),
+  )
+  fig = Figure(size=(1320, 420))
+  for (column, (experiment, regime, parameter, title)) in enumerate(panels)
+    ax = Axis(
+      fig[1, column];
+      xlabel=parameter == :N ? "elements per direction, 1/h" : "frequency ν",
+      ylabel=column == 1 ? "outer iterations to tolerance" : "",
+      title,
+    )
+    for (index, method) in enumerate(methods)
+      mask =
+        (tbl.experiment .== experiment) .&
+        (tbl.regime .== regime) .&
+        (tbl.method .== method)
+      xs, ys = evp_terminal_series(tbl, mask, parameter, :iteration)
+      add_series!(
+        ax, xs, ys;
+        color=colors[index], marker=EVP_SENSITIVITY_MARKERS[method],
+      )
+    end
+  end
+  Legend(
+    fig[2, 1:3],
+    legend_line_marker_elements(methods, EVP_SENSITIVITY_MARKERS; colors),
+    [EVP_SENSITIVITY_LABELS[method] for method in methods];
+    orientation=:horizontal,
+    nbanks=1,
+  )
+  rowgap!(fig.layout, 8)
+  savefigs(fig, "fig24_evp_scaling")
+end
+
+function fig25_evp_linear_work()
+  tbl = loadtable("study9_evp_sensitivity.csv")
+  methods = ["lobpcg_as", "jd_gmres_as", "si_lanczos_pcg_as"]
+  colors = Makie.resample_cmap(:tab10, length(methods))
+  fig = Figure(size=(900, 390))
+  Label(
+    fig[0, 1:2],
+    "Linear-preconditioner work is separate from varDD local eigenproblems";
+    fontsize=22,
+    font=:bold,
+  )
+  for (column, (quantity, ylabel)) in enumerate((
+    (:linear_as_batches, "parallel linear AS batches"),
+    (:global_operator_products, "global K/M operator applications"),
+  ))
+    ax = Axis(
+      fig[1, column];
+      xlabel="elements per direction, 1/h",
+      ylabel,
+      title=column == 1 ? "local linear solves" : "global operator work",
+    )
+    for (index, method) in enumerate(methods)
+      mask =
+        (tbl.experiment .== "mesh") .&
+        (tbl.regime .== "fixed_delta_over_H") .&
+        (tbl.method .== method)
+      if quantity == :global_operator_products
+        xs = sort(unique(tbl.N[mask]))
+        ys = Float64[]
+        for N in xs
+          indices = findall(mask .& (tbl.N .== N))
+          terminal = indices[argmax(tbl.iteration[indices])]
+          push!(
+            ys,
+            tbl.global_k_products[terminal] + tbl.global_m_products[terminal],
+          )
+        end
+      else
+        xs, ys = evp_terminal_series(tbl, mask, :N, quantity)
+      end
+      add_series!(
+        ax, xs, ys;
+        color=colors[index], marker=EVP_SENSITIVITY_MARKERS[method],
+      )
+    end
+  end
+  Legend(
+    fig[2, 1:2],
+    legend_line_marker_elements(methods, EVP_SENSITIVITY_MARKERS; colors),
+    [EVP_SENSITIVITY_LABELS[method] for method in methods];
+    orientation=:horizontal,
+    nbanks=1,
+  )
+  rowgap!(fig.layout, 8)
+  savefigs(fig, "fig25_evp_linear_work")
+end
+
+function fig26_evp_history()
+  tbl = loadtable("study9_evp_sensitivity.csv")
+  combination = loadtable("study9_evp_sensitivity_combination.csv")
+  mask =
+    (tbl.experiment .== "history") .&
+    (tbl.method .== "var_dd_history")
+  depths, iterations = evp_terminal_series(
+    tbl, mask, :history_depth, :iteration
+  )
+  conditions = Float64[]
+  for depth in depths
+    condition_mask =
+      (combination.experiment .== "history") .&
+      (combination.method .== "var_dd_history") .&
+      (combination.history_depth .== depth)
+    push!(conditions, maximum(combination.mass_condition[condition_mask]))
+  end
+  fig = Figure(size=(820, 360))
+  Label(
+    fig[0, 1:2],
+    "One previous iterate supplies the useful EVP history enrichment";
+    fontsize=22,
+    font=:bold,
+  )
+  ax_iterations = Axis(
+    fig[1, 1]; xlabel="history depth q", ylabel="outer iterations to tolerance"
+  )
+  add_series!(ax_iterations, depths, iterations; color=PALETTE[2], marker=:hexagon)
+  vlines!(ax_iterations, [1]; color=(:black, 0.45), linestyle=:dash)
+  ax_condition = Axis(
+    fig[1, 2];
+    xlabel="history depth q",
+    ylabel="max κ₂(QᵀMQ)",
+    yscale=log10,
+  )
+  add_series!(ax_condition, depths, conditions; color=PALETTE[5], marker=:diamond)
+  vlines!(ax_condition, [1]; color=(:black, 0.45), linestyle=:dash)
+  savefigs(fig, "fig26_evp_history")
+end
+
+function fig27_evp_local_work()
+  tbl = loadtable("study9_evp_sensitivity.csv")
+  local_stats = loadtable("study9_evp_sensitivity_local.csv")
+  Ns = sort(unique(tbl.N[
+    (tbl.experiment .== "mesh") .& (tbl.regime .== "fixed_delta_over_H")
+  ]))
+  fig = Figure(size=(1260, 390))
+  Label(
+    fig[0, 1:3],
+    "Local-system size, critical path, and factor storage";
+    fontsize=22,
+    font=:bold,
+  )
+
+  ax_dimension = Axis(
+    fig[1, 1]; xlabel="elements per direction, 1/h", ylabel="maximum local dimension"
+  )
+  for (system, label, color, marker) in (
+    ("schwarz_block", "AS block", PALETTE[4], :rect),
+    ("vardd_augmented_pencil", "varDD augmented pencil", PALETTE[2], :circle),
+  )
+    values = Float64[]
+    for N in Ns
+      mask =
+        (local_stats.experiment .== "mesh") .&
+        (local_stats.regime .== "fixed_delta_over_H") .&
+        (local_stats.N .== N) .&
+        (local_stats.system .== system) .&
+        (system == "schwarz_block" ? trues(length(local_stats.N)) :
+         local_stats.method .== "var_dd")
+      push!(values, maximum(local_stats.dimension[mask]))
+    end
+    add_series!(ax_dimension, Ns, values; label, color, marker)
+  end
+  axislegend(ax_dimension; position=:lt)
+
+  ax_critical = Axis(
+    fig[1, 2];
+    xlabel="elements per direction, 1/h",
+    ylabel="critical-path local LOBPCG iterations",
+  )
+  for (method, color, marker) in (
+    ("var_dd", PALETTE[1], :circle),
+    ("var_dd_history", PALETTE[2], :hexagon),
+  )
+    mask =
+      (tbl.experiment .== "mesh") .&
+      (tbl.regime .== "fixed_delta_over_H") .&
+      (tbl.method .== method)
+    xs, ys = evp_terminal_series(
+      tbl, mask, :N, :local_iterations_critical
+    )
+    add_series!(
+      ax_critical, xs, ys;
+      label=EVP_SENSITIVITY_LABELS[method], color, marker,
+    )
+  end
+  axislegend(ax_critical; position=:lt)
+
+  ax_factor = Axis(
+    fig[1, 3];
+    xlabel="elements per direction, 1/h",
+    ylabel="maximum local factor nnz",
+    yscale=log10,
+  )
+  for (system, label, color, marker) in (
+    ("schwarz_block", "AS block", PALETTE[4], :rect),
+    ("vardd_augmented_pencil", "varDD augmented pencil", PALETTE[2], :circle),
+  )
+    values = Float64[]
+    for N in Ns
+      mask =
+        (local_stats.experiment .== "mesh") .&
+        (local_stats.regime .== "fixed_delta_over_H") .&
+        (local_stats.N .== N) .&
+        (local_stats.system .== system) .&
+        (system == "schwarz_block" ? trues(length(local_stats.N)) :
+         local_stats.method .== "var_dd")
+      push!(values, maximum(local_stats.factor_nnz[mask]))
+    end
+    add_series!(ax_factor, Ns, values; label, color, marker)
+  end
+  axislegend(ax_factor; position=:lt)
+  savefigs(fig, "fig27_evp_local_work")
+end
+
+# ---------------------------------------------------------------------------
 
 function make_all_figures()
   println("plots: generating all figures from data/*.csv")
@@ -1836,6 +2099,10 @@ function make_all_figures()
   fig21_semilinear_mesh_scaling()
   fig22_semilinear_newton_inner()
   fig23_semilinear_history()
+  fig24_evp_scaling()
+  fig25_evp_linear_work()
+  fig26_evp_history()
+  fig27_evp_local_work()
   println("plots: done -> $(FIG_DIR)")
 end
 

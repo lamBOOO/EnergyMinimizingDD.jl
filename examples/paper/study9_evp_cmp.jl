@@ -1,139 +1,111 @@
-# Study 9: EVP -- comparison against a one-level additive-Schwarz-preconditioned
-# steepest-descent and LOBPCG baselines on the SAME overlapping partitions.
-#   - var_dd (energy-optimal recombination of the m local solves)
-#   - var_dd_prev (also retain the preceding global iterate)
-#   - var_dd_mix_* (post-combination damping with several weights)
-#   - LOPSD + additive Schwarz preconditioner, memoryless
-#   - LOBPCG + additive Schwarz preconditioner
-# No shift-invert ARPACK curve is included.
-# Cost unit: subdomain solves (one var_dd sweep / AS preconditioner application = m).
+# Study 9: smallest generalized eigenpair. All methods use the same initial
+# vector, true relative residual, overlapping partitions, and one-level AS
+# blocks. The local work categories are retained separately because a varDD
+# local eigenproblem is not equivalent to an AS triangular solve.
 
 isdefined(Main, :PAPER_COMMON) || include("common.jl")
+isdefined(Main, :EVP_COMMON) || include("evp_common.jl")
 
-using IterativeSolvers
-
-rayleigh(K, M, x) = dot(x, K * x) / dot(x, M * x)
-evp_resnorm(K, M, x, lambda) = norm(K * x - lambda .* (M * x))
-
-function normalize_M!(x, M)
-  x ./= sqrt(dot(x, M * x))
-  return x
+function append_evp_history!(rows, method, m, lambda_reference, result)
+  for entry in result.history
+    push!(rows.method, string(method))
+    push!(rows.m, m)
+    push!(rows.iteration, entry.iteration)
+    push!(rows.lambda, entry.lambda)
+    push!(rows.eigenvalue_error, abs(entry.lambda - lambda_reference))
+    push!(rows.residual, entry.residual)
+    push!(rows.relative_residual, entry.relative_residual)
+    push!(rows.local_eigen_batches, entry.local_eigen_batches)
+    push!(rows.linear_as_batches, entry.linear_as_batches)
+    push!(rows.local_iterations_critical, entry.local_iterations_critical)
+    push!(rows.local_iterations_total, entry.local_iterations_total)
+    push!(rows.global_k_products, entry.global_k_products)
+    push!(rows.global_m_products, entry.global_m_products)
+    push!(rows.inner_iterations, entry.inner_iterations)
+  end
 end
 
-function lopsd_as_history(K, M, S; maxiter, tol)
-  m = nsub(S)
-  P = ASPreconditioner(S)
-  x = normalize_M!(ones(size(K, 1)), M)
-  lambda = rayleigh(K, M, x)
-  hist = Tuple{Int,Float64,Float64}[(0, lambda, evp_resnorm(K, M, x, lambda))]
-
-  for k = 1:maxiter
-    r = K * x .- lambda .* (M * x)
-    z = similar(r)
-    ldiv!(z, P, r)
-    # Memoryless locally optimal preconditioned steepest descent:
-    # Rayleigh-Ritz in span{x, T r}, with no previous search direction.
-    x_new = Solvers.combine_step(
-      Energies.GeneralizedRayleighQuotient(K, M),
-      hcat(x, z),
-    )
-    lambda = rayleigh(K, M, x_new)
-    rn = evp_resnorm(K, M, x_new, lambda)
-    push!(hist, (k * m, lambda, rn))
-    rn < tol && return hist
-    x = x_new
+function append_evp_diagnostics!(local_rows, combination_rows, inner_rows, method, m, result)
+  for stat in result.local_stats
+    push!(local_rows.method, string(method))
+    push!(local_rows.m, m)
+    push!(local_rows.outer_iteration, stat.outer_iteration)
+    push!(local_rows.subdomain, stat.subdomain)
+    push!(local_rows.dimension, stat.dimension)
+    push!(local_rows.iterations, stat.iterations)
+    push!(local_rows.converged, Int(stat.converged))
+    push!(local_rows.residual, stat.residual)
+    push!(local_rows.k_nnz, stat.k_nnz)
+    push!(local_rows.factor_nnz, stat.factor_nnz)
   end
-  return hist
-end
-
-function lobpcg_as_history(K, M, S; maxiter, tol)
-  m = nsub(S)
-  x0 = ones(size(K, 1), 1)
-  hist = Tuple{Int,Float64,Float64}[(0, rayleigh(K, M, view(x0, :, 1)), NaN)]
-  result = lobpcg(
-    K,
-    M,
-    false,
-    x0;
-    P = ASPreconditioner(S),
-    maxiter = maxiter,
-    tol = tol,
-    log = true,
-  )
-  for state in result.trace
-    push!(
-      hist,
-      (
-        state.iteration * m,
-        state.ritz_values[1],
-        state.residual_norms[1],
-      ),
-    )
+  for stat in result.combination_stats
+    push!(combination_rows.method, string(method))
+    push!(combination_rows.m, m)
+    push!(combination_rows.outer_iteration, stat.outer_iteration)
+    push!(combination_rows.basis_columns, stat.basis_columns)
+    push!(combination_rows.effective_rank, stat.effective_rank)
+    push!(combination_rows.mass_condition, stat.mass_condition)
+    push!(combination_rows.relative_gap, stat.relative_gap)
   end
-  return hist
-end
-
-function var_dd_evp_history(K, M, dofspar; maxiter, tol, kwargs...)
-  _, _, e_hist, _, resnorm_hist = Solvers.var_dd(
-    Energies.GeneralizedRayleighQuotient(K, M),
-    dofspar;
-    maxiter = maxiter,
-    tol = tol,
-    verbose = false,
-    kwargs...,
-  )
-  m = length(dofspar)
-  hist = Tuple{Int,Float64,Float64}[]
-  for (k, lambda) in enumerate(e_hist)
-    rn = k == 1 ? NaN : resnorm_hist[k-1]
-    push!(hist, ((k - 1) * m, lambda, rn))
+  for stat in result.inner_stats
+    push!(inner_rows.method, string(method))
+    push!(inner_rows.m, m)
+    push!(inner_rows.outer_iteration, stat.outer_iteration)
+    push!(inner_rows.iterations, stat.iterations)
+    push!(inner_rows.converged, Int(stat.converged))
+    push!(inner_rows.relative_residual, stat.relative_residual)
   end
-  return hist
 end
 
 function run_study9()
-  files = ("study9_evp_cmp.csv", "study9_partitions.csv")
+  files = (
+    "study9_evp_cmp.csv",
+    "study9_partitions.csv",
+    "study9_evp_local_stats.csv",
+    "study9_evp_combination_stats.csv",
+    "study9_evp_inner_stats.csv",
+  )
   if !needs_run(files...)
     println("study9: cached, skipping")
     return
   end
-  println("study9: EVP vs LOPSD+AS/LOBPCG+AS baselines (no ARPACK curve)")
+  println("study9: EVP vs LOPSD, LOBPCG, JD, and shift-invert Lanczos with AS")
   Random.seed!(1)
 
-  N = SMALL ? 20 : 40
+  N = SMALL ? 10 : 40
   ms = SMALL ? [2] : [2, 4, 8]
   overlap = 2
-  tol = 1e-6
-  maxiter = SMALL ? 25 : 100
+  relative_tolerance = SMALL ? 1e-5 : 1e-6
+  maxiter = SMALL ? 12 : 100
 
   rows = (
-    method = String[],
-    m = Int[],
-    solves = Int[],
-    lambda = Float64[],
-    err = Float64[],
-    resnorm = Float64[],
+    method=String[], m=Int[], iteration=Int[], lambda=Float64[],
+    eigenvalue_error=Float64[], residual=Float64[], relative_residual=Float64[],
+    local_eigen_batches=Int[], linear_as_batches=Int[],
+    local_iterations_critical=Int[], local_iterations_total=Int[],
+    global_k_products=Int[], global_m_products=Int[], inner_iterations=Int[],
   )
-  part_rows = (
-    m = Int[],
-    N = Int[],
-    idx = Int[],
-    owner = Int[],
-    mult = Int[],
+  local_rows = (
+    method=String[], m=Int[], outer_iteration=Int[], subdomain=Int[],
+    dimension=Int[], iterations=Int[], converged=Int[], residual=Float64[],
+    k_nnz=Int[], factor_nnz=Int[],
   )
-  record(method, m, lambda_ref, hist) = for (s, lambda, rn) in hist
-    push!(rows.method, method)
-    push!(rows.m, m)
-    push!(rows.solves, s)
-    push!(rows.lambda, lambda)
-    push!(rows.err, abs(lambda - lambda_ref))
-    push!(rows.resnorm, rn)
-  end
+  combination_rows = (
+    method=String[], m=Int[], outer_iteration=Int[], basis_columns=Int[],
+    effective_rank=Int[], mass_condition=Float64[], relative_gap=Float64[],
+  )
+  inner_rows = (
+    method=String[], m=Int[], outer_iteration=Int[], iterations=Int[],
+    converged=Int[], relative_residual=Float64[],
+  )
+  part_rows = (m=Int[], N=Int[], idx=Int[], owner=Int[], mult=Int[])
 
   for m in ms
-    K, M, b, dofspar, U = schroedinger_setup(N, m, overlap)
-    S = schwarz_setup(K, dofspar)
-    lambda_ref = dense_reference_lambda(K, M)
+    K, M, _, dofspar, _, core = schroedinger_setup(
+      N, m, overlap; return_core_partition=true
+    )
+    schwarz = schwarz_setup(K, dofspar; core_dofs=core)
+    lambda_reference = dense_reference_lambda(K, M)
 
     owner, mult = metis_cell_partition(N, m, overlap)
     for idx in eachindex(owner)
@@ -144,61 +116,37 @@ function run_study9()
       push!(part_rows.mult, mult[idx])
     end
 
-    record(
-      "var_dd",
-      m,
-      lambda_ref,
-      var_dd_evp_history(K, M, dofspar; maxiter = maxiter, tol = tol),
-    )
-    record(
-      "var_dd_prev",
-      m,
-      lambda_ref,
-      var_dd_evp_history(
+    for method in EVP_COMPARISON_METHODS
+      result = evp_method_result(
+        method,
         K,
         M,
-        dofspar;
-        maxiter = maxiter,
-        tol = tol,
-        history_depth = 1,
-      ),
-    )
-    for (method, omega) in (
-      ("var_dd_mix_025", 0.25),
-      ("var_dd_mix_05", 0.5),
-      ("var_dd_mix_075", 0.75),
-    )
-      record(
-        method,
+        dofspar,
+        schwarz;
+        maxiter,
+        relative_tolerance,
+        history_depth=1,
+      )
+      append_evp_history!(rows, method, m, lambda_reference, result)
+      append_evp_diagnostics!(
+        local_rows, combination_rows, inner_rows, method, m, result
+      )
+      terminal = last(result.history)
+      @printf(
+        "  m=%d, %-22s: %3d outer, relres %.2e, AS batches %d\n",
         m,
-        lambda_ref,
-        var_dd_evp_history(
-          K,
-          M,
-          dofspar;
-          maxiter = maxiter,
-          tol = tol,
-          mixing_omega = omega,
-        ),
+        string(method),
+        terminal.iteration,
+        terminal.relative_residual,
+        terminal.linear_as_batches,
       )
     end
-
-    record(
-      "lopsd_as",
-      m,
-      lambda_ref,
-      lopsd_as_history(K, M, S; maxiter = maxiter, tol = tol),
-    )
-    record(
-      "lobpcg_as",
-      m,
-      lambda_ref,
-      lobpcg_as_history(K, M, S; maxiter = maxiter, tol = tol),
-    )
-    println("  m = $m done")
   end
   savetable("study9_evp_cmp.csv", rows)
   savetable("study9_partitions.csv", part_rows)
+  savetable("study9_evp_local_stats.csv", local_rows)
+  savetable("study9_evp_combination_stats.csv", combination_rows)
+  savetable("study9_evp_inner_stats.csv", inner_rows)
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__

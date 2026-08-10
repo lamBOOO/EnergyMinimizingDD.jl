@@ -1,6 +1,7 @@
 module Solvers
 
 using LinearAlgebra
+using SparseArrays
 using FiniteDiff
 using Gridap
 using GridapDistributed
@@ -206,10 +207,11 @@ end
 Calcualted x_new = argmin_{x ∈ span{u_cur, e_j, j ∈ idx_sub} \\ {0}} (x' K x)/(x' M x)
 where {e_j} are standard basis vectors. The output is re-normalized in the M-norm.
 """
-function inf_step(
+function generalized_rayleigh_inf_step(
   e::Energies.GeneralizedRayleighQuotient{Float64},
   u_cur::Vector{Float64},
-  idx_sub::AbstractVector,
+  idx_sub::AbstractVector;
+  collect_info::Bool=false,
 )
   localdim = 1 + length(idx_sub)
 
@@ -222,32 +224,17 @@ function inf_step(
 
   # Extract relevant rows/columns from K and M
   if length(idx_sub) > 0
-    # Build the local matrices more efficiently
-    K_local = zeros(localdim, localdim)
-    M_local = zeros(localdim, localdim)
-
-    # First row/column: u_cur' * K/M * [u_cur, e_j1, e_j2, ...]
+    # The augmented pencil has arrowhead form. Keeping it sparse avoids the
+    # artificial dense O(n_i^3) bottleneck that otherwise dominates mesh
+    # refinement studies, while representing exactly the same local space.
     K_u = K * u_cur
     M_u = M * u_cur
-
-    K_local[1, 1] = dot(u_cur, K_u)  # u' * K * u
-    M_local[1, 1] = dot(u_cur, M_u)  # u' * M * u
-
-    # First row/column: u_cur' * K/M * e_j
-    for (k, j) in pairs(idx_sub)
-      K_local[1, k+1] = K_u[j]  # u' * K * e_j = (K * u)[j]
-      K_local[k+1, 1] = K_u[j]  # e_j' * K * u = (K * u)[j] (symmetric)
-      M_local[1, k+1] = M_u[j]  # u' * M * e_j = (M * u)[j]
-      M_local[k+1, 1] = M_u[j]  # e_j' * M * u = (M * u)[j] (symmetric)
-    end
-
-    # Remaining entries: e_i' * K/M * e_j = K[i,j] and M[i,j]
-    for (k1, j1) in pairs(idx_sub)
-      for (k2, j2) in pairs(idx_sub)
-        K_local[k1+1, k2+1] = K[j1, j2]
-        M_local[k1+1, k2+1] = M[j1, j2]
-      end
-    end
+    K_block = sparse(K[idx_sub, idx_sub])
+    M_block = sparse(M[idx_sub, idx_sub])
+    K_cross = sparse(reshape(K_u[idx_sub], :, 1))
+    M_cross = sparse(reshape(M_u[idx_sub], :, 1))
+    K_local = [sparse(reshape([dot(u_cur, K_u)], 1, 1)) K_cross'; K_cross K_block]
+    M_local = [sparse(reshape([dot(u_cur, M_u)], 1, 1)) M_cross'; M_cross M_block]
   else
     # Degenerate case: only current solution
     K_local = reshape([dot(u_cur, K * u_cur)], 1, 1)
@@ -261,14 +248,79 @@ function inf_step(
   K_local_sym = Symmetric(K_local)
   M_local_sym = Symmetric(M_local)
   F = cholesky(K_local_sym)  # ≈ A^{-1} preconditioner
-  res =
-    lobpcg(K_local_sym, M_local_sym, false, 1; P = F, tol = 1e-8, maxiter = 500)
+  res = lobpcg(
+    K_local_sym,
+    M_local_sym,
+    false,
+    1;
+    P=F,
+    tol=1e-8,
+    maxiter=500,
+    log=collect_info,
+  )
 
   # Return the Ritz vector itself. Its normalization is immaterial to the
   # subsequent Rayleigh--Ritz combination and is performed there.
   x_new = reconstruct_implicit!(res.X[:, 1], u_cur, idx_sub)
+  factor_nnz = if !collect_info
+    -1
+  elseif issparse(K_local)
+    nnz(sparse(F.L))
+  else
+    localdim * (localdim + 1) ÷ 2
+  end
+  info = (
+    dimension=localdim,
+    iterations=Int(res.iterations),
+    converged=Bool(res.converged),
+    residual=Float64(res.residual_norms[1]),
+    k_nnz=collect_info ? (issparse(K_local) ? nnz(K_local) : localdim^2) : -1,
+    factor_nnz=factor_nnz,
+  )
+  return (u=x_new, info=info)
+end
 
-  return x_new
+function inf_step(
+  e::Energies.GeneralizedRayleighQuotient{Float64},
+  u_cur::Vector{Float64},
+  idx_sub::AbstractVector,
+)
+  return generalized_rayleigh_inf_step(e, u_cur, idx_sub).u
+end
+
+function inf_step_with_info(
+  e::Energies.AbstractEnergy{Float64},
+  u_cur::Vector{Float64},
+  idx_sub::AbstractVector;
+  collect_info::Bool=false,
+)
+  u = inf_step(e, u_cur, idx_sub)
+  return (
+    u=u,
+    info=(
+      dimension=1 + length(idx_sub),
+      iterations=-1,
+      converged=true,
+      residual=NaN,
+      k_nnz=-1,
+      factor_nnz=-1,
+    ),
+  )
+end
+
+
+function inf_step_with_info(
+  e::Energies.GeneralizedRayleighQuotient{Float64},
+  u_cur::Vector{Float64},
+  idx_sub::AbstractVector;
+  collect_info::Bool=false,
+)
+  return generalized_rayleigh_inf_step(
+    e,
+    u_cur,
+    idx_sub;
+    collect_info,
+  )
 end
 
 function inf_step(
@@ -1079,6 +1131,10 @@ Variational domain decomposition algorithm for solving various energy minimizati
 - `subspace_callback=nothing`: Optional study/diagnostic hook called as
   `subspace_callback(iteration, combined_matrix)` immediately before the
   second-level minimization. It does not alter the algorithm.
+- `local_solve_callback=nothing`: Optional diagnostic hook called as
+  `local_solve_callback(iteration, subdomain, info)` after each local solve.
+  For generalized Rayleigh quotients, `info` records the augmented-pencil
+  dimension, LOBPCG iterations, convergence, and sparse factor sizes.
 - `verbose::Bool=true`: Print per-iteration convergence information
 """
 function var_dd(
@@ -1092,6 +1148,7 @@ function var_dd(
   mixing_omega::Float64 = 0.0,
   sweep::Symbol = :additive,
   subspace_callback = nothing,
+  local_solve_callback = nothing,
   verbose::Bool = true,
 )
   # TODO: Make local updates and other returns more elgant with info struct?
@@ -1125,13 +1182,32 @@ function var_dd(
 
     for i = 1:m
       local_base = sweep == :additive ? u_cur : multiplicative_iterate
-      u_next_i = if sweep == :additive
-        inf_step(e, u_cur, subdomain_dofs[i])
+      local_result = if sweep == :additive
+        inf_step_with_info(
+          e,
+          u_cur,
+          subdomain_dofs[i];
+          collect_info=!isnothing(local_solve_callback),
+        )
       else
         multiplicative_iterate = multiplicative_inf_step(
           e, multiplicative_iterate, subdomain_dofs[i]
         )
+        (
+          u=multiplicative_iterate,
+          info=(
+            dimension=1 + length(subdomain_dofs[i]),
+            iterations=-1,
+            converged=true,
+            residual=NaN,
+            k_nnz=-1,
+            factor_nnz=-1,
+          ),
+        )
       end
+      u_next_i = local_result.u
+      !isnothing(local_solve_callback) &&
+        local_solve_callback(n, i, local_result.info)
       local_updates[:, i] = u_next_i
 
       if save_local_updates

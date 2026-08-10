@@ -4,12 +4,12 @@ multiplicative varDD separately. The additive local candidates are independent
 and their `m` subdomain solves can run in parallel. Multiplicative varDD feeds
 each local result into the next subdomain, giving it a serial critical path of
 `m` local solves per sweep. The history variant requires no additional local
-solves and enlarges only the small second-level problem. Both studies additionally
-compare post-combination damping with omega = 0.25, 0.5, and 0.75.
+solves and enlarges only the small second-level problem. Study 8 additionally
+compares post-combination damping with omega = 0.25, 0.5, and 0.75.
 The stored cost is the number of local subdomain solves: one variational DD
 sweep, one additive Schwarz stationary step, one RAS stationary step, and one
 additive-Schwarz preconditioner application each count as `m` subdomain solves.
-Figures 12 and 13 divide this work count by `m` and plot outer solves.
+Figure 12 divides this work count by `m` and plots outer solves.
 
 Study 8 also includes right-preconditioned, unrestarted GMRES+RAS. RAS uses
 the same overlapping subdomains as varDD and a balanced disjoint restriction
@@ -61,6 +61,42 @@ Local CG diagnostics that do not reach the requested tolerance are capped at
 2000 iterations. A dotted horizontal line and black upward triangles mark
 these right-censored values; they mean "at least 2000", not convergence in
 exactly 2000 iterations.
+
+Study 9 solves the generalized symmetric eigenproblem `K*u=lambda*M*u` from
+the same M-normalized initial vector and stops on the same true residual
+reduction. Figure 13 compares varDD, varDD with one previous iterate, LOPSD+AS,
+LOBPCG+AS [Knyazev2001], Jacobi--Davidson with an AS-preconditioned flexible
+GMRES correction solve [SleijpenVanDerVorst1996, GensebergerEtAl2010], and
+shift-and-invert Lanczos with accurate PCG(AS) applications
+[Simoncini2005]. The last method applies `K^{-1}*M` with inner relative
+tolerance `1e-10`; it is therefore an intentionally expensive classical
+reference rather than a one-AS-application method.
+
+The eigenproblem work counters remain deliberately non-equivalent:
+
+1. a parallel batch of local generalized eigenproblems for varDD,
+2. a parallel batch of local AS triangular solves for the preconditioned
+   eigensolvers,
+3. local LOBPCG iterations inside the varDD augmented pencils, and
+4. global `K` and `M` operator applications.
+
+They are never collapsed into a single "equivalent work" number. The local
+CSV reports the local dimension, LOBPCG iterations, sparse-pencil nonzeros,
+and Cholesky-factor nonzeros. The cumulative parallel critical path is the sum
+over sweeps of the maximum local LOBPCG iteration count over subdomains.
+
+The Study 9 sensitivity runs use `N=20,40,80`. They show both two fixed overlap
+layers and `overlap=N/20` for fixed `delta/H=0.1`. The oscillatory test uses
+
+    a(x,y) = 1 + (kappa-1)/2 *
+             (1 + sin(2*pi*nu*x)*sin(2*pi*nu*y)),
+
+with `kappa=1e3`, `N=64`, and resolved frequencies `nu=1,2,4,8`. It tests
+rapidly varying coefficients rather than higher eigenmodes, which would
+require orthogonality constraints and deflation. History depths
+`q=0,1,2,4,8` are compared separately. Figures 24--27 report outer scaling,
+linear-AS/global-operator work, history sensitivity, and local-system
+critical-path/storage diagnostics.
 
 All methods shown are one-level methods, so their iteration counts are expected
 to grow as the number of subdomains `m` increases. Two-level/coarse-space
