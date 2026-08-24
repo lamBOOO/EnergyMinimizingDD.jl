@@ -45,6 +45,34 @@ include(joinpath(@__DIR__, "..", "examples", "paper", "study8_linear_cmp.jl"))
   @test all(i -> cartesian_core[i] ⊆ cartesian_overlap[i], 1:4)
   @test_throws ArgumentError laplace_setup(8, 3, 1; partitioning=:cartesian)
 
+  reference_owners = metis_cell_owners(4, 2)
+  nested_owners = prolong_cell_owners(reference_owners, 8)
+  @test length(nested_owners) == 8^2
+  for parent_y = 1:4, parent_x = 1:4
+    parent = parent_x + 4 * (parent_y - 1)
+    children = [
+      child_x + 8 * (child_y - 1) for
+      child_y = (2 * parent_y-1):(2 * parent_y),
+      child_x = (2 * parent_x-1):(2 * parent_x)
+    ]
+    @test all(nested_owners[children] .== reference_owners[parent])
+  end
+  _, _, _, nested_overlap, _, nested_core = laplace_setup(
+    8,
+    2,
+    1;
+    cell_owners=nested_owners,
+    return_core_partition=true,
+  )
+  @test all(i -> nested_core[i] ⊆ nested_overlap[i], 1:2)
+  @test_throws ArgumentError prolong_cell_owners(reference_owners, 6)
+  @test_throws DimensionMismatch laplace_setup(
+    8, 2, 1; cell_owners=nested_owners[1:end-1]
+  )
+  @test_throws ArgumentError laplace_setup(
+    8, 2, 1; cell_owners=fill(Int32(1), 8^2)
+  )
+
   dimensions = Int[]
   Solvers.var_dd(
     Energies.QuadraticEnergy(K, b),

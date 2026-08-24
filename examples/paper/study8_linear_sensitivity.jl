@@ -246,6 +246,7 @@ function run_study8_sensitivity()
     methods=STUDY8_SENSITIVITY_METHODS,
     history_depth=1,
     partitioning=:metis,
+    cell_owners=nothing,
   )
     K, _, b, dofspar, _, core_dofs = laplace_setup(
       N,
@@ -253,6 +254,7 @@ function run_study8_sensitivity()
       overlap;
       diffusion=inclusion_diffusion(contrast),
       partitioning,
+      cell_owners,
       return_core_partition=true,
     )
     schwarz = schwarz_setup(K, dofspar; core_dofs)
@@ -324,13 +326,24 @@ function run_study8_sensitivity()
     )
   end
 
-  # In the fixed-relative-overlap sequence, N=20j and overlap=j give
-  # delta/H ≈ overlap*sqrt(m)/N = 0.1 exactly for m=4.
+  # Both mesh sequences inherit the same irregular METIS core partition from
+  # the coarsest grid. Thus H is fixed physically rather than changing with a
+  # fresh graph partition at every N. In the fixed-relative-overlap sequence,
+  # N=20j and overlap=j also keep the physical graph-overlap width ell*h fixed.
   mesh_sizes = SMALL ? [10, 20, 30] : collect(20:20:120)
   m = 4
+  mesh_reference_N = first(mesh_sizes)
+  mesh_reference_owners = metis_cell_owners(mesh_reference_N, m)
   for N in mesh_sizes
+    nested_owners = prolong_cell_owners(mesh_reference_owners, N)
     run_configuration(
-      "mesh", "fixed_layers", N, m, 2, 1.0; partitioning=:cartesian
+      "mesh",
+      "fixed_layers",
+      N,
+      m,
+      2,
+      1.0;
+      cell_owners=nested_owners,
     )
     scaled_overlap = SMALL ? max(1, N ÷ 10) : N ÷ 20
     run_configuration(
@@ -340,7 +353,7 @@ function run_study8_sensitivity()
       m,
       scaled_overlap,
       1.0;
-      partitioning=:cartesian,
+      cell_owners=nested_owners,
     )
   end
 

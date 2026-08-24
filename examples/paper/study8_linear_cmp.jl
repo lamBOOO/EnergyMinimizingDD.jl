@@ -148,8 +148,12 @@ function run_study8()
   N = SMALL ? 20 : 40
   ms = SMALL ? [2] : [2, 4, 8]
   overlap = 2
-  tol = 1e-10
+  relative_tolerance = SMALL ? 1e-7 : 1e-10
   maxsweeps = SMALL ? 50 : 400
+  partition_reference_N = SMALL ? 10 : 20
+  reference_owners = Dict(
+    m => metis_cell_owners(partition_reference_N, m) for m in ms
+  )
 
   rows = (
     method = String[],
@@ -193,12 +197,18 @@ function run_study8()
   end
 
   for m in ms
+    owners = prolong_cell_owners(reference_owners[m], N)
     K, M, b, dofspar, U, core_dofs = laplace_setup(
-      N, m, overlap; return_core_partition = true
+      N,
+      m,
+      overlap;
+      cell_owners = owners,
+      return_core_partition = true,
     )
     S = schwarz_setup(K, dofspar; core_dofs)
+    tol = relative_tolerance * norm(b - K * ones(length(b)))
 
-    owner, mult = metis_cell_partition(N, m, overlap)
+    owner, mult = cell_partition_overlap(N, m, overlap, owners)
     for idx in eachindex(owner)
       push!(part_rows.m, m)
       push!(part_rows.N, N)

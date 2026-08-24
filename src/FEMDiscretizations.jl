@@ -21,6 +21,7 @@ function FEM_Schroedinger(
   diffusion::F3 = (x -> 1.0),
   overlap::Int = 2,
   partitioning::Symbol = :metis,
+  cell_owners::Union{Nothing,AbstractVector{<:Integer}} = nothing,
   return_core_partition::Bool = false,
 ) where {F1<:Function,F2<:Function,F3<:Function}
 
@@ -41,7 +42,19 @@ function FEM_Schroedinger(
   M = assemble_matrix(a2, VV, U)
   b = assemble_vector(b, VV)
   g = GridapDistributed.compute_cell_graph(model)
-  par = if partitioning == :metis
+  par = if !isnothing(cell_owners)
+    length(cell_owners) == N^2 || throw(DimensionMismatch(
+      "cell_owners must contain one owner for each of the $(N^2) cells",
+    ))
+    owners = Int32.(cell_owners)
+    all(owner -> 1 <= owner <= m, owners) || throw(ArgumentError(
+      "cell_owners entries must lie in 1:$m",
+    ))
+    all(i -> i in owners, 1:m) || throw(ArgumentError(
+      "cell_owners must assign at least one cell to every subdomain",
+    ))
+    owners
+  elseif partitioning == :metis
     Metis.partition(g, m)
   elseif partitioning == :cartesian
     nsub_direction = round(Int, sqrt(m))

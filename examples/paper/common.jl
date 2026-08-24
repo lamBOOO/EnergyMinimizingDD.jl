@@ -73,22 +73,68 @@ schroedinger_setup(N, m, overlap; kwargs...) = FEMDiscretizations.FEM_Schroeding
   kwargs...,
 )
 
-"Non-overlapping METIS cell owner and overlap multiplicity on the N x N mesh."
-function metis_cell_partition(N, m, overlap)
+"Compute a METIS owner for every cell of an `N x N` Cartesian mesh."
+function metis_cell_owners(N, m)
   model = CartesianDiscreteModel(
     (0, 1.0, 0, 1.0),
     (1.0 * N, 1.0 * N);
     isperiodic = (false, false),
   )
   g = GridapDistributed.compute_cell_graph(model)
-  owner = Int.(Metis.partition(g, m))
+  return Int32.(Metis.partition(g, m))
+end
+
+"""
+    prolong_cell_owners(reference_owners, N)
+
+Prolong a cellwise partition of a square reference grid to an integer uniform
+refinement. Every child cell inherits its parent cell's owner, so all refined
+meshes represent the same physical (possibly irregular) core partition.
+"""
+function prolong_cell_owners(reference_owners, N)
+  reference_N = isqrt(length(reference_owners))
+  reference_N^2 == length(reference_owners) || throw(DimensionMismatch(
+    "reference_owners must describe a square Cartesian grid",
+  ))
+  N % reference_N == 0 || throw(ArgumentError(
+    "N=$N must be an integer refinement of reference_N=$reference_N",
+  ))
+  refinement = N ÷ reference_N
+  owners = Vector{Int32}(undef, N^2)
+  for cell = 1:N^2
+    xcell = mod1(cell, N)
+    ycell = cld(cell, N)
+    parent_x = cld(xcell, refinement)
+    parent_y = cld(ycell, refinement)
+    parent = parent_x + reference_N * (parent_y - 1)
+    owners[cell] = reference_owners[parent]
+  end
+  return owners
+end
+
+"Overlap multiplicity for an explicitly supplied non-overlapping cell owner."
+function cell_partition_overlap(N, m, overlap, owner)
+  length(owner) == N^2 || throw(DimensionMismatch(
+    "owner must contain one entry for every cell",
+  ))
+  model = CartesianDiscreteModel(
+    (0, 1.0, 0, 1.0),
+    (1.0 * N, 1.0 * N);
+    isperiodic = (false, false),
+  )
+  g = GridapDistributed.compute_cell_graph(model)
   elpar = FEMDiscretizations.create_elements_partition(Int32.(owner), m)
   FEMDiscretizations.create_overlapping_elements_partition!(elpar, g, m, overlap)
   mult = zeros(Int, length(owner))
   for elems in elpar, el in elems
     mult[el] += 1
   end
-  return owner, mult
+  return Int.(owner), mult
+end
+
+"Non-overlapping METIS cell owner and overlap multiplicity on the N x N mesh."
+function metis_cell_partition(N, m, overlap)
+  return cell_partition_overlap(N, m, overlap, metis_cell_owners(N, m))
 end
 
 "Reference lowest eigenvalue of the discrete pencil (K, M) via Arpack."

@@ -37,6 +37,8 @@ set_theme!(
 
 const PALETTE = Makie.wong_colors()
 const MARKERSIZE = 8
+const PAPER_FULL_WIDTH = 1000
+const PAPER_HALF_WIDTH = PAPER_FULL_WIDTH ÷ 2
 
 "Save a figure as PDF (vector, for LaTeX) and PNG (preview) into figures/."
 function savefigs(fig, name)
@@ -1003,6 +1005,74 @@ function fig12_poisson_cmp()
   savefigs(fig, "fig12_poisson_cmp")
 end
 
+# Paper-facing subset of Figure 12. Here q counts the current iterate as the
+# first global vector, so q=1 is plain additive varDD and q=2 adds u_{k-1}.
+function fig12b_poisson_cmp_paper()
+  tbl = loadtable("study8_linear_cmp.csv")
+  parts = loadtable("study8_partitions.csv")
+  ms = sort(unique(tbl.m))
+  methods = (
+    "var_dd_additive",
+    "var_dd_additive_history",
+    "ras",
+    "pcg_as",
+    "gmres_ras",
+  )
+  labels = Dict(
+    "var_dd_additive" => "EMDD (q = 1)",
+    "var_dd_additive_history" => "EMDD (q = 2)",
+    "ras" => "RAS",
+    "pcg_as" => "CG+AS",
+    "gmres_ras" => "GMRES+RAS",
+  )
+  markers = Dict(
+    "var_dd_additive" => :circle,
+    "var_dd_additive_history" => :hexagon,
+    "ras" => :utriangle,
+    "pcg_as" => :diamond,
+    "gmres_ras" => :pentagon,
+  )
+  full_colors = Makie.resample_cmap(:tab10, 10)
+  colors = [full_colors[i] for i in (1, 2, 8, 9, 10)]
+  finite_res = tbl.resnorm[tbl.resnorm .> 0]
+  ylims = (1e-9, maximum(finite_res) * 3)
+  yticks = LogTicks(collect(1:-2:-9))
+  fig = Figure(size=(PAPER_FULL_WIDTH, 330))
+  for (column, m) in enumerate(ms)
+    ax = Axis(
+      fig[1, column];
+      xlabel="iteration",
+      ylabel=column == 1 ? "residual norm ‖Axₖ-b‖₂" : "",
+      yscale=log10,
+      yticks,
+      title="m = $m",
+      limits=((0, 100), ylims),
+    )
+    for (index, method) in enumerate(methods)
+      mask = (tbl.m .== m) .& (tbl.method .== method) .& (tbl.resnorm .> 0)
+      add_series!(
+        ax,
+        pick(tbl, :solves, mask) ./ m,
+        pick(tbl, :resnorm, mask);
+        label=labels[method],
+        color=colors[index],
+        marker=markers[method],
+      )
+    end
+    add_partition_inset!(fig[1, column], parts, m)
+  end
+  Legend(
+    fig[2, 1:length(ms)],
+    legend_line_marker_elements(methods, markers; colors),
+    [labels[method] for method in methods];
+    orientation=:horizontal,
+    nbanks=1,
+    framevisible=true,
+  )
+  rowgap!(fig.layout, 8)
+  savefigs(fig, "fig12b_poisson_cmp_paper")
+end
+
 # ---------------------------------------------------------------------------
 # Fig 13: EVP residual -- comparison against one-level preconditioned baselines
 # ---------------------------------------------------------------------------
@@ -1437,8 +1507,13 @@ function fig18_poisson_scaling()
   )
   colors = Makie.resample_cmap(:tab10, length(methods))
   panels = (
-    ("mesh", "fixed_layers", :N, "fixed overlap layers, ℓ = 2"),
-    ("mesh", "fixed_delta_over_H", :N, "fixed relative overlap, δ/H = 0.1"),
+    ("mesh", "fixed_layers", :N, "nested METIS, fixed layers ℓ = 2"),
+    (
+      "mesh",
+      "fixed_delta_over_H",
+      :N,
+      "nested METIS, fixed relative overlap δ/H ≈ 0.1",
+    ),
     ("overlap", "layer_sweep", :overlap, "overlap sweep, N = 64"),
   )
   fig = Figure(size=(430 * length(panels), 390))
@@ -1446,7 +1521,7 @@ function fig18_poisson_scaling()
     ax = Axis(
       fig[1, column];
       xlabel=parameter == :N ? "elements per direction, 1/h" : "overlap layers ℓ",
-      ylabel=column == 1 ? "parallel local-solve batches to tolerance" : "",
+      ylabel=column == 1 ? "parallel local-solve batches" : "",
       title,
     )
     for (index, method) in enumerate(methods)
@@ -2088,6 +2163,7 @@ function make_all_figures()
   fig10_heat_dissipation()
   fig11_local3d()
   fig12_poisson_cmp()
+  fig12b_poisson_cmp_paper()
   fig13_evp_cmp()
   fig14_gp_convergence()
   fig15_gp_ground_states()

@@ -10,6 +10,15 @@ The stored cost is the number of local subdomain solves: one variational DD
 sweep, one additive Schwarz stationary step, one RAS stationary step, and one
 additive-Schwarz preconditioner application each count as `m` subdomain solves.
 Figure 12 divides this work count by `m` and plots outer solves.
+The paper-facing five-method variant Figure 12b calls the method
+**energy-minimizing domain decomposition (EMDD)**. It denotes plain additive
+EMDD by `q=1` (the current iterate) and one-vector history by `q=2` (the
+current and previous iterates); this is a basis-size convention, not the
+`history_depth` keyword value.
+All linear-source comparisons stop after the same relative true-residual
+reduction. Figure 12 and the mesh-scaling runs share one irregular partition
+family: METIS is run once on the `N=20` reference grid and every finer cell
+inherits its coarse parent's owner.
 
 Study 8 also includes right-preconditioned, unrestarted GMRES+RAS. RAS uses
 the same overlapping subdomains as varDD and a balanced disjoint restriction
@@ -21,11 +30,12 @@ used for stopping.
 
 The Study 8 sensitivity data change one parameter at a time rather than taking
 a Cartesian product. Mesh refinement is shown at `N=20,40,...,120`, both with
-two fixed overlap layers and with exactly fixed relative physical overlap. In
-the latter sequence `overlap=N/20` and `m=4`, hence `delta/H=0.1`. For a
-clean refinement study, these runs use the same nested `2 x 2` Cartesian
-subdomain geometry at every mesh level; the other studies retain METIS
-partitions. For a regular decomposition, the reported estimate is
+two fixed overlap layers and with fixed relative physical overlap. The
+irregular METIS core geometry is nested rather than recomputed at each mesh
+level, so its physical subdomain scale `H` is unchanged. In the latter
+sequence `overlap=N/20`, making the graph-overlap width `overlap/N` constant;
+thus each subdomain's `delta/H` is fixed up to one-cell boundary resolution.
+The nominal balanced-partition estimate reported in the CSV is
 
     delta/H ≈ overlap*sqrt(m)/N.
 
