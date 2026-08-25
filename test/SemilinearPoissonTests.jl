@@ -88,6 +88,44 @@ const SPSolvers = VariationalDD.Solvers
     @test minimum(eigvals(Symmetric(Matrix(mass)))) > 0
   end
 
+  @testset "L-BFGS EMDD local solve uses the linear enriched space" begin
+    A = [
+      5.0 -1.0  0.0  0.0  0.0
+     -1.0  4.0 -1.0  0.0  0.0
+      0.0 -1.0  4.0 -1.0  0.0
+      0.0  0.0 -1.0  4.0 -1.0
+      0.0  0.0  0.0 -1.0  3.0
+    ]
+    b = [1.0, -0.5, 2.0, 0.25, 1.5]
+    hessian_called = Ref(false)
+    energy = SPEnergies.NonlinearEnergy(
+      "quadratic nonlinear-energy wrapper",
+      u -> 0.5 * dot(u, A * u) - dot(b, u),
+      u -> A * u - b,
+      _ -> begin
+        hessian_called[] = true
+        error("the enriched EMDD local L-BFGS solve must not use the Hessian")
+      end,
+      5,
+    )
+    current = [0.8, -0.4, 0.6, 1.1, -0.7]
+    active = Int32[2, 3]
+    basis = hcat(
+      current,
+      [index == active[1] ? 1.0 : 0.0 for index = 1:5],
+      [index == active[2] ? 1.0 : 0.0 for index = 1:5],
+    )
+    expected = basis * ((basis' * A * basis) \ (basis' * b))
+    enriched = SPSolvers.inf_step(energy, current, active)
+    @test !hessian_called[]
+    @test enriched ≈ expected atol=1e-8 rtol=1e-8
+
+    inactive = setdiff(eachindex(current), active)
+    scale = dot(current[inactive], enriched[inactive]) /
+            dot(current[inactive], current[inactive])
+    @test enriched[inactive] ≈ scale .* current[inactive]
+  end
+
   @testset "shared nonlinear DD interface" begin
     exact(x) = sinpi(x[1]) * sinpi(x[2])
     forcing(x) = 2pi^2 * exact(x) - exp(-exact(x))

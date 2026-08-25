@@ -3,12 +3,19 @@
 All methods solve the same triangular P1 discretization of
 
 \[
--\Delta u=\exp(-u)+f,\qquad u|_{\partial\Omega}=0,
+-\Delta u+\beta u^3=f,\qquad \beta=1,\qquad u|_{\partial\Omega}=0,
 \]
 
 from the same zero initial iterate and stop when the norm of the assembled
 Euler residual has decreased by the same prescribed relative factor. The
 overlapping and nonoverlapping DOF sets are exactly those used by varDD.
+
+For varDD, each local candidate minimizes the energy over
+`V_i + span{u_k}` with gradient-only L-BFGS (relative tolerance `1e-10`,
+absolute tolerance `1e-12`, at most 200 iterations). The nonlinear Schwarz,
+ASPIN, and RASPEN baselines retain the standard affine Dirichlet space
+`u_k + V_i`; their local maps are solved by the existing damped Newton
+routine.
 
 The comparison methods are deliberately kept in the example layer rather than
 the package solver API:

@@ -70,9 +70,16 @@ const PLSolvers = VariationalDD.Solvers
   @testset "shared infimum and linear combination interface" begin
     energy, subdomains, _, initial = setup(3.0)
     active = collect(Int, subdomains[1])
-    local_minimizer = PLSolvers.inf_step(energy, initial, active)
+    affine_minimizer = PLSolvers.nonlinear_local_minimize(
+      energy, initial, active
+    ).u
     inactive = setdiff(eachindex(initial), active)
-    @test local_minimizer[inactive] == initial[inactive]
+    @test affine_minimizer[inactive] == initial[inactive]
+
+    local_minimizer = PLSolvers.inf_step(energy, initial, active)
+    scale = dot(initial[inactive], local_minimizer[inactive]) /
+            dot(initial[inactive], initial[inactive])
+    @test local_minimizer[inactive] ≈ scale .* initial[inactive]
     @test PLEnergies.energy(energy, local_minimizer) <=
           PLEnergies.energy(energy, initial)
 

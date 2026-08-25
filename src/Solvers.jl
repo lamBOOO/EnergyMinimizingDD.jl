@@ -351,7 +351,88 @@ function inf_step(
   u_cur::Vector{Float64},
   idx_sub::AbstractVector,
 )
-  return nonlinear_local_minimize(e, u_cur, idx_sub).u
+  return nonlinear_enriched_local_minimize(e, u_cur, idx_sub).u
+end
+
+"""
+    nonlinear_enriched_local_minimize(e, u_cur, idx_sub; kwargs...)
+
+Minimize a nonlinear energy over `V_i + span{u_cur}` with L-BFGS. The
+coordinate basis consists of the exterior part of `u_cur` and the active
+coordinate vectors, which spans the requested space without constructing a
+dense global-by-local matrix. Only energy and gradient evaluations are used;
+the Hessian stored by `e` is deliberately ignored.
+"""
+function nonlinear_enriched_local_minimize(
+  e::Energies.NonlinearEnergy{Float64},
+  u_cur::Vector{Float64},
+  idx_sub::AbstractVector;
+  relative_tolerance::Float64=1e-10,
+  absolute_tolerance::Float64=1e-12,
+  maxiter::Int=200,
+)
+  active = collect(Int, idx_sub)
+  isempty(active) && return (u=copy(u_cur), iterations=0, energy_evaluations=0)
+
+  exterior = copy(u_cur)
+  exterior[active] .= 0.0
+  exterior_norm = norm(exterior)
+  has_global_direction = !iszero(exterior_norm)
+  global_direction = has_global_direction ? exterior ./ exterior_norm : exterior
+  first_local_coordinate = has_global_direction ? 2 : 1
+  initial_coordinates = has_global_direction ?
+                        vcat(exterior_norm, u_cur[active]) :
+                        copy(u_cur[active])
+
+  function reconstruct(coordinates)
+    u = has_global_direction ?
+        coordinates[1] .* global_direction :
+        zeros(Float64, length(u_cur))
+    u[active] .= view(coordinates, first_local_coordinate:length(coordinates))
+    return u
+  end
+
+  function project_gradient(gradient)
+    local_gradient = gradient[active]
+    return has_global_direction ?
+           vcat(dot(global_direction, gradient), local_gradient) :
+           local_gradient
+  end
+
+  initial_gradient = project_gradient(Energies.gradient(e, u_cur))
+  target = max(absolute_tolerance, relative_tolerance * norm(initial_gradient))
+  energy_evaluations = 0
+  function objective(coordinates)
+    energy_evaluations += 1
+    return Energies.energy(e, reconstruct(coordinates))
+  end
+  function reduced_gradient!(storage, coordinates)
+    storage .= project_gradient(Energies.gradient(e, reconstruct(coordinates)))
+    return storage
+  end
+
+  result = Optim.optimize(
+    objective,
+    reduced_gradient!,
+    initial_coordinates,
+    Optim.LBFGS(),
+    Optim.Options(
+      iterations=maxiter,
+      g_abstol=target,
+      # A global FE energy can be unchanged to roundoff even though the
+      # projected local gradient is not small. Let the line search globalize
+      # the step, but do not mistake objective stagnation or a rounded increase
+      # for convergence before the requested gradient tolerance is met.
+      allow_f_increases=true,
+      successive_f_tol=maxiter,
+      show_warnings=false,
+    ),
+  )
+  return (
+    u=reconstruct(Optim.minimizer(result)),
+    iterations=Optim.iterations(result),
+    energy_evaluations=energy_evaluations,
+  )
 end
 
 """Minimize a nonlinear energy with all exterior degrees of freedom fixed."""
