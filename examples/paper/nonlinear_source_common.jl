@@ -160,7 +160,7 @@ function nonlinear_source_schwarz_baseline(
   initial_residual = residual_history[1]
   for _ = 1:maxiter
     candidates = hcat([
-      Solvers.inf_step(energy, u, indices) for indices in dofs
+      Solvers.nonlinear_local_minimize(energy, u, indices).u for indices in dofs
     ]...)
     corrections = candidates .- u
     direction = if method == :nonlinear_as

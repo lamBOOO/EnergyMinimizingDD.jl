@@ -1,6 +1,6 @@
 # Study 11: strictly convex semilinear Poisson problem
 #
-#   -Delta u = exp(-u) + f,  u = 0 on the boundary,
+#   -Delta u + beta*u^3 = f,  u = 0 on the boundary,
 #
 # with a manufactured sine solution. All methods use the same triangular P1
 # mesh, METIS partition, overlap, initial iterate, and true residual test.
@@ -14,6 +14,7 @@ const SEMILINEAR_MODES = (
   (0.55, 2, 3),
   (0.35, 3, 2),
 )
+const SEMILINEAR_BETA = 1.0
 
 semilinear_exact(x) = sum(
   coefficient * sinpi(kx * x[1]) * sinpi(ky * x[2]) for
@@ -24,7 +25,7 @@ semilinear_minus_laplacian(x) = pi^2 * sum(
   (coefficient, kx, ky) in SEMILINEAR_MODES
 )
 semilinear_forcing(x) =
-  semilinear_minus_laplacian(x) - exp(-semilinear_exact(x))
+  semilinear_minus_laplacian(x) + SEMILINEAR_BETA * semilinear_exact(x)^3
 
 function run_study11()
   files = (
@@ -38,7 +39,7 @@ function run_study11()
     println("study11: cached, skipping")
     return
   end
-  println("study11: manufactured exponential semilinear Poisson problem")
+  println("study11: manufactured cubic semilinear Poisson problem")
 
   N = SMALL ? 8 : 16
   ms = SMALL ? [2] : [2, 4, 8]
@@ -81,16 +82,16 @@ function run_study11()
   initial = FEMDiscretizations.FEM_SemilinearPoisson(
     N,
     first(ms);
-    potential=s -> exp(-s),
-    potential_gradient=s -> -exp(-s),
-    potential_hessian=s -> exp(-s),
+    potential=s -> SEMILINEAR_BETA * s^4 / 4,
+    potential_gradient=s -> SEMILINEAR_BETA * s^3,
+    potential_hessian=s -> 3 * SEMILINEAR_BETA * s^2,
     forcing=semilinear_forcing,
     overlap=overlap,
     quadrature_degree=8,
     initial_guess=x -> 0.0,
   )
   reference_energy = Energies.NonlinearEnergy(
-    "exponential semilinear Poisson",
+    "cubic semilinear Poisson",
     energy_assembler,
     gradient_assembler,
     hessian_assembler,
@@ -131,9 +132,9 @@ function run_study11()
     mass = FEMDiscretizations.FEM_SemilinearPoisson(
       N,
       m;
-      potential=s -> exp(-s),
-      potential_gradient=s -> -exp(-s),
-      potential_hessian=s -> exp(-s),
+      potential=s -> SEMILINEAR_BETA * s^4 / 4,
+      potential_gradient=s -> SEMILINEAR_BETA * s^3,
+      potential_hessian=s -> 3 * SEMILINEAR_BETA * s^2,
       forcing=semilinear_forcing,
       overlap=overlap,
       quadrature_degree=8,
@@ -141,7 +142,7 @@ function run_study11()
       return_mass_matrix=true,
     )
     energy = Energies.NonlinearEnergy(
-      "exponential semilinear Poisson",
+      "cubic semilinear Poisson",
       energy_assembler,
       gradient_assembler,
       hessian_assembler,

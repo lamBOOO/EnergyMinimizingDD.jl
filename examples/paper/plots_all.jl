@@ -1210,7 +1210,7 @@ function fig15_gp_ground_states()
 end
 
 # ---------------------------------------------------------------------------
-# Fig 17: manufactured exponential semilinear Poisson comparison
+# Fig 17: manufactured cubic semilinear Poisson comparison
 # ---------------------------------------------------------------------------
 function fig17_semilinear_poisson()
   conv = loadtable("study11_semilinear_conv.csv")
@@ -1263,7 +1263,7 @@ function fig17_semilinear_poisson()
   fig = Figure(size=(max(990, 330 * length(ms)), 540))
   Label(
     fig[0, 1:length(ms)],
-    "−Δu = exp(−u) + f  in Ω,    u = 0  on ∂Ω";
+    "−Δu + βu³ = f  in Ω,    β = 1,    u = 0  on ∂Ω";
     fontsize=22,
     font=:bold,
   )

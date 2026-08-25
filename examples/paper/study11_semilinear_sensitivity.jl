@@ -1,4 +1,4 @@
-# Study 11 sensitivity experiments for the exponential semilinear source
+# Study 11 sensitivity experiments for the cubic semilinear source
 # problem. The experiments vary one design choice at a time:
 #   - h, h/2, h/4 with overlap layers 1, 2, 4 (fixed physical overlap),
 #   - the number of PCG(AS) steps in each inexact Newton update,
@@ -14,9 +14,9 @@ function semilinear_sensitivity_setup(N, m, overlap)
     FEMDiscretizations.FEM_SemilinearPoisson(
       N,
       m;
-      potential=s -> exp(-s),
-      potential_gradient=s -> -exp(-s),
-      potential_hessian=s -> exp(-s),
+      potential=s -> SEMILINEAR_BETA * s^4 / 4,
+      potential_gradient=s -> SEMILINEAR_BETA * s^3,
+      potential_hessian=s -> 3 * SEMILINEAR_BETA * s^2,
       forcing=semilinear_forcing,
       overlap=overlap,
       quadrature_degree=8,
@@ -24,7 +24,7 @@ function semilinear_sensitivity_setup(N, m, overlap)
       return_mass_matrix=true,
     )
   energy = Energies.NonlinearEnergy(
-    "exponential semilinear Poisson",
+    "cubic semilinear Poisson",
     ea,
     ga,
     ha,

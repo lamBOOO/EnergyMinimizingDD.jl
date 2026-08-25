@@ -258,19 +258,15 @@ function FEM_SemilinearPoisson(
 
   function gradient_assembler(values::Vector{Float64})
     uh = cached_fe_function(values)
-    residual(v) = ∫(
-      ∇(uh) ⋅ ∇(v) + (potential_gradient ∘ uh) * v -
-      (x -> forcing(x)) * v
-    )dOmega
-    return assemble_vector(residual, Vh)
+    reaction(v) = ∫((potential_gradient ∘ uh) * v)dOmega
+    return K * values + assemble_vector(reaction, Vh) - b
   end
 
   function hessian_assembler(values::Vector{Float64})
     uh = cached_fe_function(values)
-    tangent(du, v) = ∫(
-      ∇(du) ⋅ ∇(v) + (potential_hessian ∘ uh) * du * v
-    )dOmega
-    return sparse(assemble_matrix(tangent, Vh, Uh))
+    reaction_tangent(du, v) =
+      ∫((potential_hessian ∘ uh) * du * v)dOmega
+    return K + sparse(assemble_matrix(reaction_tangent, Vh, Uh))
   end
 
   initial_fe = interpolate_everywhere(initial_guess, Uh)

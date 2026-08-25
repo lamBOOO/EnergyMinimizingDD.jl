@@ -16,8 +16,8 @@ formulations and fairness conventions.
 
 ## Generic semilinear Poisson benchmark
 
-Study 11 solves `-Delta u = exp(-u) + f` on a triangular P1 mesh with a
-manufactured sine solution. The exponential is supplied as one instance of
+Study 11 solves `-Delta u + beta*u^3 = f`, with `beta=1`, on a triangular P1
+mesh with a manufactured sine solution. The quartic density is supplied through
 the generic `FEM_SemilinearPoisson` potential interface; the package does not
 define a PDE-specific energy type. The study compares nonlinear AS/RAS,
 Anderson--RAS, Newton--PCG(AS), the Spicher--Wihler energy-IMEX iteration,
