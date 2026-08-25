@@ -13,6 +13,9 @@ using Printf
 using Random
 using LineSearches
 
+vtk_output_dir = normpath(joinpath(@__DIR__, "..", "output", "vtk"))
+mkpath(vtk_output_dir)
+
 N = 80
 m = 2
 maxiter = 100
@@ -41,14 +44,14 @@ println("Exact eigenvalue = $(exact_sol[1][1])")
 # write to vtk file using U info
 writevtk(
   U.space.fe_basis.trian,
-  "eigen_solution";
+  joinpath(vtk_output_dir, "eigen_solution");
   cellfields=["u_approx" => FEFunction(U, u_approx)],
 )
 # write all sols to vtk file for visualization
 for (i, sol) in enumerate(solutions)
   writevtk(
     U.space.fe_basis.trian,
-    "schroedinger_solution_iter$(i-1)";
+    joinpath(vtk_output_dir, "schroedinger_solution_iter$(i-1)");
     cellfields=["u" => FEFunction(U, sol)],
   )
 end
@@ -59,7 +62,7 @@ for (iter, local_updates) in enumerate(local_updates_history)
   end
   writevtk(
     U.space.fe_basis.trian,
-    "schroedinger_local_updates_iter$(iter-1)";
+    joinpath(vtk_output_dir, "schroedinger_local_updates_iter$(iter-1)");
     cellfields=cellfields,
   )
 end
@@ -104,7 +107,7 @@ println("Poisson energy = $E_poisson")
 # write to vtk file using U info
 writevtk(
   U.space.fe_basis.trian,
-  "poisson_solution";
+  joinpath(vtk_output_dir, "poisson_solution");
   cellfields=[
     "u_poisson" => FEFunction(U, u_poisson),
     "u_poisson_direct" => FEFunction(U, u_poisson_direct),
@@ -117,7 +120,7 @@ for (iter, local_updates) in enumerate(local_updates_history)
   end
   writevtk(
     U.space.fe_basis.trian,
-    "poisson_local_updates_iter$(iter-1)";
+    joinpath(vtk_output_dir, "poisson_local_updates_iter$(iter-1)");
     cellfields=cellfields,
   )
 end
@@ -132,7 +135,7 @@ println("✓ passed.")
 for (i, sol) in enumerate(sols)
   writevtk(
     U.space.fe_basis.trian,
-    "poisson_solution_iter$(i-1)";
+    joinpath(vtk_output_dir, "poisson_solution_iter$(i-1)");
     cellfields=["u" => FEFunction(U, sol)],
   )
 end
