@@ -228,53 +228,6 @@ function add_gp_solution_inset!(
   return sax
 end
 
-function add_plap_solution_inset!(
-  figpos,
-  solutions,
-  p;
-  halign = 0.68,
-  valign = 0.97,
-  inset_size = 0.23,
-)
-  smask = solutions.p .== p
-  N = solutions.N[findfirst(smask)]
-  values = pick(solutions, :value, smask)
-  sax = Axis(
-    figpos;
-    width = Relative(inset_size),
-    height = Relative(inset_size),
-    halign = halign,
-    valign = valign,
-    tellwidth = false,
-    tellheight = false,
-    aspect = DataAspect(),
-    limits = (0, 1, 0, 1),
-  )
-  translate!(sax.blockscene, 0, 0, 150)
-  hidedecorations!(sax)
-  hidespines!(sax)
-  xs = collect(all_nodes(N))
-  heatmap!(
-    sax,
-    xs,
-    xs,
-    field_matrix_with_bc(values, N);
-    colormap = :viridis,
-    colorrange = (0, maximum(values)),
-  )
-  text!(
-    sax,
-    0.5,
-    0.96;
-    text="solution",
-    align=(:center, :top),
-    fontsize=9,
-    color=:white,
-    font=:bold,
-  )
-  return sax
-end
-
 function add_semilinear_solution_inset!(
   figpos,
   solutions;
@@ -416,7 +369,6 @@ end
 function fig01_setup()
   part = loadtable("study1_partition.csv")
   gs = loadtable("study1_schroedinger.csv")
-  plap = loadtable("study1_plap.csv")
 
   fig = Figure(size = (880, 780))
 
@@ -461,7 +413,7 @@ function fig01_setup()
 
   Ngs = gs.N[1]
   ax3 = Axis(
-    fig[2, 1];
+    fig[2, 1:2];
     title = "Schroedinger ground state",
     xlabel = "x1",
     ylabel = "x2",
@@ -476,22 +428,6 @@ function fig01_setup()
     colormap = :viridis,
   )
 
-  Npl = plap.N[1]
-  ax4 = Axis(
-    fig[2, 2];
-    title = "p-Laplacian solution (p = 3)",
-    xlabel = "x1",
-    ylabel = "x2",
-    aspect = DataAspect(),
-    limits = (0, 1, 0, 1),
-  )
-  heatmap!(
-    ax4,
-    collect(all_nodes(Npl)),
-    collect(all_nodes(Npl)),
-    field_matrix_with_bc(plap.value, Npl);
-    colormap = :viridis,
-  )
 
   colgap!(fig.layout, 12)
   rowgap!(fig.layout, 12)
@@ -724,96 +660,6 @@ function fig07_poisson()
   add_legend!(ax2; position = :rt)
   savefigs(fig, "fig07_poisson")
 end
-
-# ---------------------------------------------------------------------------
-# Fig 8: p-Laplacian one-level nonlinear DD comparison
-# ---------------------------------------------------------------------------
-function fig08_plaplacian()
-  conv = loadtable("study5_conv.csv")
-  solutions = loadtable("study5_solutions.csv")
-  parts = loadtable("study5_partitions.csv")
-  ps = sort(unique(conv.p))
-  ms = sort(unique(conv.m))
-  methods = (
-    "nonlinear_as",
-    "nonlinear_ras",
-    "var_dd",
-    "var_dd_history",
-  )
-  labels = Dict(
-    "nonlinear_as" => "nonlinear AS, optimal damping",
-    "nonlinear_ras" => "nonlinear RAS, optimal damping",
-    "var_dd" => "varDD",
-    "var_dd_history" => "varDD + history",
-  )
-  markers = Dict(
-    "nonlinear_as" => :circle,
-    "nonlinear_ras" => :rect,
-    "var_dd" => :diamond,
-    "var_dd_history" => :utriangle,
-  )
-  colors = Makie.resample_cmap(:tab10, length(methods))
-  positive_residuals = conv.relative_residual[conv.relative_residual .> 0]
-  ylimits = (1e-8, maximum(positive_residuals) * 2)
-  ytick_exps = sort(
-    collect(floor(Int, log10(ylimits[2])):-2:ceil(Int, log10(ylimits[1])))
-  )
-  yticks = LogTicks(ytick_exps)
-
-  fig = Figure(size = (330 * length(ms), 275 * length(ps) + 90))
-  for (row, p) in enumerate(ps), (column, m) in enumerate(ms)
-    ax = Axis(
-      fig[row, column];
-      xlabel = row == length(ps) ? "outer iteration" : "",
-      ylabel = column == 1 ? "p = $(Int(p))\nrelative residual" : "",
-      title = row == 1 ? "m = $m" : "",
-      yscale = log10,
-      yticks = yticks,
-      limits = (nothing, ylimits),
-    )
-    for (index, method) in enumerate(methods)
-      mask =
-        (conv.p .== p) .&
-        (conv.m .== m) .&
-        (conv.method .== method) .&
-        (conv.relative_residual .> 0)
-      residual_values = logfloor(pick(conv, :relative_residual, mask); floor=1e-16)
-      outer = pick(conv, :outer, mask)
-      add_series!(
-        ax,
-        outer,
-        residual_values;
-        label=labels[method],
-        color=colors[index],
-        marker=markers[method],
-      )
-    end
-    hlines!(ax, [1e-7]; color=:black, linestyle=:dot, linewidth=1.2)
-    add_plap_solution_inset!(
-      fig[row, column], solutions, p; halign=0.68, inset_size=0.23
-    )
-    add_triangle_partition_inset!(
-      fig[row, column],
-      parts,
-      m;
-      halign=0.99,
-      inset_size=0.23,
-      inset_title="partition",
-    )
-  end
-
-  Legend(
-    fig[length(ps)+1, 1:length(ms)],
-    legend_line_marker_elements(methods, markers; colors),
-    [labels[m] for m in methods];
-    orientation=:horizontal,
-    nbanks=1,
-    framevisible=true,
-  )
-  rowgap!(fig.layout, 8)
-  savefigs(fig, "fig08_plaplacian")
-end
-
 # ---------------------------------------------------------------------------
 # Fig 9: heat equation — warm vs cold start and tau sweep
 # ---------------------------------------------------------------------------
@@ -2158,7 +2004,6 @@ function make_all_figures()
   fig05_robustness()
   fig06_timing()
   fig07_poisson()
-  fig08_plaplacian()
   fig09_heat_warmstart()
   fig10_heat_dissipation()
   fig11_local3d()

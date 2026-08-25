@@ -364,11 +364,10 @@ residual_norm(e::GrossPitaevskiiRayleighQuotient, u::AbstractVector) =
 
 
 
-# 4) Generic Nonlinear Energy: E(u) for general nonlinear problems
-#    Can represent PDE problems like p-Laplacian: E(u) = ∫(|∇u|^p/p)dΩ - ∫f*u dΩ
-#    Or simple algebraic systems: E(x) = ½||F(x)||² where F(x) = 0 is the root problem
+# 4) Generic Nonlinear Energy: E(u) for general nonlinear problems,
+#    including algebraic systems E(x) = ½||F(x)||² where F(x) = 0.
 struct NonlinearEnergy{T,F1<:Function,F2<:Function,F3} <: AbstractEnergy{T}
-  name::String   # Descriptive name (e.g., "p-Laplacian", "Circle-Cubic System")
+  name::String   # Descriptive name (e.g., "Circle-Cubic System")
   assembler::F1  # Function that assembles the energy given u: (u) -> energy_value
   grad_assembler::F2  # Function that assembles the gradient: (u) -> gradient_vector
   hess_assembler::F3  # Optional analytic Hessian assembler

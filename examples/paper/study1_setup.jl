@@ -1,12 +1,11 @@
 # Study 1: problem setup illustration data.
 # - METIS overlapping partition (owner + overlap multiplicity per dof)
 # - Schroedinger ground state computed with var_dd
-# - p-Laplacian solution computed with var_dd
 
 isdefined(Main, :PAPER_COMMON) || include("common.jl")
 
 function run_study1()
-  files = ("study1_partition.csv", "study1_schroedinger.csv", "study1_plap.csv")
+  files = ("study1_partition.csv", "study1_schroedinger.csv")
   if !needs_run(files...)
     println("study1: cached, skipping")
     return
@@ -53,27 +52,6 @@ function run_study1()
       value = u_gs,
       lambda = fill(lambda_gs, ndofs),
     ),
-  )
-
-  # p-Laplacian solution (p = 3)
-  Np = SMALL ? 12 : 18
-  mp = SMALL ? 4 : 9
-  p = 3.0
-  ea, ga, ha, dofspar_p, Up, ndofs_p, _, u0_p =
-    FEMDiscretizations.FEM_PLaplacian(Np, mp, p, x -> 1.0, overlap)
-  e_plap = Energies.NonlinearEnergy("p-Laplacian", ea, ga, ha, ndofs_p)
-  initial_residual = Energies.residual_norm(e_plap, u0_p)
-  u_plap, = Solvers.var_dd(
-    e_plap,
-    dofspar_p;
-    u0 = u0_p,
-    maxiter = 50,
-    tol = 1e-6 * initial_residual,
-    verbose = false,
-  )
-  savetable(
-    "study1_plap.csv",
-    (N = fill(Np, ndofs_p), idx = 1:ndofs_p, value = u_plap),
   )
 end
 

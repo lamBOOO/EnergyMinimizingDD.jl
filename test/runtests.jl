@@ -1,7 +1,6 @@
 include("./EnergiesTests.jl")
 include("./SubspaceSolverTests.jl")
 include("./GrossPitaevskiiTests.jl")
-include("./PLaplacianTests.jl")
 include("./SemilinearPoissonTests.jl")
 include("./NonlinearSourceBaselinesTests.jl")
 include("./LinearSchwarzTests.jl")
