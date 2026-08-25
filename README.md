@@ -1,82 +1,171 @@
 # VariationalDD.jl
 
-## Generalized eigenvalue benchmark
+<p align="center">
+  <strong>Energy-minimizing domain decomposition for finite-element problems in Julia</strong>
+</p>
 
-Study 9 solves `K*u = lambda*M*u` with the same initial vector, overlapping
-partition, and relative true-residual test for varDD, history-enhanced varDD,
-LOPSD+AS, LOBPCG+AS, Jacobi--Davidson--GMRES(AS), and shift-and-invert
-Lanczos--PCG(AS). Its sensitivity runs vary `m=2,4,8`, refine through
-`h,h/2,h/4` with both fixed overlap layers and fixed `delta/H`, sweep a
-resolved oscillatory diffusion coefficient, and vary the varDD history depth.
-Local eigenproblem batches, linear AS batches, local LOBPCG critical-path
-iterations, factor storage, and global operator applications are reported in
-separate units. See
-[`examples/paper/study89_note.md`](examples/paper/study89_note.md) for the
-formulations and fairness conventions.
+<p align="center">
+  <a href="https://github.com/lamBOOO/dd_eigen/actions/workflows/ci.yml"><img src="https://github.com/lamBOOO/dd_eigen/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
+  <a href="https://julialang.org/"><img src="https://img.shields.io/badge/Julia-1.10%2B-9558B2?logo=julia&logoColor=white" alt="Julia 1.10 or newer"></a>
+  <a href="docs/src/index.md"><img src="https://img.shields.io/badge/docs-getting%20started-2B6CB0" alt="Documentation"></a>
+  <a href="#project-status"><img src="https://img.shields.io/badge/status-experimental-EA8C00" alt="Experimental status"></a>
+</p>
 
-## Generic semilinear Poisson benchmark
+<p align="center">
+  <img src="docs/src/assets/variational-dd-poisson-iteration.png" width="1000" alt="A real Poisson iteration: an asymmetric initial field, four local update fields, and the second-level minimizer">
+</p>
 
-Study 11 solves `-Delta u + beta*u^3 = f`, with `beta=1`, on a triangular P1
-mesh with a manufactured sine solution. The quartic density is supplied through
-the generic `FEM_SemilinearPoisson` potential interface; the package does not
-define a PDE-specific energy type. The study compares nonlinear AS/RAS,
-Anderson--RAS, Newton--PCG(AS), the Spicher--Wihler energy-IMEX iteration,
-ASPIN, RASPEN, varDD, and varDD with history using the same discretization,
-partition, initial iterate, and true relative-residual stopping criterion. See
-[`examples/paper/study11_note.md`](examples/paper/study11_note.md) for the
-method definitions and
-[`examples/paper/references.bib`](examples/paper/references.bib) for reusable
-BibTeX records.
+VariationalDD.jl implements energy-minimizing domain-decomposition methods for finite-element problems. Each iteration solves independent variational problems on overlapping local spaces and then recombines the resulting candidates through a small global minimization. A common solver interface supports quadratic source problems, generalized eigenproblems, semilinear energies, and Gross–Pitaevskii models.
 
-## Henning--Jarlebring GPE benchmark
+The figure visualizes one computed iteration of the Poisson example below, starting from an asymmetric initial field. The middle panels show the local corrections $\mathsf y_i^{(0)}-\mathsf u^{(0)}$; the white contours identify the degrees of freedom in each overlapping subspace. The displayed energy values are evaluated from the actual iterates. The figure can be reproduced with [`docs/generate_readme_figures.jl`](docs/generate_readme_figures.jl).
 
-Study 10 reproduces the illustrative Gross--Pitaevskii example in section 2.3
-of Henning--Jarlebring: `D=[-8,8]^2`, `kappa=500`, harmonic-plus-optical
-potential (2.9), and their polynomial initial state. It includes the exact
-normalized `a_u`-gradient flow from Definition 5.12 with the energy-optimal
-step (5.30). At the current normalized iterate `u_k`, define
+## Scope
 
-```text
-A(u_k) = K + kappa*C(u_k),
-r_k    = A(u_k)u_k - lambda_k*M*u_k.
+The package currently provides:
+
+- objective functions for quadratic source problems, generalized Rayleigh quotients, semilinear equations, and Gross–Pitaevskii models;
+- finite-element assembly based on [Gridap.jl](https://github.com/gridap/Gridap.jl);
+- overlapping METIS and Cartesian partitions of the finite-element degrees of freedom;
+- additive and multiplicative local sweeps, variational second-level recombination, and optional enrichment with previous iterates; and
+- convergence histories, local-solver diagnostics, reproducible benchmark studies, and example notebooks.
+
+## Quick start: Poisson's equation
+
+Install the current development version directly from GitHub:
+
+```julia
+import Pkg
+Pkg.add(url="https://github.com/lamBOOO/dd_eigen.git")
 ```
 
-The exact benchmark solves the global elliptic problem
-`A(u_k)z_k=M*u_k` by sparse Cholesky and minimizes the energy along update
-(5.28). On the documented `32 x 32` Q1 mesh (`h=0.5`), its energy error after 30
-iterations is approximately `1e-9`, consistent with Figure 6. Since the paper
-does not state the mesh used for that figure, the reported values
-`E_GS≈10.8995` and `lambda_GS≈27.7133` are treated as refinement targets.
-The comparison also includes **exact CG-GFDN(a_u)**, which combines the exact
-metric solve with the same Fletcher--Reeves history, descent restart, and
-energy-optimal line search used by the AS-inexact CG method.
-The 3x3 comparison additionally includes `kappa=10` and `kappa=100`, using the
-same setup and initial state; `kappa=500` remains the paper-reproduction row.
-An opt-in `run_hj_mesh_validation()` study records exact-GFDN results up to
-`N=256`; there it gives `E_h=10.9007980` and `lambda_h=27.7149190`. The
-`h=1e-3` statement elsewhere in the paper refers to its separate 1D Figure 7
-experiment, not this two-dimensional benchmark.
+The following example solves
 
-The AS-inexact comparison instead applies the one-level additive Schwarz
-approximation once,
+$$
+-\Delta u = 1 \quad \text{in } (0,1)^2,
+\qquad u = 0 \quad \text{on } \partial(0,1)^2,
+$$
 
-```text
-z_k = B_AS(u_k) r_k,     B_AS(u_k) approximately A(u_k)^(-1),
+with four overlapping subdomains:
+
+```julia
+using VariationalDD, LinearAlgebra
+
+const FEM = VariationalDD.FEMDiscretizations
+const E = VariationalDD.Energies
+const S = VariationalDD.Solvers
+
+A, _, b, subdomains, _ = FEM.FEM_Schroedinger(
+    16, 4; P=x -> 0.0, f=x -> 1.0, overlap=2,
+    partitioning=:cartesian,
+)
+energy = E.QuadraticEnergy(A, b)
+u, _, _, _, residuals = S.var_dd(
+    energy, subdomains; maxiter=50, tol=1e-8, verbose=false,
+)
+
+@show length(residuals) norm(A * u - b)
+# length(residuals) = 28
+# norm(A * u - b) = 5.337471100984455e-9
 ```
 
-followed by projection onto the mass-tangent space and an energy-optimal
-normalized line search. One application of `B_AS(u_k)` consists of `m`
-independent local subdomain solves, which can run in parallel. The accelerated
-variant adds a Fletcher--Reeves history direction and restarts when this is no
-longer a descent direction. The figures therefore call the methods
-**AS-inexact GFDN(a_u)** and **AS-inexact CG-GFDN(a_u)**.
+<p align="center">
+  <img src="docs/src/assets/poisson-convergence.png" width="900" alt="Makie plot of the measured residual and energy-error convergence for the Poisson quick start">
+</p>
 
-This terminology follows Remark 5.14 ("inexact GFDN(a_u)") of Patrick Henning
-and Elias Jarlebring, *The Gross--Pitaevskii Equation and Eigenvector
-Nonlinearities: Numerical Methods and Algorithms*, SIAM Review 67(2), 2025.
-The remark explains that the elliptic inverse required by an exact
-`GFDN(a_u)` step can be replaced by a small amount of linear-solver work and
-that this can substantially reduce the computational cost. Our one-AS
-application is a domain-decomposition realization of that inexact principle.
+The Cartesian partition makes this small example deterministic. For irregular meshes and larger computations, use the default `partitioning=:metis`.
 
-Reference: [Henning--Jarlebring, SIAM Review, sections 2.3 and 5.2.3](https://doi.org/10.1137/22M1516324)
+## Two-level energy-minimizing method
+
+Following the notation of the accompanying theory manuscript, consider an overlapping decomposition $\mathcal V=\sum_{i=1}^m\mathcal V_i$ and an objective $\mathsf J:\mathcal V\to\mathbb R\cup\{+\infty\}$. Given the current iterate $\mathsf u^{(k)}$, the method enriches every local space with the global iterate and solves the resulting local minimization problems independently:
+
+$$
+\begin{aligned}
+\mathcal W_i\!\left(\mathsf u^{(k)}\right)
+  &= \operatorname{span}\!\left\{\mathsf u^{(k)}\right\}+\mathcal V_i, \\
+\mathsf y_i^{(k)}
+  &\in \underset{\mathsf y\in\mathcal W_i(\mathsf u^{(k)})}{\operatorname{arg\,min}}
+     \,\mathsf J(\mathsf y),
+  && i=1,\ldots,m.
+\end{aligned}
+$$
+
+The local candidates are combined variationally rather than through a prescribed weighted sum. For a history depth $q\geq0$, let $\widetilde q_k=\min\{q,k\}$. The method forms a compact second-level space from the candidates and the available iterate history, then minimizes the same objective over that space:
+
+$$
+\begin{aligned}
+\mathcal Z^{(k)}
+  &= \operatorname{span}\!\left\{
+     \mathsf u^{(k-\widetilde q_k)},\ldots,\mathsf u^{(k)},
+     \mathsf y_1^{(k)},\ldots,\mathsf y_m^{(k)}\right\}, \\
+\mathsf u^{(k+1)}
+  &\in \underset{\mathsf u\in\mathcal Z^{(k)}}{\operatorname{arg\,min}}
+     \,\mathsf J(\mathsf u).
+\end{aligned}
+$$
+
+With the default `history_depth=0`, the second level uses the current iterate and the new local candidates. A positive history depth retains up to $q$ earlier iterates and can improve the global recombination without changing the local problems.
+
+### Model objectives
+
+For a symmetric positive-definite linear source problem, the objective is the discrete energy
+
+$$
+\mathcal E(\mathsf v)
+  = \tfrac12\mathsf v^\top\mathsf A\mathsf v
+  - \mathsf b^\top\mathsf v,
+\qquad \mathsf A\succ0.
+$$
+
+Its unique minimizer is denoted by $\mathsf u^\star$. Convergence can be measured with the stationarity residual
+
+$$
+\mathsf r(\mathsf u)
+  := \nabla\mathcal E(\mathsf u)
+  = \mathsf A\mathsf u-\mathsf b.
+$$
+
+For the generalized eigenproblem
+
+$$
+\mathsf A\mathsf u^*=\lambda^*\mathsf M\mathsf u^*,
+$$
+
+the objective is the generalized Rayleigh quotient
+
+$$
+\mathsf J(\mathsf v)
+  = \frac{\mathsf v^\top\mathsf A\mathsf v}
+         {\mathsf v^\top\mathsf M\mathsf v}.
+$$
+
+The two-level construction is unchanged: both the local and global subproblems minimize the relevant objective. In the eigenvalue setting, these minimizations are Rayleigh–Ritz problems on the corresponding trial spaces.
+
+## Supported problem classes
+
+| Problem class | Energy type | Example |
+|---|---|---|
+| Linear source / Poisson | `QuadraticEnergy` | [`study4_poisson.jl`](examples/paper/study4_poisson.jl) |
+| Generalized eigenproblem | `GeneralizedRayleighQuotient` | [`study89_note.md`](examples/paper/study89_note.md) |
+| Generic semilinear Poisson | `NonlinearEnergy` | [`study11_note.md`](examples/paper/study11_note.md) |
+| Gross–Pitaevskii ground state | `GrossPitaevskiiRayleighQuotient` | [`study10_note.md`](examples/paper/study10_note.md) |
+| Backward-Euler gradient flow | repeated `QuadraticEnergy` solves | [`heat_equation_dd.jl`](examples/heat_equation_dd.jl) |
+
+## Documentation and examples
+
+- [Getting started and package overview](docs/src/index.md)
+- [API reference](docs/src/api.md)
+- [Example programs and notebooks](examples)
+- [Benchmark methodology and fairness conventions](examples/paper/study89_note.md)
+- [Reusable benchmark references](examples/paper/references.bib)
+
+To reproduce the repository environment and run the test suite:
+
+```bash
+git clone https://github.com/lamBOOO/dd_eigen.git
+cd dd_eigen
+julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.test()'
+```
+
+## Project status
+
+VariationalDD.jl is experimental research software. The implementation is covered by automated tests, but the public API may evolve before a stable release. Questions, bug reports, benchmark contributions, and focused pull requests are welcome through [GitHub Issues](https://github.com/lamBOOO/dd_eigen/issues).
