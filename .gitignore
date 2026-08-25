@@ -4,4 +4,5 @@ Manifest.toml
 docs/build/
 *.vtu
 *.csv
+!examples/paper/tables/fig18_poisson_scaling.csv
 docs/Project.toml
