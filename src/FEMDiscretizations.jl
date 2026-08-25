@@ -2,7 +2,6 @@ module FEMDiscretizations
 
 using LinearAlgebra
 using SparseArrays
-using FiniteDiff
 using Gridap
 using GridapDistributed
 using Metis
@@ -10,7 +9,6 @@ using IterativeSolvers
 using Arpack
 using Printf
 using Random
-using LineSearches
 
 function FEM_Schroedinger(
   N::Int,
@@ -197,112 +195,6 @@ function _partitioned_triangular_p1_space(N::Int, m::Int, overlap::Int)
   )
 end
 
-"""
-    FEM_PLaplacian(N, m=9, p=3.0, f=x->1.0, overlap=2;
-                   alpha=x->1.0, epsilon=1e-8)
-
-Assemble the regularized weighted p-Laplacian energy on a triangular P1 mesh
-of the unit square,
-
-    E(u) = integral(alpha/p * (epsilon^2 + |grad u|^2)^(p/2) - f*u).
-
-The triangular cells are partitioned with METIS using edge adjacency and
-enlarged by `overlap` triangle layers. In addition to the energy and gradient
-assemblers, this routine returns an analytic sparse Hessian assembler for
-local and reduced Newton solves. The final return value is the DOF partition
-induced by the original, nonoverlapping METIS element partition; it can be
-used to construct a restricted prolongation independently of the overlap.
-"""
-function FEM_PLaplacian(
-  N::Int,
-  m::Int = 9,
-  p::Float64 = 3.0,
-  f::F = (x -> 1.0),
-  overlap::Int = 2,
-  ;
-  alpha::A = (x -> 1.0),
-  epsilon::Float64 = 1e-8,
-) where {F<:Function,A<:Function}
-
-  p >= 2 || throw(ArgumentError("the study supports p >= 2"))
-  epsilon > 0 || throw(ArgumentError("epsilon must be positive"))
-  setup = _partitioned_triangular_p1_space(N, m, overlap)
-  V, U, omega = setup.V, setup.U, setup.omega
-  dOmega = Measure(omega, max(2, ceil(Int, p)))
-  dofspar = setup.overlapping_dofs
-  core_dofspar = setup.core_dofs
-  ndofs = setup.ndofs
-  dirichlet_values = get_dirichlet_dof_values(U)
-  caches = [
-    FEFunction(U, zeros(ndofs), dirichlet_values) for _ = 1:Threads.nthreads()
-  ]
-  function cached_fe_function(values)
-    uh = caches[Threads.threadid()]
-    copyto!(get_free_dof_values(uh), values)
-    return uh
-  end
-
-  eps2 = epsilon^2
-  half_p = p / 2
-  load(v) = ∫((x -> f(x)) * v)dOmega
-  b = assemble_vector(load, V)
-  stiffness(du, v) = ∫((x -> alpha(x)) * ∇(du) ⋅ ∇(v))dOmega
-  K = assemble_matrix(stiffness, V, U)
-
-  density(gradient) = (gradient ⊙ gradient + eps2)^half_p / p
-  function energy_assembler(values::Vector{Float64})
-    uh = cached_fe_function(values)
-    nonlinear = sum(∫((x -> alpha(x)) * (density ∘ ∇(uh)))dOmega)
-    return nonlinear - dot(b, values)
-  end
-
-  flux(gradient) = begin
-    norm_squared = gradient ⊙ gradient + eps2
-    return norm_squared^((p - 2) / 2) * gradient
-  end
-  tangent(gradient_du, gradient_u) = begin
-    norm_squared = gradient_u ⊙ gradient_u + eps2
-    isotropic = norm_squared^((p - 2) / 2) * gradient_du
-    anisotropic =
-      (p - 2) * norm_squared^((p - 4) / 2) *
-      (gradient_u ⊙ gradient_du) * gradient_u
-    return isotropic + anisotropic
-  end
-
-  function gradient_assembler(values::Vector{Float64})
-    uh = cached_fe_function(values)
-    residual(v) = ∫(
-      (x -> alpha(x)) * (∇(v) ⊙ (flux ∘ ∇(uh))) -
-      (x -> f(x)) * v
-    )dOmega
-    return assemble_vector(residual, V)
-  end
-
-  function hessian_assembler(values::Vector{Float64})
-    uh = cached_fe_function(values)
-    jacobian(du, v) = ∫(
-      (x -> alpha(x)) *
-      (∇(v) ⊙ (tangent ∘ (∇(du), ∇(uh))))
-    )dOmega
-    return sparse(assemble_matrix(jacobian, V, U))
-  end
-
-  initial_fe = interpolate_everywhere(
-    x -> 0.1 * x[1] * (1 - x[1]) * x[2] * (1 - x[2]), U
-  )
-  initial = collect(get_free_dof_values(initial_fe))
-  return (
-    energy_assembler,
-    gradient_assembler,
-    hessian_assembler,
-    dofspar,
-    U,
-    ndofs,
-    sparse(K),
-    initial,
-    core_dofspar,
-  )
-end
 
 """
     FEM_SemilinearPoisson(N, m=9; potential, potential_gradient,
@@ -317,8 +209,8 @@ Assemble the triangular P1 discretization of the generic semilinear energy
 whose Euler equation is `-Delta u + V'(u) = f`. The three potential callbacks
 provide `V`, `V'`, and `V''`; consequently the returned `NonlinearEnergy`
 assemblers use an analytic residual and sparse Hessian. Local overlapping DOFs
-and the original METIS core DOFs are returned in the same positions as for
-`FEM_PLaplacian`. With `return_mass_matrix=true`, the consistent mass matrix
+and the original METIS core DOFs are returned in the result tuple. With
+`return_mass_matrix=true`, the consistent mass matrix
 is appended to the return tuple; this supports stabilized pseudo-time
 linearizations without changing the common nine-value interface.
 """
@@ -397,78 +289,6 @@ function FEM_SemilinearPoisson(
   return return_mass_matrix ? (result..., M) : result
 end
 
-"""
-  solve_p_laplacian_gridap(N::Int, p::Float64)
-
-Solve the p-Laplacian problem using standard Gridap approach following
-the tutorial https://gridap.github.io/Tutorials/dev/pages/t004_p_laplacian/
-Returns the solution for comparison with domain decomposition method.
-Uses consistent smooth ε-regularization matching the DD version.
-"""
-function solve_p_laplacian_gridap(
-  N::Int,
-  p::Float64 = 3.0,
-  f::F = (x -> 1.0),
-) where {F<:Function}
-
-  # Setup domain and FE space (same as DD version for consistency)
-  domain = (0, 1.0, 0, 1.0)
-  partition1 = (1.0 * N, 1.0 * N)
-  background =
-    CartesianDiscreteModel(domain, partition1; isperiodic = (false, false))
-  model = simplexify(background)
-  reffe = ReferenceFE(lagrangian, Float64, 1)
-  V0 = TestFESpace(model, reffe, dirichlet_tags = ["boundary"])
-  Ug = TrialFESpace(V0, 0)
-
-  # Numerical integration setup
-  degree = 2
-  Ω = Triangulation(model)
-  dΩ = Measure(Ω, degree)
-
-  # p-Laplacian weak form with consistent regularization
-  # Use same smooth, branch-free ε-regularization as DD version
-  eps2 = 1e-16
-
-  flux(∇u) = begin
-    gnorm_sq = ∇u ⊙ ∇u + eps2
-    return gnorm_sq^((p - 2) / 2) * ∇u
-  end
-
-  # Jacobian for Newton method
-  dflux(∇du, ∇u) = begin
-    gnorm_sq = ∇u ⊙ ∇u + eps2
-    return (p - 2) * gnorm_sq^((p - 4) / 2) *
-           (∇u ⊙ ∇du) * ∇u +
-           gnorm_sq^((p - 2) / 2) * ∇du
-  end
-
-  # Weak residual and Jacobian
-  res(u, v) = ∫(∇(v) ⊙ (flux ∘ ∇(u)) - v * (x -> f(x)))dΩ
-  jac(u, du, v) = ∫(∇(v) ⊙ (dflux ∘ (∇(du), ∇(u))))dΩ
-
-  # Create FE operator
-  op = FEOperator(res, jac, Ug, V0)
-
-  # Setup nonlinear solver using NLsolve with optimized tolerance
-  nls = NLSolver(
-    show_trace = false,
-    method = :newton,
-    linesearch = LineSearches.BackTracking(),
-    ftol = 1e-8,
-    iterations = 50,
-  )
-  solver = FESolver(nls)
-
-  uh0 = interpolate_everywhere(
-    x -> 0.1 * x[1] * (1 - x[1]) * x[2] * (1 - x[2]), Ug
-  )
-
-  # Solve the nonlinear problem
-  uh, = solve!(uh0, solver, op)
-
-  return uh, Ug
-end
 
 function create_dofs_partition(
   elemsp::Vector{Vector{Int32}},
