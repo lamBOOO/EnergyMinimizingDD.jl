@@ -58,6 +58,8 @@ Energies.hessian!(H, RQ_sym, x)
 # Check GeneralizedRayleighQuotient
 B = [2.0 0.0; 0.0 1.0]
 GRQ = Energies.GeneralizedRayleighQuotient(A_sym, Symmetric(B))
+@assert GRQ isa Energies.RayleighQuotient
+@assert Energies.GeneralizedRayleighQuotient === Energies.RayleighQuotient
 GRQ(x)                    # Evaluate generalized Rayleigh quotient
 Energies.gradient(GRQ, x) # Compute gradient
 Energies.hessian(GRQ, x)   # Hessian implemented
@@ -73,3 +75,9 @@ Energies.hessian(GRQ, x)   # Hessian implemented
   x;
   absstep = 1e-8,
 ) - Energies.hessian(GRQ, x) |> norm < 1E-6
+
+# The ordinary quotient uses the same implementation with B = I.
+@assert RQ_sym(x) ≈ Energies.GeneralizedRayleighQuotient(
+  A_sym,
+  Diagonal(ones(size(A_sym, 1))),
+)(x)

@@ -1381,17 +1381,4 @@ function mix_iterates(
   return u_new
 end
 
-function mix_iterates(
-  e::Energies.RayleighQuotient,
-  u_cur::AbstractVector,
-  u_trial::AbstractVector,
-  omega::Real,
-)
-  omega == 0 && return u_trial
-  aligned_trial = dot(u_cur, u_trial) < 0 ? -u_trial : u_trial
-  u_new = omega .* u_cur .+ (1 - omega) .* aligned_trial
-  u_new ./= norm(u_new)
-  return u_new
-end
-
 end # module
