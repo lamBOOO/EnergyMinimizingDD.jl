@@ -148,4 +148,61 @@ const SPSolvers = VariationalDD.Solvers
     @test all(diff(result[3]) .<= 1e-11)
     @test result[5][end] < initial_residual
   end
+
+  @testset "quadratic-model DD sweeps" begin
+    exact(x) = sinpi(x[1]) * sinpi(x[2])
+    forcing(x) = 2pi^2 * exact(x) - exp(-exact(x))
+    energy, subdomains, _, _, _, initial = semilinear_energy(
+      potential=s -> exp(-s),
+      dpotential=s -> -exp(-s),
+      ddpotential=s -> exp(-s),
+      forcing=forcing,
+    )
+    initial .= 0.0
+    model = SPEnergies.quadratic_model(energy, initial)
+    @test SPEnergies.energy(model, initial) ≈ SPEnergies.energy(energy, initial)
+    @test SPEnergies.gradient(model, initial) ≈
+          SPEnergies.gradient(energy, initial)
+    @test SPEnergies.hessian(model) ≈ SPEnergies.hessian(energy, initial)
+
+    hessian_calls = Ref(0)
+    counted_energy = SPEnergies.NonlinearEnergy(
+      "counted semilinear energy",
+      u -> SPEnergies.energy(energy, u),
+      u -> SPEnergies.gradient(energy, u),
+      u -> begin
+        hessian_calls[] += 1
+        SPEnergies.hessian(energy, u)
+      end,
+      length(initial),
+    )
+    initial_residual = SPEnergies.residual_norm(energy, initial)
+    result = SPSolvers.var_dd(
+      counted_energy,
+      subdomains;
+      u0=initial,
+      maxiter=100,
+      tol=1e-8 * initial_residual,
+      quadratic_model=true,
+      verbose=false,
+    )
+    @test result[5][end] < 1e-8 * initial_residual
+    @test all(diff(result[3]) .<= 1e-12)
+    @test hessian_calls[] == length(result[5])
+
+    no_hessian = SPEnergies.NonlinearEnergy(
+      "no Hessian",
+      u -> SPEnergies.energy(energy, u),
+      u -> SPEnergies.gradient(energy, u),
+      length(initial),
+    )
+    @test_throws ArgumentError SPSolvers.var_dd(
+      no_hessian,
+      subdomains;
+      u0=initial,
+      maxiter=1,
+      quadratic_model=true,
+      verbose=false,
+    )
+  end
 end

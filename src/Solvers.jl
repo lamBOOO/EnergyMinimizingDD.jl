@@ -48,6 +48,15 @@ function inf_step(
   u_cur::Vector{Float64},
   idx_sub::AbstractVector,
 )
+  if iszero(norm(u_cur))
+    @warn "the zero current iterate contributes no enriched direction; minimizing over the local coordinate space only" maxlog=1
+    active = collect(Int, idx_sub)
+    isempty(active) && return copy(u_cur)
+    u_new = zeros(Float64, length(u_cur))
+    u_new[active] .= e.A[active, active] \ e.b[active]
+    return u_new
+  end
+
   α_new = quadratic_local_coefficients(e, u_cur, idx_sub)
 
   # Return the actual minimizer in span{u_cur, e_j : j ∈ idx_sub}.
@@ -1183,7 +1192,7 @@ function reconstruct_implicit!(
 end
 
 """
-    var_dd(e, subdomain_dofs; maxiter=50, tol=1e-8, save_local_updates=false, fe_space=nothing, output_prefix="dd_local_update")
+    var_dd(e, subdomain_dofs; maxiter=50, tol=1e-8, quadratic_model=false, ...)
 
 Variational domain decomposition algorithm for solving various energy minimization problems.
 
@@ -1204,6 +1213,10 @@ Variational domain decomposition algorithm for solving various energy minimizati
 - `mixing_omega::Float64=0.0`: Post-combination damping parameter in
   `u_{k+1} = ω u_k + (1-ω) ũ_{k+1}`. The default zero keeps the exact
   second-level minimizer.
+- `quadratic_model::Bool=false`: Build one quadratic Taylor model of `e` at
+  the start of each outer sweep. Local subdomain solves and the second-level
+  combination minimize this frozen model; convergence and histories are still
+  evaluated with the original energy. This requires an energy Hessian.
 - `sweep::Symbol=:additive`: Local-update mode. `:additive` forms all local
   candidates from `u_k`, so those `m` solves can run in parallel.
   `:multiplicative` feeds each local update into the next subdomain and thus
@@ -1227,6 +1240,7 @@ function var_dd(
   u0::Union{Nothing,Vector{Float64}} = nothing,
   history_depth::Int = 0,
   mixing_omega::Float64 = 0.0,
+  quadratic_model::Bool = false,
   sweep::Symbol = :additive,
   subspace_callback = nothing,
   local_solve_callback = nothing,
@@ -1258,6 +1272,7 @@ function var_dd(
 
   local_updates = zeros(size(u_cur, 1), m)  # preallocate for efficiency
   for n = 1:maxiter
+    sweep_energy = quadratic_model ? Energies.quadratic_model(e, u_cur) : e
     current_local_updates = Vector{Vector{Float64}}()
     multiplicative_iterate = copy(u_cur)
 
@@ -1265,14 +1280,14 @@ function var_dd(
       local_base = sweep == :additive ? u_cur : multiplicative_iterate
       local_result = if sweep == :additive
         inf_step_with_info(
-          e,
+          sweep_energy,
           u_cur,
           subdomain_dofs[i];
           collect_info=!isnothing(local_solve_callback),
         )
       else
         multiplicative_iterate = multiplicative_inf_step(
-          e, multiplicative_iterate, subdomain_dofs[i]
+          sweep_energy, multiplicative_iterate, subdomain_dofs[i]
         )
         (
           u=multiplicative_iterate,
@@ -1303,7 +1318,7 @@ function var_dd(
     combination_anchor = sweep == :additive ? u_cur : multiplicative_iterate
     combined_matrix = hcat(combination_anchor, previous_iterates..., local_updates)
     !isnothing(subspace_callback) && subspace_callback(n, combined_matrix)
-    u_trial = combine_step(e, combined_matrix)
+    u_trial = combine_step(sweep_energy, combined_matrix)
     u_new = mix_iterates(e, u_cur, u_trial, mixing_omega)
 
     resnorm = Energies.residual_norm(e, u_new)

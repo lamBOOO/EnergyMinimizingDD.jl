@@ -28,6 +28,25 @@ method definitions and
 [`examples/paper/references.bib`](examples/paper/references.bib) for reusable
 BibTeX records.
 
+### Quadratic Taylor-model DD sweeps
+
+For nonlinear energies with a Hessian, `Solvers.var_dd(...;
+quadratic_model=true)` builds one quadratic Taylor model at the beginning of
+each outer sweep. The existing local subdomain solves and second-level
+combination then minimize that frozen quadratic model using linear solves. The
+next sweep rebuilds the model at the new global iterate. Residuals, convergence,
+and energy histories always use the original nonlinear energy.
+
+The reproducible benchmark
+[`examples/semilinear_quadratic_model_benchmark.jl`](examples/semilinear_quadratic_model_benchmark.jl)
+compares this option with the original nonlinear local and combination solves.
+It reports sweep counts, final relative residuals, true-energy monotonicity, and
+median runtimes after compilation warm-up. Timing is kept out of the test suite
+because wall-clock assertions are platform dependent. In the reference run,
+the nonlinear/quadratic variants took 33/33 sweeps (`1.00`/`0.013` seconds) for
+`N=8`, and 33/32 sweeps (`4.34`/`0.035` seconds) for `N=16`; both variants had
+monotone true-energy histories and reached relative residual `1e-8`.
+
 ## Henning--Jarlebring GPE benchmark
 
 Study 10 reproduces the illustrative Gross--Pitaevskii example in section 2.3
