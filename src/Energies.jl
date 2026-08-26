@@ -6,6 +6,7 @@ export AbstractEnergy, QuadraticEnergy, RayleighQuotient
 export GeneralizedRayleighQuotient, GrossPitaevskiiRayleighQuotient
 export NonlinearEnergy, LinearRegressionEnergy
 export energy, gradient, gradient!, hessian, hessian!, dimension, residual_norm
+export quadratic_model
 export physical_energy, chemical_potential, projected_residual
 
 include("energies/interface.jl")

@@ -30,6 +30,25 @@ hessian(e::QuadraticEnergy) = e.A
 hessian(e::QuadraticEnergy, x::AbstractVector) = hessian(e)
 
 """
+    quadratic_model(e, u)
+
+Return the second-order Taylor model of `e` at `u` as a `QuadraticEnergy`.
+The constant is retained so that the model agrees with `e` at `u`; it does
+not affect any minimization step.
+"""
+function quadratic_model(e::AbstractEnergy{T}, u::AbstractVector{T}) where {T}
+  length(u) == dimension(e) || throw(
+    DimensionMismatch("iterate length must equal the energy dimension"),
+  )
+  A = hessian(e, u)
+  g = gradient(e, u)
+  Au = A * u
+  b = Au - g
+  c = energy(e, u) + T(0.5) * dot(u, Au) - dot(g, u)
+  return QuadraticEnergy(A, b; c=c)
+end
+
+"""
     LinearRegressionEnergy(A, b)
 
 Least-squares energy `E(x) = norm(A*x - b)^2`.
