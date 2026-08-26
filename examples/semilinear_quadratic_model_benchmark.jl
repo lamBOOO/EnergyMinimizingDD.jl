@@ -101,7 +101,7 @@ println(
   "   N   dofs | nonlinear solves: sweeps  relres   median(s)  monotone | ",
   "quadratic model: sweeps  relres   median(s)  monotone",
 )
-for N in (8, 16)
+for N in (8, 16, 32)
   energy, subdomains, initial = semilinear_problem(N)
   nonlinear_time, nonlinear = median_timing(
     () -> run_vardd(energy, subdomains, initial; quadratic_model = false),
