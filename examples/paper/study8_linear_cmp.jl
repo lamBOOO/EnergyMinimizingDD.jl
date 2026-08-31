@@ -147,12 +147,15 @@ function run_study8()
   println("study8: Poisson vs Schwarz baselines")
   Random.seed!(1)
 
-  N = SMALL ? 20 : 40
-  ms = SMALL ? [2] : [2, 4, 8]
+  N = SMALL ? 16 : 64
+  ms = SMALL ? [4] : [4, 16, 64]
   overlap = 2
   relative_tolerance = SMALL ? 1e-7 : 1e-10
   maxsweeps = SMALL ? 50 : 400
-  partition_reference_N = SMALL ? 10 : 20
+  # METIS partitions this reference grid and the owners are prolonged to the
+  # N x N mesh, so partition_reference_N must divide N. Setting it equal to N
+  # makes the prolongation the identity, i.e. METIS runs on the actual mesh.
+  partition_reference_N = SMALL ? 16 : 64
   reference_owners = Dict(
     m => metis_cell_owners(partition_reference_N, m) for m in ms
   )

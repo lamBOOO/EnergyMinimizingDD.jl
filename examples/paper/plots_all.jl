@@ -37,6 +37,16 @@ set_theme!(
 
 const PALETTE = Makie.wong_colors()
 const MARKERSIZE = 8
+
+"""
+    tab10_colors(n)
+
+First `n` entries of the categorical tab10 palette, cycling if `n > 10`. Taking
+a fixed prefix keeps a curve's color independent of how many curves a figure
+draws; `resample_cmap` would instead interpolate across the whole colormap and
+produce both muddy blends and a palette that shifts with `n`.
+"""
+tab10_colors(n) = [Makie.to_colormap(:tab10)[mod1(i, 10)] for i = 1:n]
 const PAPER_FULL_WIDTH = 1000
 const PAPER_HALF_WIDTH = PAPER_FULL_WIDTH ÷ 2
 
@@ -816,7 +826,7 @@ function fig12_poisson_cmp()
     "pcg_as" => :diamond,
     "gmres_ras" => :pentagon,
   )
-  colors = Makie.resample_cmap(:tab10, length(methods))
+  colors = tab10_colors(length(methods))
   finite_res = tbl.resnorm[tbl.resnorm .> 0]
   ylims = (1e-10 * 0.5, maximum(finite_res) * 3)
   ytick_exps = sort(collect(floor(Int, log10(ylims[2])):-2:ceil(Int, log10(ylims[1]))))
@@ -865,17 +875,13 @@ function fig12b_poisson_cmp_paper()
   ms = sort(unique(tbl.m))
   methods = (
     "var_dd_additive",
-    "remdd_q1",
     "var_dd_additive_history",
-    "remdd_q2",
     "ras",
     "pcg_as",
     "gmres_ras",
   )
   labels = Dict(
     "var_dd_additive" => "EMDD (q = 1)",
-    "remdd_q1" => "REMDD (q = 1)",
-    "remdd_q2" => "REMDD (q = 2)",
     "var_dd_additive_history" => "EMDD (q = 2)",
     "ras" => "RAS",
     "pcg_as" => "CG+AS",
@@ -883,14 +889,12 @@ function fig12b_poisson_cmp_paper()
   )
   markers = Dict(
     "var_dd_additive" => :circle,
-    "remdd_q1" => :rtriangle,
-    "remdd_q2" => :ltriangle,
     "var_dd_additive_history" => :hexagon,
     "ras" => :utriangle,
     "pcg_as" => :diamond,
     "gmres_ras" => :pentagon,
   )
-  colors = Makie.resample_cmap(:tab10, length(methods))
+  colors = tab10_colors(length(methods))
   finite_res = tbl.resnorm[tbl.resnorm .> 0]
   ylims = (1e-9, maximum(finite_res) * 3)
   yticks = LogTicks(collect(1:-2:-9))
@@ -965,7 +969,7 @@ function fig12c_poisson_nicolaides()
     "remdd_q2" => :ltriangle,
     "remdd_q2_nicolaides" => :star5,
   )
-  colors = Makie.resample_cmap(:tab10, length(methods))
+  colors = tab10_colors(length(methods))
   selected = map(method -> method in methods, tbl.method)
   finite_res = tbl.resnorm[selected .& (tbl.resnorm .> 0)]
   ylims = (1e-10 * 0.5, maximum(finite_res) * 3)
@@ -1116,7 +1120,7 @@ function fig13_evp_cmp()
     "jd_gmres_as" => :diamond,
     "si_lanczos_pcg_as" => :pentagon,
   )
-  colors = Makie.resample_cmap(:tab10, length(methods))
+  colors = tab10_colors(length(methods))
   finite_res = tbl.relative_residual[tbl.relative_residual .> 0]
   ylims = (1e-6 * 0.5, maximum(finite_res) * 1.5)
   ytick_exps = sort(collect(floor(Int, log10(ylims[2])):-2:ceil(Int, log10(ylims[1]))))
@@ -1193,7 +1197,7 @@ function fig14_gp_convergence()
     "gfdn_au_as" => :rect,
     "cg_gfdn_au_as" => :utriangle,
   )
-  colors = Makie.resample_cmap(:tab10, length(methods))
+  colors = tab10_colors(length(methods))
   positive_residuals = tbl.resnorm[tbl.resnorm .> 0]
   ylimits = (1e-7, maximum(positive_residuals) * 2)
   ytick_exps = sort(
@@ -1281,7 +1285,7 @@ function fig16_gp_energy_gap()
     "gfdn_au_as" => :rect,
     "cg_gfdn_au_as" => :utriangle,
   )
-  colors = Makie.resample_cmap(:tab10, length(methods))
+  colors = tab10_colors(length(methods))
   positive_gaps = tbl.energy_gap[tbl.energy_gap .> 0]
   ylimits = (max(minimum(positive_gaps) / 2, 1e-14), maximum(positive_gaps) * 2)
   ytick_exps = sort(
@@ -1419,7 +1423,7 @@ function fig17_semilinear_poisson()
     "var_dd" => :diamond,
     "var_dd_history" => :utriangle,
   )
-  colors = Makie.resample_cmap(:tab10, length(methods))
+  colors = tab10_colors(length(methods))
   positive_residuals = conv.relative_residual[conv.relative_residual .> 0]
   ylimits = (1e-8, maximum(positive_residuals) * 2)
   ytick_exps = sort(
@@ -1517,7 +1521,7 @@ function fig18_poisson_scaling()
     "pcg_as" => :diamond,
     "gmres_ras" => :pentagon,
   )
-  colors = Makie.resample_cmap(:tab10, length(methods))
+  colors = tab10_colors(length(methods))
   panels = (
     ("mesh", "fixed_layers", :N, "nested METIS, fixed layers ℓ = 2"),
     (
@@ -1580,7 +1584,7 @@ function fig19_poisson_contrast()
     "pcg_as" => :diamond,
     "gmres_ras" => :pentagon,
   )
-  colors = Makie.resample_cmap(:tab10, length(methods))
+  colors = tab10_colors(length(methods))
   fig = Figure(size=(1420, 410))
   ax_iterations = Axis(
     fig[1, 1];
@@ -1779,7 +1783,7 @@ function fig21_semilinear_mesh_scaling()
   methods = collect(SEMILINEAR_BENCHMARK_METHODS)
   mask_mesh = tbl.experiment .== "mesh"
   Ns = sort(unique(tbl.N[mask_mesh]))
-  colors = Makie.resample_cmap(:tab10, length(methods))
+  colors = tab10_colors(length(methods))
   fig = Figure(size=(1120, 500))
   Label(
     fig[0, 1:3],
@@ -1934,7 +1938,7 @@ end
 function fig24_evp_scaling()
   tbl = loadtable("study9_evp_sensitivity.csv")
   methods = collect(EVP_SENSITIVITY_METHODS)
-  colors = Makie.resample_cmap(:tab10, length(methods))
+  colors = tab10_colors(length(methods))
   panels = (
     ("mesh", "fixed_layers", :N, "fixed overlap layers, ℓ = 2"),
     ("mesh", "fixed_delta_over_H", :N, "fixed relative overlap, δ/H = 0.1"),
@@ -1979,7 +1983,7 @@ end
 function fig25_evp_linear_work()
   tbl = loadtable("study9_evp_sensitivity.csv")
   methods = ["lobpcg_as", "jd_gmres_as", "si_lanczos_pcg_as"]
-  colors = Makie.resample_cmap(:tab10, length(methods))
+  colors = tab10_colors(length(methods))
   fig = Figure(size=(900, 390))
   Label(
     fig[0, 1:2],

@@ -124,7 +124,7 @@ function make_fig18_table(;
   \centering
   \caption{%
     Parallel local-solve batches required to reduce the relative residual below
-    \(10^{-10}\) for the Poisson problem in Figure~18. The first two column
+    \(10^{-10}\) for the Poisson problem. The first two column
     groups refine the mesh for \(m=4\); the third varies the overlap for
     \(1/h=64\) and \(m=4\). Here \(q\) denotes the EMDD history-space dimension.
   }
@@ -140,14 +140,13 @@ function make_fig18_table(;
       output empty row,
       before row={
         \toprule
-        & \multicolumn{6}{c}{\makebox[0pt]{fixed \(\ell=2\)}}
-        & \multicolumn{6}{c}{\makebox[0pt]{fixed \(\delta/H\approx0.1\)}}
-        & \multicolumn{4}{c}{\makebox[0pt]{overlap sweep}} \\
         \cmidrule(lr){2-7} \cmidrule(lr){8-13} \cmidrule(lr){14-17}
         method
-        & \multicolumn{6}{c}{\makebox[0pt]{elements per direction, \(1/h\)}}
-        & \multicolumn{6}{c}{\makebox[0pt]{elements per direction, \(1/h\)}}
-        & \multicolumn{4}{c}{\makebox[0pt]{overlap layers, \(\ell\) (\(1/h=64\))}} \\
+        & \multicolumn{6}{c}{\makebox[0pt]{discretization \(1/h\) (\(\ell=2\))}}
+        & \multicolumn{6}{c}{\makebox[0pt]{discretization \(1/h\) (\(\delta/H\approx0.1\))}}
+        % One header row per column group: these labels sit in zero-width
+        % boxes, so a second row of group titles overflowed into its neighbour.
+        & \multicolumn{4}{c}{\makebox[0pt]{layers \(\ell\) (\(1/h=64\))}} \\
         \cmidrule(lr){2-7} \cmidrule(lr){8-13} \cmidrule(lr){14-17}
         & 20 & 40 & 60 & 80 & 100 & 120
         & 20 & 40 & 60 & 80 & 100 & 120
