@@ -332,6 +332,25 @@ function inf_step_with_info(
   )
 end
 
+function inf_step_with_info(
+  e::Energies.NonlinearEnergy{Float64},
+  u_cur::Vector{Float64},
+  idx_sub::AbstractVector;
+  collect_info::Bool=false,
+)
+  result = nonlinear_enriched_local_minimize(e, u_cur, idx_sub)
+  info = (
+    dimension=1 + length(idx_sub),
+    iterations=result.iterations,
+    converged=result.converged,
+    residual=result.residual,
+    energy_evaluations=result.energy_evaluations,
+    k_nnz=-1,
+    factor_nnz=-1,
+  )
+  return (u=result.u, info=info)
+end
+
 function inf_step(
   e::Energies.GrossPitaevskiiRayleighQuotient{Float64},
   u_cur::Vector{Float64},
@@ -381,7 +400,13 @@ function nonlinear_enriched_local_minimize(
   maxiter::Int=200,
 )
   active = collect(Int, idx_sub)
-  isempty(active) && return (u=copy(u_cur), iterations=0, energy_evaluations=0)
+  isempty(active) && return (
+    u=copy(u_cur),
+    iterations=0,
+    converged=true,
+    residual=0.0,
+    energy_evaluations=0,
+  )
 
   exterior = copy(u_cur)
   exterior[active] .= 0.0
@@ -437,9 +462,13 @@ function nonlinear_enriched_local_minimize(
       show_warnings=false,
     ),
   )
+  u = reconstruct(Optim.minimizer(result))
+  residual = norm(project_gradient(Energies.gradient(e, u)))
   return (
-    u=reconstruct(Optim.minimizer(result)),
+    u=u,
     iterations=Optim.iterations(result),
+    converged=residual <= target,
+    residual=residual,
     energy_evaluations=energy_evaluations,
   )
 end
@@ -1214,9 +1243,9 @@ Variational domain decomposition algorithm for solving various energy minimizati
   `u_{k+1} = ω u_k + (1-ω) ũ_{k+1}`. The default zero keeps the exact
   second-level minimizer.
 - `quadratic_model::Bool=false`: Build one quadratic Taylor model of `e` at
-  the start of each outer sweep. Local subdomain solves and the second-level
-  combination minimize this frozen model; convergence and histories are still
-  evaluated with the original energy. This requires an energy Hessian.
+  the start of each outer sweep and use it for the local subdomain solves. The
+  second-level combination, convergence test, and histories use the original
+  energy. This requires an energy Hessian.
 - `sweep::Symbol=:additive`: Local-update mode. `:additive` forms all local
   candidates from `u_k`, so those `m` solves can run in parallel.
   `:multiplicative` feeds each local update into the next subdomain and thus
@@ -1228,7 +1257,9 @@ Variational domain decomposition algorithm for solving various energy minimizati
 - `local_solve_callback=nothing`: Optional diagnostic hook called as
   `local_solve_callback(iteration, subdomain, info)` after each local solve.
   For generalized Rayleigh quotients, `info` records the augmented-pencil
-  dimension, LOBPCG iterations, convergence, and sparse factor sizes.
+  dimension, LOBPCG iterations, convergence, and sparse factor sizes. For
+  nonlinear energies it records the reduced dimension, L-BFGS iterations,
+  convergence, projected residual, and energy evaluations.
 - `verbose::Bool=true`: Print per-iteration convergence information
 """
 function var_dd(
@@ -1318,7 +1349,7 @@ function var_dd(
     combination_anchor = sweep == :additive ? u_cur : multiplicative_iterate
     combined_matrix = hcat(combination_anchor, previous_iterates..., local_updates)
     !isnothing(subspace_callback) && subspace_callback(n, combined_matrix)
-    u_trial = combine_step(sweep_energy, combined_matrix)
+    u_trial = combine_step(e, combined_matrix)
     u_new = mix_iterates(e, u_cur, u_trial, mixing_omega)
 
     resnorm = Energies.residual_norm(e, u_new)

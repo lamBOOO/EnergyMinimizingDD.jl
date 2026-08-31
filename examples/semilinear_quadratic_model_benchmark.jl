@@ -1,9 +1,14 @@
 # Reproducible comparison of two varDD variants for a convex semilinear
 # Poisson energy:
 #
-#   1. the original nonlinear local and second-level minimizations;
-#   2. one frozen quadratic Taylor model per outer DD sweep, minimized by the
-#      same subdomain and second-level framework using linear solves.
+#   1. the original nonlinear local minimizations;
+#   2. one frozen quadratic Taylor model per outer DD sweep for linear local
+#      solves.
+#
+# Both variants use an exact nonlinear second-level minimization of the
+# original energy. The benchmark reports the total L-BFGS iterations spent in
+# the local subproblems of the full nonlinear variant. Every case starts from
+# the zero initial guess.
 #
 # Run from the repository root with
 #
@@ -23,7 +28,7 @@ const MODES = (
   (0.55, 2, 3),
   (0.35, 3, 2),
 )
-const BETA = 1.0
+const BETAS = (1.0, 10.0, 100.0, 1000.0)
 
 exact_solution(x) = sum(
   coefficient * sinpi(kx * x[1]) * sinpi(ky * x[2]) for
@@ -35,9 +40,8 @@ minus_laplacian(x) = pi^2 * sum(
   (coefficient, kx, ky) in MODES
 )
 
-forcing(x) = minus_laplacian(x) + BETA * exact_solution(x)^3
-
-function semilinear_problem(N)
+function semilinear_problem(N, beta)
+  forcing(x) = minus_laplacian(x) + beta * exact_solution(x)^3
   energy_assembler,
   gradient_assembler,
   hessian_assembler,
@@ -49,9 +53,9 @@ function semilinear_problem(N)
   _ = FEM.FEM_SemilinearPoisson(
     N,
     4;
-    potential = s -> BETA * s^4 / 4,
-    potential_gradient = s -> BETA * s^3,
-    potential_hessian = s -> 3 * BETA * s^2,
+    potential = s -> beta * s^4 / 4,
+    potential_gradient = s -> beta * s^3,
+    potential_hessian = s -> 3 * beta * s^2,
     forcing = forcing,
     overlap = 2,
     quadrature_degree = 8,
@@ -69,6 +73,18 @@ end
 
 function run_vardd(energy, subdomains, initial; quadratic_model)
   initial_residual = Energies.residual_norm(energy, initial)
+  local_inner_iterations = Ref(0)
+  local_solve_count = Ref(0)
+  max_local_inner_iterations = Ref(0)
+  function record_local_iterations(_, _, info)
+    iterations = max(0, info.iterations)
+    local_inner_iterations[] += iterations
+    local_solve_count[] += 1
+    max_local_inner_iterations[] = max(
+      max_local_inner_iterations[], iterations
+    )
+    return nothing
+  end
   result = Solvers.var_dd(
     energy,
     subdomains;
@@ -76,12 +92,19 @@ function run_vardd(energy, subdomains, initial; quadratic_model)
     maxiter = 100,
     tol = 1e-8 * initial_residual,
     quadratic_model = quadratic_model,
+    local_solve_callback = record_local_iterations,
     verbose = false,
   )
+  average_local_inner_iterations = iszero(local_solve_count[]) ?
+                                   0.0 :
+                                   local_inner_iterations[] / local_solve_count[]
   return (
     sweeps = length(result[3]) - 1,
     relative_residual = result[5][end] / initial_residual,
     monotone = all(diff(result[3]) .<= 1e-12),
+    local_inner_iterations = local_inner_iterations[],
+    average_local_inner_iterations = average_local_inner_iterations,
+    max_local_inner_iterations = max_local_inner_iterations[],
   )
 end
 
@@ -98,11 +121,11 @@ end
 
 println("Semilinear varDD benchmark (m=4, relative tolerance 1e-8)")
 println(
-  "   N   dofs | nonlinear solves: sweeps  relres   median(s)  monotone | ",
+  " beta    N   dofs | nonlinear local solves: sweeps  total    avg  max  relres   median(s)  monotone | ",
   "quadratic model: sweeps  relres   median(s)  monotone",
 )
-for N in (8, 16, 32)
-  energy, subdomains, initial = semilinear_problem(N)
+for beta in BETAS, N in (8, 16, 32)
+  energy, subdomains, initial = semilinear_problem(N, beta)
   nonlinear_time, nonlinear = median_timing(
     () -> run_vardd(energy, subdomains, initial; quadratic_model = false),
   )
@@ -110,10 +133,14 @@ for N in (8, 16, 32)
     () -> run_vardd(energy, subdomains, initial; quadratic_model = true),
   )
   @printf(
-    "%4d %6d | %6d  %.2e  %9.6f  %8s | %6d  %.2e  %9.6f  %8s\n",
+    "%5g %4d %6d | %6d %6d %6.2f %4d  %.2e  %9.6f  %8s | %6d  %.2e  %9.6f  %8s\n",
+    beta,
     N,
     length(initial),
     nonlinear.sweeps,
+    nonlinear.local_inner_iterations,
+    nonlinear.average_local_inner_iterations,
+    nonlinear.max_local_inner_iterations,
     nonlinear.relative_residual,
     nonlinear_time,
     string(nonlinear.monotone),
