@@ -1221,6 +1221,202 @@ function reconstruct_implicit!(
 end
 
 """
+    partition_of_unity_weights(subdomain_dofs, ndofs)
+
+Build diagonal algebraic partition-of-unity weights for an overlapping DOF
+partition. If degree of freedom `j` belongs to `q` subdomains, its weight is
+`1/q` in each of them. Thus every row of the returned `ndofs × nsubdomains`
+matrix sums to one.
+
+The weights can restrict overlapping local corrections before the global
+combination step without requiring a separate, nonoverlapping owner partition.
+"""
+function partition_of_unity_weights(subdomain_dofs, ndofs::Integer)
+  ndofs > 0 || throw(ArgumentError("ndofs must be positive"))
+  nsubdomains = length(subdomain_dofs)
+  nsubdomains > 0 || throw(ArgumentError("at least one subdomain is required"))
+
+  weights = zeros(Float64, ndofs, nsubdomains)
+  for (subdomain, indices) in enumerate(subdomain_dofs)
+    all(index -> 1 <= index <= ndofs, indices) || throw(
+      ArgumentError("subdomain $subdomain contains a DOF outside 1:$ndofs")
+    )
+    length(unique(indices)) == length(indices) ||
+      throw(ArgumentError("subdomain $subdomain contains duplicate DOFs"))
+    weights[indices, subdomain] .= 1.0
+  end
+
+  multiplicity = vec(sum(weights; dims=2))
+  uncovered = findall(iszero, multiplicity)
+  isempty(uncovered) || throw(
+    ArgumentError(
+      "partition-of-unity restriction requires every DOF to be covered; " *
+      "uncovered DOFs: $(join(uncovered, ", "))",
+    ),
+  )
+  weights ./= multiplicity
+  return weights
+end
+
+"Assign every degree of freedom to one of its nonoverlapping core candidates."
+function _balanced_disjoint_cores(core_dofs, ndofs::Integer)
+  memberships = [Int[] for _ in 1:ndofs]
+  for (subdomain, indices) in enumerate(core_dofs)
+    length(unique(indices)) == length(indices) ||
+      throw(ArgumentError("core $subdomain contains duplicate DOFs"))
+    for index in indices
+      1 <= index <= ndofs ||
+        throw(ArgumentError("core $subdomain contains a DOF outside 1:$ndofs"))
+      push!(memberships[index], subdomain)
+    end
+  end
+  uncovered = findall(isempty, memberships)
+  isempty(uncovered) || throw(
+    ArgumentError(
+      "the nonoverlapping cores must cover every DOF; uncovered DOFs: " *
+      join(uncovered, ", "),
+    ),
+  )
+
+  owned = [Int[] for _ in core_dofs]
+  loads = zeros(Int, length(core_dofs))
+  for degree in sortperm(length.(memberships))
+    candidates = memberships[degree]
+    owner = candidates[argmin(view(loads, candidates))]
+    push!(owned[owner], degree)
+    loads[owner] += 1
+  end
+  return owned
+end
+
+"""
+    nicolaides_coarse_basis(A, core_dofs, subdomain_dofs; normalize=true)
+
+Construct a low-energy Nicolaides-type partition-of-unity coarse space for a
+scalar elliptic operator `A`. There must be one nonoverlapping core and one
+overlapping DOF set per subdomain. Interface DOFs appearing in multiple cores
+are assigned to one core with balanced ownership.
+
+For subdomain `i`, the raw basis function is one on its owned core, zero
+outside its overlapping DOFs, and discrete harmonic in the transition region
+`T_i`:
+
+```text
+A[T_i,T_i] * theta_hat_i = -A[T_i,C_i] * 1.
+```
+
+With `normalize=true`, the default, the raw functions are divided pointwise by
+their sum. The returned columns therefore form a partition of unity. Use this
+basis as `coarse_basis` in [`var_dd`](@ref). Multiplicity weights from
+[`partition_of_unity_weights`](@ref) serve a different purpose: they restrict
+REMDD local corrections and are not a low-energy coarse basis.
+"""
+function nicolaides_coarse_basis(
+  A::AbstractMatrix, core_dofs, subdomain_dofs; normalize::Bool=true
+)
+  ndofs = size(A, 1)
+  size(A, 2) == ndofs || throw(DimensionMismatch("A must be square"))
+  nsubdomains = length(subdomain_dofs)
+  nsubdomains > 0 || throw(ArgumentError("at least one subdomain is required"))
+  length(core_dofs) == nsubdomains || throw(
+    DimensionMismatch(
+      "there must be one core and one overlapping DOF set per subdomain"
+    ),
+  )
+  all(isfinite, A) || throw(ArgumentError("A must contain only finite values"))
+  issymmetric(A) || throw(ArgumentError("A must be symmetric"))
+
+  overlapping = Vector{Vector{Int}}(undef, nsubdomains)
+  for (subdomain, indices) in enumerate(subdomain_dofs)
+    length(unique(indices)) == length(indices) ||
+      throw(ArgumentError("subdomain $subdomain contains duplicate DOFs"))
+    all(index -> 1 <= index <= ndofs, indices) || throw(
+      ArgumentError("subdomain $subdomain contains a DOF outside 1:$ndofs")
+    )
+    overlapping[subdomain] = collect(Int, indices)
+  end
+
+  owned_cores = _balanced_disjoint_cores(core_dofs, ndofs)
+  basis = zeros(Float64, ndofs, nsubdomains)
+  for subdomain in 1:nsubdomains
+    core = owned_cores[subdomain]
+    isempty(core) && throw(ArgumentError("core $subdomain owns no DOFs"))
+    overlap = overlapping[subdomain]
+    overlap_membership = Set(overlap)
+    all(index -> index in overlap_membership, core) || throw(
+      ArgumentError(
+        "owned core $subdomain must be contained in its overlapping DOF set"
+      ),
+    )
+    transition = setdiff(overlap, core)
+    basis[core, subdomain] .= 1.0
+    if !isempty(transition)
+      rhs = -(A[transition, core] * ones(length(core)))
+      basis[transition, subdomain] .= Symmetric(A[transition, transition]) \ rhs
+    end
+  end
+
+  all(isfinite, basis) || throw(
+    ArgumentError("the local harmonic extensions produced non-finite values")
+  )
+  if normalize
+    row_sums = vec(sum(basis; dims=2))
+    threshold = sqrt(eps(Float64)) * max(1.0, maximum(abs, row_sums))
+    all(sum -> abs(sum) > threshold, row_sums) || throw(
+      ArgumentError(
+        "the harmonic basis cannot be normalized because its pointwise sum vanishes",
+      ),
+    )
+    basis ./= row_sums
+  end
+  return basis
+end
+
+"""
+Restrict the genuinely local part of each candidate in-place with diagonal
+PoU weights. A local candidate has the form `alpha_i * anchor + z_i`, with
+`z_i` supported on subdomain `i`; removing `alpha_i` makes the operation
+invariant under the arbitrary scaling of solution candidates.
+"""
+function restrict_local_candidates!(
+  candidates::AbstractMatrix,
+  anchor::AbstractVector,
+  weights::AbstractMatrix,
+  subdomain_dofs,
+  exterior_dofs=nothing,
+)
+  size(candidates) == size(weights) || throw(
+    DimensionMismatch(
+      "candidate and partition-of-unity matrices must have the same size"
+    ),
+  )
+  size(candidates, 1) == length(anchor) ||
+    throw(DimensionMismatch("candidate rows must match the anchor length"))
+  size(candidates, 2) == length(subdomain_dofs) ||
+    throw(DimensionMismatch("there must be one DOF set per candidate"))
+  for subdomain in axes(candidates, 2)
+    candidate = view(candidates, :, subdomain)
+    indices = subdomain_dofs[subdomain]
+    exterior = if isnothing(exterior_dofs)
+      setdiff(eachindex(anchor), indices)
+    else
+      exterior_dofs[subdomain]
+    end
+    exterior_anchor = view(anchor, exterior)
+    denominator = dot(exterior_anchor, exterior_anchor)
+    alpha = if iszero(denominator)
+      0.0
+    else
+      dot(exterior_anchor, view(candidate, exterior)) / denominator
+    end
+    local_direction = candidate[indices] .- alpha .* anchor[indices]
+    candidate .= anchor
+    candidate[indices] .+= weights[indices, subdomain] .* local_direction
+  end
+  return candidates
+end
+
+"""
     var_dd(e, subdomain_dofs; maxiter=50, tol=1e-8, quadratic_model=false, ...)
 
 Variational domain decomposition algorithm for solving various energy minimization problems.
@@ -1251,6 +1447,16 @@ Variational domain decomposition algorithm for solving various energy minimizati
   `:multiplicative` feeds each local update into the next subdomain and thus
   has a serial critical path of `m` local solves. The latter currently supports
   `QuadraticEnergy` and reproduces the original projectively rescaled sweep.
+- `restriction::Symbol=:none`: Treatment of overlapping local corrections in
+  the second-level trial space. Writing each local candidate as
+  `u_i=alpha_i*u_k+z_i`, with `z_i` supported on subdomain `i`,
+  `:partition_of_unity` replaces it by `u_k+D_i*z_i`, where the diagonal
+  multiplicity weights obey `sum(D_i)=I`. This restricted mode is available
+  for additive sweeps and is referred to as restricted EMDD (REMDD).
+- `coarse_basis=nothing`: Optional global coarse-space basis appended to the
+  second-level trial space. For scalar Poisson problems,
+  `nicolaides_coarse_basis(e.A, core_dofs, subdomain_dofs)` supplies one
+  discrete-harmonic partition-of-unity mode per subdomain.
 - `subspace_callback=nothing`: Optional study/diagnostic hook called as
   `subspace_callback(iteration, combined_matrix)` immediately before the
   second-level minimization. It does not alter the algorithm.
@@ -1273,6 +1479,8 @@ function var_dd(
   mixing_omega::Float64 = 0.0,
   quadratic_model::Bool = false,
   sweep::Symbol = :additive,
+  restriction::Symbol = :none,
+  coarse_basis = nothing,
   subspace_callback = nothing,
   local_solve_callback = nothing,
   verbose::Bool = true,
@@ -1285,9 +1493,29 @@ function var_dd(
   sweep in (:additive, :multiplicative) || throw(ArgumentError(
     "sweep must be :additive or :multiplicative",
   ))
+  restriction in (:none, :partition_of_unity) || throw(ArgumentError(
+    "restriction must be :none or :partition_of_unity",
+  ))
+  restriction == :partition_of_unity && sweep != :additive && throw(
+    ArgumentError("partition-of-unity restriction requires sweep=:additive"),
+  )
 
   # Initial guess, no need to normalize apparently
   u_cur = isnothing(u0) ? ones(Energies.dimension(e)) : copy(u0)
+  if !isnothing(coarse_basis)
+    ndims(coarse_basis) == 2 || throw(ArgumentError(
+      "coarse_basis must be a matrix",
+    ))
+    size(coarse_basis, 1) == length(u_cur) || throw(DimensionMismatch(
+      "coarse_basis rows must match the energy dimension",
+    ))
+    size(coarse_basis, 2) > 0 || throw(ArgumentError(
+      "coarse_basis must contain at least one vector",
+    ))
+    all(isfinite, coarse_basis) || throw(ArgumentError(
+      "coarse_basis must contain only finite values",
+    ))
+  end
 
   e_hist = Float64[]
   sol_hist = Vector{Vector{Float64}}()
@@ -1300,6 +1528,11 @@ function var_dd(
   push!(sol_hist, copy(u_cur))
 
   m = length(subdomain_dofs)
+  restriction_weights = restriction == :partition_of_unity ?
+    partition_of_unity_weights(subdomain_dofs, length(u_cur)) : nothing
+  restriction_exteriors = restriction == :partition_of_unity ? [
+    setdiff(eachindex(u_cur), indices) for indices in subdomain_dofs
+  ] : nothing
 
   local_updates = zeros(size(u_cur, 1), m)  # preallocate for efficiency
   for n = 1:maxiter
@@ -1346,8 +1579,25 @@ function var_dd(
       push!(local_update_hist, current_local_updates)
     end
 
+    if restriction == :partition_of_unity
+      restrict_local_candidates!(
+        local_updates,
+        u_cur,
+        restriction_weights,
+        subdomain_dofs,
+        restriction_exteriors,
+      )
+    end
+
     combination_anchor = sweep == :additive ? u_cur : multiplicative_iterate
-    combined_matrix = hcat(combination_anchor, previous_iterates..., local_updates)
+    combined_matrix = isnothing(coarse_basis) ?
+      hcat(combination_anchor, previous_iterates..., local_updates) :
+      hcat(
+        combination_anchor,
+        previous_iterates...,
+        local_updates,
+        coarse_basis,
+      )
     !isnothing(subspace_callback) && subspace_callback(n, combined_matrix)
     u_trial = combine_step(e, combined_matrix)
     u_new = mix_iterates(e, u_cur, u_trial, mixing_omega)

@@ -1,6 +1,8 @@
 # Study 8: Poisson — comparison against one-level Schwarz baselines on the
 # SAME overlapping partition:
 #   - var_dd_additive (m independent local solves)
+#   - REMDD with q=1 and q=2 (local corrections weighted by a multiplicity PoU)
+#   - two-level EMDD/REMDD with the Nicolaides coarse space
 #   - var_dd_additive_history (additive plus the preceding global iterate)
 #   - var_dd_additive_mix_* (post-combination damping with several weights)
 #   - var_dd_multiplicative (m sequential local solves)
@@ -207,6 +209,7 @@ function run_study8()
     )
     S = schwarz_setup(K, dofspar; core_dofs)
     tol = relative_tolerance * norm(b - K * ones(length(b)))
+    nicolaides_basis = Solvers.nicolaides_coarse_basis(K, core_dofs, dofspar)
 
     owner, mult = cell_partition_overlap(N, m, overlap, owners)
     for idx in eachindex(owner)
@@ -225,6 +228,18 @@ function run_study8()
       var_dd_linear_history(K, b, dofspar; maxiter = maxsweeps, tol = tol),
     )
     record(
+      "remdd_q1",
+      m,
+      var_dd_linear_history(
+        K,
+        b,
+        dofspar;
+        maxiter = maxsweeps,
+        tol = tol,
+        restriction = :partition_of_unity,
+      ),
+    )
+    record(
       "var_dd_additive_history",
       m,
       var_dd_linear_history(
@@ -236,6 +251,40 @@ function run_study8()
         history_depth = 1,
       ),
     )
+    record(
+      "remdd_q2",
+      m,
+      var_dd_linear_history(
+        K,
+        b,
+        dofspar;
+        maxiter = maxsweeps,
+        tol = tol,
+        restriction = :partition_of_unity,
+        history_depth = 1,
+      ),
+    )
+    for (method, restriction, history_depth) in (
+      ("emdd_q1_nicolaides", :none, 0),
+      ("emdd_q2_nicolaides", :none, 1),
+      ("remdd_q1_nicolaides", :partition_of_unity, 0),
+      ("remdd_q2_nicolaides", :partition_of_unity, 1),
+    )
+      record(
+        method,
+        m,
+        var_dd_linear_history(
+          K,
+          b,
+          dofspar;
+          maxiter = maxsweeps,
+          tol = tol,
+          restriction = restriction,
+          history_depth = history_depth,
+          coarse_basis = nicolaides_basis,
+        ),
+      )
+    end
     for (method, omega) in (
       ("var_dd_additive_mix_025", 0.25),
       ("var_dd_additive_mix_05", 0.5),

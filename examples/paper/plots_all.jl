@@ -776,6 +776,8 @@ function fig12_poisson_cmp()
   ms = sort(unique(tbl.m))
   labels = Dict(
     "var_dd_additive" => "additive varDD",
+    "remdd_q1" => "REMDD (q = 1)",
+    "remdd_q2" => "REMDD (q = 2)",
     "var_dd_additive_history" => "additive varDD + previous",
     "var_dd_additive_mix_025" => "additive varDD, ω = 0.25",
     "var_dd_additive_mix_05" => "additive varDD, ω = 0.5",
@@ -788,7 +790,9 @@ function fig12_poisson_cmp()
   )
   methods = (
     "var_dd_additive",
+    "remdd_q1",
     "var_dd_additive_history",
+    "remdd_q2",
     "var_dd_additive_mix_025",
     "var_dd_additive_mix_05",
     "var_dd_additive_mix_075",
@@ -800,6 +804,8 @@ function fig12_poisson_cmp()
   )
   markers = Dict(
     "var_dd_additive" => :circle,
+    "remdd_q1" => :rtriangle,
+    "remdd_q2" => :ltriangle,
     "var_dd_additive_history" => :hexagon,
     "var_dd_additive_mix_025" => :cross,
     "var_dd_additive_mix_05" => :xcross,
@@ -815,7 +821,7 @@ function fig12_poisson_cmp()
   ylims = (1e-10 * 0.5, maximum(finite_res) * 3)
   ytick_exps = sort(collect(floor(Int, log10(ylims[2])):-2:ceil(Int, log10(ylims[1]))))
   yticks = LogTicks(ytick_exps)
-  fig = Figure(size = (max(330 * length(ms), 1000), 330))
+  fig = Figure(size = (max(430 * length(ms), 1200), 350))
   for (j, m) in enumerate(ms)
     ax = Axis(
       fig[1, j];
@@ -859,13 +865,17 @@ function fig12b_poisson_cmp_paper()
   ms = sort(unique(tbl.m))
   methods = (
     "var_dd_additive",
+    "remdd_q1",
     "var_dd_additive_history",
+    "remdd_q2",
     "ras",
     "pcg_as",
     "gmres_ras",
   )
   labels = Dict(
     "var_dd_additive" => "EMDD (q = 1)",
+    "remdd_q1" => "REMDD (q = 1)",
+    "remdd_q2" => "REMDD (q = 2)",
     "var_dd_additive_history" => "EMDD (q = 2)",
     "ras" => "RAS",
     "pcg_as" => "CG+AS",
@@ -873,13 +883,14 @@ function fig12b_poisson_cmp_paper()
   )
   markers = Dict(
     "var_dd_additive" => :circle,
+    "remdd_q1" => :rtriangle,
+    "remdd_q2" => :ltriangle,
     "var_dd_additive_history" => :hexagon,
     "ras" => :utriangle,
     "pcg_as" => :diamond,
     "gmres_ras" => :pentagon,
   )
-  full_colors = Makie.resample_cmap(:tab10, 10)
-  colors = [full_colors[i] for i in (1, 2, 8, 9, 10)]
+  colors = Makie.resample_cmap(:tab10, length(methods))
   finite_res = tbl.resnorm[tbl.resnorm .> 0]
   ylims = (1e-9, maximum(finite_res) * 3)
   yticks = LogTicks(collect(1:-2:-9))
@@ -917,6 +928,161 @@ function fig12b_poisson_cmp_paper()
   )
   rowgap!(fig.layout, 8)
   savefigs(fig, "fig12b_poisson_cmp_paper")
+end
+
+# Two-level comparison isolating the effect of the Nicolaides coarse space.
+function fig12c_poisson_nicolaides()
+  tbl = loadtable("study8_linear_cmp.csv")
+  parts = loadtable("study8_partitions.csv")
+  ms = sort(unique(tbl.m))
+  methods = (
+    "var_dd_additive",
+    "emdd_q1_nicolaides",
+    "remdd_q1",
+    "remdd_q1_nicolaides",
+    "var_dd_additive_history",
+    "emdd_q2_nicolaides",
+    "remdd_q2",
+    "remdd_q2_nicolaides",
+  )
+  labels = Dict(
+    "var_dd_additive" => "EMDD (q = 1)",
+    "emdd_q1_nicolaides" => "EMDD (q = 1) + Nicolaides",
+    "remdd_q1" => "REMDD (q = 1)",
+    "remdd_q1_nicolaides" => "REMDD (q = 1) + Nicolaides",
+    "var_dd_additive_history" => "EMDD (q = 2)",
+    "emdd_q2_nicolaides" => "EMDD (q = 2) + Nicolaides",
+    "remdd_q2" => "REMDD (q = 2)",
+    "remdd_q2_nicolaides" => "REMDD (q = 2) + Nicolaides",
+  )
+  markers = Dict(
+    "var_dd_additive" => :circle,
+    "emdd_q1_nicolaides" => :rect,
+    "remdd_q1" => :rtriangle,
+    "remdd_q1_nicolaides" => :diamond,
+    "var_dd_additive_history" => :hexagon,
+    "emdd_q2_nicolaides" => :pentagon,
+    "remdd_q2" => :ltriangle,
+    "remdd_q2_nicolaides" => :star5,
+  )
+  colors = Makie.resample_cmap(:tab10, length(methods))
+  selected = map(method -> method in methods, tbl.method)
+  finite_res = tbl.resnorm[selected .& (tbl.resnorm .> 0)]
+  ylims = (1e-10 * 0.5, maximum(finite_res) * 3)
+  yticks = LogTicks(collect(1:-2:-9))
+  fig = Figure(; size=(max(430 * length(ms), 1200), 350))
+  for (column, m) in enumerate(ms)
+    ax = Axis(
+      fig[1, column];
+      xlabel="parallel local-solve batches",
+      ylabel=column == 1 ? "residual norm ‖Axₖ-b‖₂" : "",
+      yscale=log10,
+      yticks=yticks,
+      title="m = $m",
+      limits=((0, 60), ylims),
+    )
+    for (index, method) in enumerate(methods)
+      mask = (tbl.m .== m) .& (tbl.method .== method) .& (tbl.resnorm .> 1e-14)
+      add_series!(
+        ax,
+        pick(tbl, :solves, mask) ./ m,
+        logfloor(pick(tbl, :resnorm, mask));
+        label=labels[method],
+        color=colors[index],
+        marker=markers[method],
+      )
+    end
+    add_partition_inset!(fig[1, column], parts, m)
+  end
+  Legend(
+    fig[2, 1:length(ms)],
+    legend_line_marker_elements(methods, markers; colors),
+    [labels[method] for method in methods];
+    orientation=:horizontal,
+    nbanks=2,
+    framevisible=true,
+  )
+  rowgap!(fig.layout, 8)
+  return savefigs(fig, "fig12c_poisson_nicolaides")
+end
+
+# Weak scaling with fixed H/h and H/delta, including q=1 and q=2.
+function fig12d_poisson_weak_scaling()
+  tbl = loadtable("study8_weak_scaling.csv")
+  ms = sort(unique(tbl.m))
+  styles = (
+    ("EMDD", "none", "EMDD", PALETTE[1], :circle, :dash),
+    (
+      "EMDD",
+      "multiplicity",
+      "EMDD + multiplicity PoU",
+      PALETTE[1],
+      :cross,
+      :dot,
+    ),
+    (
+      "EMDD",
+      "harmonic",
+      "EMDD + harmonic Nicolaides",
+      PALETTE[1],
+      :rect,
+      :solid,
+    ),
+    ("REMDD", "none", "REMDD", PALETTE[2], :utriangle, :dash),
+    (
+      "REMDD",
+      "multiplicity",
+      "REMDD + multiplicity PoU",
+      PALETTE[2],
+      :xcross,
+      :dot,
+    ),
+    (
+      "REMDD",
+      "harmonic",
+      "REMDD + harmonic Nicolaides",
+      PALETTE[2],
+      :diamond,
+      :solid,
+    ),
+  )
+  fig = Figure(; size=(PAPER_FULL_WIDTH, 430))
+  for (column, q) in enumerate((1, 2))
+    ax = Axis(
+      fig[1, column];
+      xlabel="number of subdomains, m",
+      ylabel=column == 1 ? "parallel local-solve batches" : "",
+      xscale=log2,
+      xticks=(ms, string.(ms)),
+      title="q = $q",
+    )
+    for (family, coarse_kind, label, color, marker, linestyle) in styles
+      batches = Int[]
+      for m in ms
+        mask =
+          (tbl.m .== m) .& (tbl.q .== q) .& (tbl.family .== family) .&
+          (tbl.coarse_kind .== coarse_kind)
+        push!(batches, maximum(tbl.local_batches[mask]))
+      end
+      add_series!(ax, ms, batches; label, color, marker, linestyle)
+    end
+  end
+  Legend(
+    fig[2, 1:2],
+    [
+      [
+        LineElement(; color=style[4], linestyle=style[6], linewidth=2.5),
+        MarkerElement(; color=style[4], marker=style[5], markersize=MARKERSIZE),
+      ] for style in styles
+    ],
+    [style[3] for style in styles];
+    orientation=:horizontal,
+    nbanks=2,
+    framevisible=true,
+    labelsize=14,
+  )
+  rowgap!(fig.layout, 8)
+  return savefigs(fig, "fig12d_poisson_weak_scaling")
 end
 
 # ---------------------------------------------------------------------------
@@ -2009,6 +2175,8 @@ function make_all_figures()
   fig11_local3d()
   fig12_poisson_cmp()
   fig12b_poisson_cmp_paper()
+  fig12c_poisson_nicolaides()
+  fig12d_poisson_weak_scaling()
   fig13_evp_cmp()
   fig14_gp_convergence()
   fig15_gp_ground_states()
