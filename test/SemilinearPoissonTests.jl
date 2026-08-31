@@ -188,7 +188,40 @@ const SPSolvers = VariationalDD.Solvers
     )
     @test result[5][end] < 1e-8 * initial_residual
     @test all(diff(result[3]) .<= 1e-12)
-    @test hessian_calls[] == length(result[5])
+    @test hessian_calls[] >= length(result[5])
+
+    local_iterations = Ref(0)
+    SPSolvers.var_dd(
+      energy,
+      subdomains;
+      u0=initial,
+      maxiter=1,
+      local_solve_callback=(_, _, info) ->
+        local_iterations[] += info.iterations,
+      verbose=false,
+    )
+    @test local_iterations[] > 0
+
+    strong_beta = 1000.0
+    target = ones(2)
+    load = target .+ strong_beta .* target .^ 3
+    strong_energy = SPEnergies.NonlinearEnergy(
+      "strong algebraic quartic",
+      u -> 0.5 * dot(u, u) + strong_beta / 4 * sum(u .^ 4) - dot(load, u),
+      u -> u .+ strong_beta .* u .^ 3 .- load,
+      u -> Diagonal(1 .+ 3 * strong_beta .* u .^ 2),
+      2,
+    )
+    strong_result = SPSolvers.var_dd(
+      strong_energy,
+      [Int32[1], Int32[2]];
+      u0=zeros(2),
+      maxiter=1,
+      quadratic_model=true,
+      verbose=false,
+    )
+    @test strong_result[3][end] <= strong_result[3][1]
+    @test strong_result[1] ≈ target atol=1e-8
 
     no_hessian = SPEnergies.NonlinearEnergy(
       "no Hessian",
