@@ -5,4 +5,5 @@ docs/build/
 *.vtu
 *.csv
 !examples/paper/tables/fig18_poisson_scaling.csv
+!examples/paper/tables/fig12d_poisson_weak_scaling.csv
 docs/Project.toml

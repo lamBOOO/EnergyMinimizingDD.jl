@@ -15,6 +15,33 @@ The paper-facing five-method variant Figure 12b calls the method
 EMDD by `q=1` (the current iterate) and one-vector history by `q=2` (the
 current and previous iterates); this is a basis-size convention, not the
 `history_depth` keyword value.
+
+Figure 12d adds a Cartesian Poisson weak-scaling experiment. The subdomain
+grid grows from `2x2` through `8x8`; every subdomain retains `10x10` cells and
+two overlap layers, so `H/h=10` and `H/delta=5` are fixed. The table reports
+parallel local-solve batches to a relative residual tolerance of `1e-10`:
+
+| method | coarse space | m=4 | m=16 | m=64 |
+|:--|:--|--:|--:|--:|
+| EMDD (q=1) | none | 37 | 52 | 136 |
+| | multiplicity PoU | 35 | 48 | 65 |
+| | harmonic Nicolaides | 35 | 45 | 48 |
+| REMDD (q=1) | none | 9 | 19 | 52 |
+| | multiplicity PoU | 9 | 19 | 29 |
+| | harmonic Nicolaides | 10 | 18 | 18 |
+| EMDD (q=2) | none | 16 | 23 | 36 |
+| | multiplicity PoU | 13 | 23 | 26 |
+| | harmonic Nicolaides | 14 | 22 | 23 |
+| REMDD (q=2) | none | 8 | 17 | 34 |
+| | multiplicity PoU | 7 | 17 | 21 |
+| | harmonic Nicolaides | 10 | 16 | 16 |
+
+The multiplicity-PoU columns reduce growth but are not harmonic and do not
+fully represent the low-energy global modes. The discrete-harmonic Nicolaides
+space is nearly flat from `m=16` to `m=64`, including for `q=1`; this is the
+expected two-level scalability result. The exact table is also generated as
+`tables/fig12d_poisson_weak_scaling.tex` by `tables_all.jl`.
+
 All linear-source comparisons stop after the same relative true-residual
 reduction. Figure 12 and the mesh-scaling runs share one irregular partition
 family: METIS is run once on the `N=20` reference grid and every finer cell
@@ -108,6 +135,7 @@ require orthogonality constraints and deflation. History depths
 linear-AS/global-operator work, history sensitivity, and local-system
 critical-path/storage diagnostics.
 
-All methods shown are one-level methods, so their iteration counts are expected
-to grow as the number of subdomains `m` increases. Two-level/coarse-space
-extensions are left as future work.
+Except for the new Figure 12c/12d Nicolaides variants, the methods shown are
+one-level methods, so their iteration counts are expected to grow as the number
+of subdomains `m` increases. The weak-scaling study isolates the effect of the
+new two-level coarse-space extension.

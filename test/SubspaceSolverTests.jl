@@ -91,6 +91,144 @@ using VariationalDD.Solvers
     end
   end
 
+  @testset "partition-of-unity restricted combination" begin
+    parts = [Int32[1, 2, 3], Int32[2, 3, 4], Int32[3, 4, 5]]
+    weights = Solvers.partition_of_unity_weights(parts, 5)
+    @test vec(sum(weights; dims=2)) ≈ ones(5)
+    @test weights[1, :] ≈ [1.0, 0.0, 0.0]
+    @test weights[3, :] ≈ [1 / 3, 1 / 3, 1 / 3]
+
+    A = [
+      4.0 -1.0 0.0 0.0 0.0
+      -1.0 4.0 -1.0 0.0 0.0
+      0.0 -1.0 4.0 -1.0 0.0
+      0.0 0.0 -1.0 4.0 -1.0
+      0.0 0.0 0.0 -1.0 3.0
+    ]
+    cores = [Int32[1, 2], Int32[3], Int32[4, 5]]
+    raw_coarse = Solvers.nicolaides_coarse_basis(
+      A, cores, parts; normalize=false
+    )
+    coarse = Solvers.nicolaides_coarse_basis(A, cores, parts)
+    @test vec(sum(coarse; dims=2)) ≈ ones(5)
+    @test raw_coarse[cores[1], 1] == ones(2)
+    @test iszero(raw_coarse[4, 1]) && iszero(raw_coarse[5, 1])
+    for (subdomain, core) in enumerate(cores)
+      transition = setdiff(parts[subdomain], core)
+      @test A[transition, transition] * raw_coarse[transition, subdomain] +
+            A[transition, core] * ones(length(core)) ≈ zeros(length(transition))
+    end
+
+    b = collect(1.0:5.0)
+    u0 = ones(5)
+    energy = Energies.QuadraticEnergy(A, b)
+    raw = hcat([Solvers.inf_step(energy, copy(u0), part) for part in parts]...)
+    restricted_candidates = Solvers.restrict_local_candidates!(
+      copy(raw), u0, weights, parts
+    )
+    expected = Solvers.combine_step(energy, hcat(u0, restricted_candidates))
+    result = @test_logs (:warn, r"Reached maxiter=1") Solvers.var_dd(
+      energy,
+      parts;
+      u0=u0,
+      maxiter=1,
+      tol=0.0,
+      restriction=:partition_of_unity,
+      verbose=false,
+    )
+    @test result[1] ≈ expected
+    @test Energies.energy(energy, result[1]) <= Energies.energy(energy, u0)
+
+    plain_expected = Solvers.combine_step(energy, hcat(u0, raw))
+    multiplicity_expected = Solvers.combine_step(energy, hcat(u0, raw, weights))
+    with_multiplicity = @test_logs (:warn, r"Reached maxiter=1") Solvers.var_dd(
+      energy,
+      parts;
+      u0=u0,
+      maxiter=1,
+      tol=0.0,
+      coarse_basis=weights,
+      verbose=false,
+    )
+    @test with_multiplicity[1] ≈ multiplicity_expected
+
+    coarse_expected = Solvers.combine_step(energy, hcat(u0, raw, coarse))
+    with_coarse = @test_logs (:warn, r"Reached maxiter=1") Solvers.var_dd(
+      energy,
+      parts;
+      u0=u0,
+      maxiter=1,
+      tol=0.0,
+      coarse_basis=coarse,
+      verbose=false,
+    )
+    @test with_coarse[1] ≈ coarse_expected
+    @test Energies.energy(energy, with_coarse[1]) <=
+      Energies.energy(energy, plain_expected) + 1e-12
+
+    q2_dimensions = Int[]
+    with_coarse_q2 = @test_logs (:warn, r"Reached maxiter=2") Solvers.var_dd(
+      energy,
+      parts;
+      u0=u0,
+      maxiter=2,
+      tol=0.0,
+      history_depth=1,
+      coarse_basis=coarse,
+      subspace_callback=(_, space) -> push!(q2_dimensions, size(space, 2)),
+      verbose=false,
+    )
+    @test q2_dimensions == [7, 8]
+    @test all(isfinite, with_coarse_q2[1])
+    @test all(diff(with_coarse_q2[3]) .<= 1e-12)
+
+    disjoint = [Int32[1, 2], Int32[3, 4, 5]]
+    plain = @test_logs (:warn, r"Reached maxiter=1") Solvers.var_dd(
+      energy, disjoint; u0=u0, maxiter=1, tol=0.0, verbose=false
+    )
+    restricted = @test_logs (:warn, r"Reached maxiter=1") Solvers.var_dd(
+      energy,
+      disjoint;
+      u0=u0,
+      maxiter=1,
+      tol=0.0,
+      restriction=:partition_of_unity,
+      verbose=false,
+    )
+    @test restricted[1] ≈ plain[1]
+
+    @test_throws ArgumentError Solvers.partition_of_unity_weights(
+      [Int32[1], Int32[3]], 3
+    )
+    @test_throws DimensionMismatch Solvers.nicolaides_coarse_basis(
+      zeros(4, 5), cores, parts
+    )
+    @test_throws DimensionMismatch Solvers.nicolaides_coarse_basis(
+      A, cores[1:2], parts
+    )
+    @test_throws ArgumentError Solvers.nicolaides_coarse_basis(
+      [2.0 -1.0; 0.0 2.0], [Int32[1], Int32[2]], [Int32[1, 2], Int32[1, 2]]
+    )
+    @test_throws ArgumentError Solvers.nicolaides_coarse_basis(
+      A, [Int32[1], Int32[3], Int32[4, 5]], parts
+    )
+    @test_throws ArgumentError Solvers.nicolaides_coarse_basis(
+      A, [Int32[1, 2], Int32[3], Int32[4, 5]], [Int32[1], parts[2], parts[3]]
+    )
+    @test_throws ArgumentError Solvers.var_dd(
+      energy, parts; restriction=:invalid
+    )
+    @test_throws ArgumentError Solvers.var_dd(
+      energy, parts; sweep=:multiplicative, restriction=:partition_of_unity
+    )
+    @test_throws ArgumentError Solvers.var_dd(
+      energy, parts; coarse_basis=ones(5)
+    )
+    @test_throws DimensionMismatch Solvers.var_dd(
+      energy, parts; coarse_basis=zeros(4, 2)
+    )
+  end
+
   @testset "previous-iterate enrichment and post-mixing" begin
     Random.seed!(29)
     n = 10
