@@ -140,15 +140,13 @@ function make_fig18_table(;
       output empty row,
       before row={
         \toprule
-        \cmidrule(lr){2-7} \cmidrule(lr){8-13} \cmidrule(lr){14-17}
-        method
         & \multicolumn{6}{c}{\makebox[0pt]{discretization \(1/h\) (\(\ell=2\))}}
         & \multicolumn{6}{c}{\makebox[0pt]{discretization \(1/h\) (\(\delta/H\approx0.1\))}}
         % One header row per column group: these labels sit in zero-width
         % boxes, so a second row of group titles overflowed into its neighbour.
         & \multicolumn{4}{c}{\makebox[0pt]{layers \(\ell\) (\(1/h=64\))}} \\
         \cmidrule(lr){2-7} \cmidrule(lr){8-13} \cmidrule(lr){14-17}
-        & 20 & 40 & 60 & 80 & 100 & 120
+        method & 20 & 40 & 60 & 80 & 100 & 120
         & 20 & 40 & 60 & 80 & 100 & 120
         & 1 & 2 & 4 & 8 \\
       },
