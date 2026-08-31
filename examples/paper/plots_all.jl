@@ -1486,6 +1486,96 @@ function fig17_semilinear_poisson()
   savefigs(fig, "fig17_semilinear_poisson")
 end
 
+# Paper-facing subset of Figure 17, mirroring the focused linear-source
+# comparison in Figure 12b. Here q counts the current iterate as the first
+# global vector, so q=1 is plain EMDD and q=2 adds u_{k-1}.
+function fig17b_semilinear_poisson_paper()
+  conv = loadtable("study11_semilinear_conv.csv")
+  solutions = loadtable("study11_semilinear_solution.csv")
+  parts = loadtable("study11_semilinear_partitions.csv")
+  ms = sort(unique(conv.m))
+  methods = (
+    "var_dd",
+    "var_dd_history",
+    "newton_pcg_as_4",
+    "newton_pcg_as_8",
+  )
+  labels = Dict(
+    "var_dd" => "EMDD (q = 1)",
+    "var_dd_history" => "EMDD (q = 2)",
+    "newton_pcg_as_4" => "Newton–PCG(AS, 4)",
+    "newton_pcg_as_8" => "Newton–PCG(AS, 8)",
+  )
+  markers = Dict(
+    "var_dd" => :diamond,
+    "var_dd_history" => :utriangle,
+    "newton_pcg_as_4" => :dtriangle,
+    "newton_pcg_as_8" => :hexagon,
+  )
+  full_colors = Makie.resample_cmap(:tab10, 10)
+  colors = [full_colors[i] for i in (9, 10, 4, 5)]
+  positive_residuals = conv.relative_residual[conv.relative_residual .> 0]
+  ylimits = (1e-8, maximum(positive_residuals) * 2)
+  ytick_exps = sort(
+    collect(floor(Int, log10(ylimits[2])):-2:ceil(Int, log10(ylimits[1])))
+  )
+
+  fig = Figure(size=(PAPER_FULL_WIDTH, 430))
+  Label(
+    fig[0, 1:length(ms)],
+    "−Δu + βu³ = f  in Ω,    β = 1,    u = 0  on ∂Ω";
+    fontsize=22,
+    font=:bold,
+  )
+  for (column, m) in enumerate(ms)
+    ax = Axis(
+      fig[1, column];
+      xlabel="outer iteration",
+      ylabel=column == 1 ? "relative residual" : "",
+      title="m = $m",
+      yscale=log10,
+      yticks=LogTicks(ytick_exps),
+      limits=(nothing, ylimits),
+    )
+    for (index, method) in enumerate(methods)
+      mask =
+        (conv.m .== m) .&
+        (conv.method .== method) .&
+        (conv.relative_residual .> 0)
+      add_series!(
+        ax,
+        pick(conv, :outer, mask),
+        pick(conv, :relative_residual, mask);
+        label=labels[method],
+        color=colors[index],
+        marker=markers[method],
+      )
+    end
+    hlines!(ax, [1e-7]; color=:black, linestyle=:dot, linewidth=1.2)
+    add_semilinear_solution_inset!(
+      fig[1, column], solutions; halign=0.68, inset_size=0.23
+    )
+    add_triangle_partition_inset!(
+      fig[1, column],
+      parts,
+      m;
+      halign=0.99,
+      inset_size=0.23,
+      inset_title="partition",
+    )
+  end
+  Legend(
+    fig[2, 1:length(ms)],
+    legend_line_marker_elements(methods, markers; colors),
+    [labels[method] for method in methods];
+    orientation=:horizontal,
+    nbanks=1,
+    framevisible=true,
+  )
+  rowgap!(fig.layout, 8)
+  savefigs(fig, "fig17b_semilinear_poisson_paper")
+end
+
 # ---------------------------------------------------------------------------
 # Figs 18--20: linear-source sensitivity studies
 # ---------------------------------------------------------------------------
@@ -2186,6 +2276,7 @@ function make_all_figures()
   fig15_gp_ground_states()
   fig16_gp_energy_gap()
   fig17_semilinear_poisson()
+  fig17b_semilinear_poisson_paper()
   fig18_poisson_scaling()
   fig19_poisson_contrast()
   fig20_poisson_history()
