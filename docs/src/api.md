@@ -1,18 +1,18 @@
 # [API reference](@id api-reference)
 
 The package currently exposes its implementation through the
-`VariationalDD.Energies`, `VariationalDD.FEMDiscretizations`, and
-`VariationalDD.Solvers` modules. The routines below form the core variational
+`EnergyMinimizingDD.Energies`, `EnergyMinimizingDD.FEMDiscretizations`, and
+`EnergyMinimizingDD.Solvers` modules. The routines below form the core variational
 domain-decomposition interface.
 
 ## Core functions
 
 ```@docs
-VariationalDD.Solvers.inf_step
-VariationalDD.Solvers.combine_step
-VariationalDD.Solvers.partition_of_unity_weights
-VariationalDD.Solvers.nicolaides_coarse_basis
-VariationalDD.Solvers.var_dd
+EnergyMinimizingDD.Solvers.inf_step
+EnergyMinimizingDD.Solvers.combine_step
+EnergyMinimizingDD.Solvers.partition_of_unity_weights
+EnergyMinimizingDD.Solvers.nicolaides_coarse_basis
+EnergyMinimizingDD.Solvers.var_dd
 ```
 
 ## Restricted and two-level variants
@@ -21,7 +21,7 @@ REMDD uses `restriction=:partition_of_unity` to multiply overlapping local
 corrections by inverse multiplicity weights before global recombination:
 
 ```julia
-u, history... = VariationalDD.Solvers.var_dd(
+u, history... = EnergyMinimizingDD.Solvers.var_dd(
     energy,
     overlapping_dofs;
     restriction=:partition_of_unity,
@@ -33,25 +33,25 @@ coarse-space comparator. They are distinct from the recommended low-energy
 Nicolaides-type basis:
 
 ```julia
-Z_multiplicity = VariationalDD.Solvers.partition_of_unity_weights(
+Z_multiplicity = EnergyMinimizingDD.Solvers.partition_of_unity_weights(
     overlapping_dofs,
     size(K, 1),
 )
-Z_harmonic = VariationalDD.Solvers.nicolaides_coarse_basis(
+Z_harmonic = EnergyMinimizingDD.Solvers.nicolaides_coarse_basis(
     K,
     core_dofs,
     overlapping_dofs,
 )
 
 # q = 1: current iterate plus the current local candidates
-u_q1, history_q1... = VariationalDD.Solvers.var_dd(
+u_q1, history_q1... = EnergyMinimizingDD.Solvers.var_dd(
     energy,
     overlapping_dofs;
     coarse_basis=Z_harmonic,
 )
 
 # q = 2: additionally retain the preceding global iterate
-u_q2, history_q2... = VariationalDD.Solvers.var_dd(
+u_q2, history_q2... = EnergyMinimizingDD.Solvers.var_dd(
     energy,
     overlapping_dofs;
     history_depth=1,

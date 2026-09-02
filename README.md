@@ -1,21 +1,21 @@
-# VariationalDD.jl
+# EnergyMinimizingDD.jl
 
 <p align="center">
   <strong>Energy-minimizing domain decomposition for finite-element problems in Julia</strong>
 </p>
 
 <p align="center">
-  <a href="https://github.com/lamBOOO/dd_eigen/actions/workflows/ci.yml"><img src="https://github.com/lamBOOO/dd_eigen/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
+  <a href="https://github.com/lamBOOO/EnergyMinimizingDD.jl/actions/workflows/ci.yml"><img src="https://github.com/lamBOOO/EnergyMinimizingDD.jl/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
   <a href="https://julialang.org/"><img src="https://img.shields.io/badge/Julia-1.10%2B-9558B2?logo=julia&logoColor=white" alt="Julia 1.10 or newer"></a>
   <a href="docs/src/index.md"><img src="https://img.shields.io/badge/docs-getting%20started-2B6CB0" alt="Documentation"></a>
   <a href="#project-status"><img src="https://img.shields.io/badge/status-experimental-EA8C00" alt="Experimental status"></a>
 </p>
 
 <p align="center">
-  <img src="docs/src/assets/variational-dd-poisson-iteration.png" width="1000" alt="A real Poisson iteration: an asymmetric initial field, four local update fields, and the second-level minimizer">
+  <img src="docs/src/assets/energy-minimizing-dd-poisson-iteration.png" width="1000" alt="A real Poisson iteration: an asymmetric initial field, four local update fields, and the second-level minimizer">
 </p>
 
-VariationalDD.jl implements energy-minimizing domain-decomposition methods for finite-element problems. Each iteration solves independent variational problems on overlapping local spaces and then recombines the resulting candidates through a small global minimization. A common solver interface supports quadratic source problems, generalized eigenproblems, semilinear energies, and Gross–Pitaevskii models.
+EnergyMinimizingDD.jl implements energy-minimizing domain-decomposition methods for finite-element problems. Each iteration solves independent variational problems on overlapping local spaces and then recombines the resulting candidates through a small global minimization. A common solver interface supports quadratic source problems, generalized eigenproblems, semilinear energies, and Gross–Pitaevskii models.
 
 The figure visualizes one computed iteration of the Poisson example below, starting from an asymmetric initial field. The middle panels show the local corrections $\mathsf y_i^{(0)}-\mathsf u^{(0)}$; the white contours identify the degrees of freedom in each overlapping subspace. The displayed energy values are evaluated from the actual iterates. The figure can be reproduced with [`docs/generate_readme_figures.jl`](docs/generate_readme_figures.jl).
 
@@ -35,7 +35,7 @@ Install the current development version directly from GitHub:
 
 ```julia
 import Pkg
-Pkg.add(url="https://github.com/lamBOOO/dd_eigen.git")
+Pkg.add(url="https://github.com/lamBOOO/EnergyMinimizingDD.jl.git")
 ```
 
 The following example solves
@@ -48,11 +48,11 @@ $$
 with four overlapping subdomains:
 
 ```julia
-using VariationalDD, LinearAlgebra
+using EnergyMinimizingDD, LinearAlgebra
 
-const FEM = VariationalDD.FEMDiscretizations
-const E = VariationalDD.Energies
-const S = VariationalDD.Solvers
+const FEM = EnergyMinimizingDD.FEMDiscretizations
+const E = EnergyMinimizingDD.Energies
+const S = EnergyMinimizingDD.Solvers
 
 A, _, b, subdomains, _ = FEM.FEM_Schroedinger(
     16, 4; P=x -> 0.0, f=x -> 1.0, overlap=2,
@@ -161,11 +161,11 @@ The two-level construction is unchanged: both the local and global subproblems m
 To reproduce the repository environment and run the test suite:
 
 ```bash
-git clone https://github.com/lamBOOO/dd_eigen.git
-cd dd_eigen
+git clone https://github.com/lamBOOO/EnergyMinimizingDD.jl.git
+cd EnergyMinimizingDD.jl
 julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.test()'
 ```
 
 ## Project status
 
-VariationalDD.jl is experimental research software. The implementation is covered by automated tests, but the public API may evolve before a stable release. Questions, bug reports, benchmark contributions, and focused pull requests are welcome through [GitHub Issues](https://github.com/lamBOOO/dd_eigen/issues).
+EnergyMinimizingDD.jl is experimental research software. The implementation is covered by automated tests, but the public API may evolve before a stable release. Questions, bug reports, benchmark contributions, and focused pull requests are welcome through [GitHub Issues](https://github.com/lamBOOO/EnergyMinimizingDD.jl/issues).

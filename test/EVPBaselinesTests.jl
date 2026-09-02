@@ -2,7 +2,7 @@ using Test
 using LinearAlgebra
 using SparseArrays
 using Random
-using VariationalDD
+using EnergyMinimizingDD
 
 isdefined(Main, :PAPER_COMMON) ||
   include(joinpath(@__DIR__, "..", "examples", "paper", "common.jl"))
@@ -28,8 +28,8 @@ isdefined(Main, :EVP_COMMON) ||
 
   current = normalize_M!(collect(range(0.5, 1.5; length=n)), M)
   indices = subdomains[2]
-  local_result = VariationalDD.Solvers.generalized_rayleigh_inf_step(
-    VariationalDD.Energies.GeneralizedRayleighQuotient(K, M),
+  local_result = EnergyMinimizingDD.Solvers.generalized_rayleigh_inf_step(
+    EnergyMinimizingDD.Energies.GeneralizedRayleighQuotient(K, M),
     current,
     indices;
     collect_info=true,

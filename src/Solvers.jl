@@ -13,7 +13,7 @@ using Random
 using LineSearches
 using Optim
 
-using VariationalDD.Energies
+using EnergyMinimizingDD.Energies
 
 """
   inf_step(e::Energies.AbstractEnergy{Float64}, u_current::Vector{Float64}, idx_sub::AbstractVector)

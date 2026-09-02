@@ -1,8 +1,8 @@
 using Test
 using LinearAlgebra
 using Random
-using VariationalDD.Energies
-using VariationalDD.Solvers
+using EnergyMinimizingDD.Energies
+using EnergyMinimizingDD.Solvers
 
 @testset "Subspace solver robustness" begin
   @testset "local minimizer may have zero current-iterate coefficient" begin

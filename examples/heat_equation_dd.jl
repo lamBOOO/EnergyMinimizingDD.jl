@@ -10,9 +10,9 @@
 # so every time step is a QuadraticEnergy solved with the existing var_dd,
 # warm-started from the previous time step.
 
-using VariationalDD.FEMDiscretizations
-using VariationalDD.Energies
-using VariationalDD.Solvers
+using EnergyMinimizingDD.FEMDiscretizations
+using EnergyMinimizingDD.Energies
+using EnergyMinimizingDD.Solvers
 using LinearAlgebra
 using Printf
 

@@ -1,7 +1,7 @@
-using VariationalDD.Energies
-using VariationalDD.FEMDiscretizations
-using VariationalDD.Solvers
-using VariationalDD
+using EnergyMinimizingDD.Energies
+using EnergyMinimizingDD.FEMDiscretizations
+using EnergyMinimizingDD.Solvers
+using EnergyMinimizingDD
 using LinearAlgebra
 using FiniteDiff
 using Gridap
@@ -24,12 +24,12 @@ overlap = 4
 
 # Schroedinger EVP FEM
 println("\n=== Schrödinger EVP FEM Example ===")
-K, M, b, part, U = VariationalDD.FEMDiscretizations.FEM_Schroedinger(
+K, M, b, part, U = EnergyMinimizingDD.FEMDiscretizations.FEM_Schroedinger(
   N, m; overlap=overlap
 )
 energy_eigen_fem = Energies.GeneralizedRayleighQuotient(K, M)
 # energy_eigen_fem = Energies.RayleighQuotient(K)
-result = VariationalDD.Solvers.var_dd(
+result = EnergyMinimizingDD.Solvers.var_dd(
   energy_eigen_fem, part; maxiter=maxiter, tol=tol, save_local_updates=true
 )
 
@@ -89,14 +89,14 @@ println("Final approximate eigenvalue (inverse iteration) = $lambda_approx_inv")
 
 # Poisson problem FEM: -Δu = f with f(x) = 1
 println("\n=== Poisson Linear FEM Example ===")
-K, M, b, part, U = VariationalDD.FEMDiscretizations.FEM_Schroedinger(
+K, M, b, part, U = EnergyMinimizingDD.FEMDiscretizations.FEM_Schroedinger(
   N, m; P=(x -> 0.0), f=(x -> 1.0), overlap=overlap
 )
 energy_poisson_fem = Energies.QuadraticEnergy(K, b, 0.0)
 # direct solve
 u_poisson_direct = K \ b
 # Solvers.var_dd solve with local update visualization
-result = VariationalDD.Solvers.var_dd(
+result = EnergyMinimizingDD.Solvers.var_dd(
   energy_poisson_fem, part; maxiter=maxiter, tol=1e-5, save_local_updates=true
 )
 u_poisson,

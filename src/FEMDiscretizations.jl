@@ -350,7 +350,7 @@ function create_balanced_disjoint_dofs_partition(core_dofs, ndofs::Int)
   return owned
 end
 
-function create_elements_partition(partition::Vector{Int32}, npars::Integer) # Helper function from VariationalDD
+function create_elements_partition(partition::Vector{Int32}, npars::Integer) # Helper function from EnergyMinimizingDD
   nelems = length(partition)
   @debug nelems, length(partition)
   @assert nelems == length(partition)
@@ -363,7 +363,7 @@ function create_elements_partition(partition::Vector{Int32}, npars::Integer) # H
   return elemsp
 end
 
-function create_overlapping_elements_partition!(elemsp, g, npars::Integer, ol) # Helper function from VariationalDD
+function create_overlapping_elements_partition!(elemsp, g, npars::Integer, ol) # Helper function from EnergyMinimizingDD
   for iol = 1:ol
     @debug "overlap" iol
     Threads.@threads for ipar = 1:npars

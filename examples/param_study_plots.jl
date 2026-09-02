@@ -1,6 +1,6 @@
-using VariationalDD.FEMDiscretizations
-using VariationalDD.Energies
-using VariationalDD.Solvers
+using EnergyMinimizingDD.FEMDiscretizations
+using EnergyMinimizingDD.Energies
+using EnergyMinimizingDD.Solvers
 using Plots
 using LinearAlgebra
 

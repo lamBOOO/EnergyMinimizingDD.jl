@@ -1,9 +1,9 @@
 using LinearAlgebra
 using Printf
 using Statistics
-using VariationalDD.Energies
-using VariationalDD.FEMDiscretizations
-using VariationalDD.Solvers
+using EnergyMinimizingDD.Energies
+using EnergyMinimizingDD.FEMDiscretizations
+using EnergyMinimizingDD.Solvers
 
 "Run one Poisson solve and return iteration count, residual, error, and time."
 function run_method(energy, subdomains, reference, tolerance, restriction)

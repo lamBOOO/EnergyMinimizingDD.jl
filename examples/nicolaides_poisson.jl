@@ -2,9 +2,9 @@
 # Run with: julia --project=. examples/nicolaides_poisson.jl
 
 using LinearAlgebra
-using VariationalDD.Energies
-using VariationalDD.FEMDiscretizations
-using VariationalDD.Solvers
+using EnergyMinimizingDD.Energies
+using EnergyMinimizingDD.FEMDiscretizations
+using EnergyMinimizingDD.Solvers
 
 function main()
   N = 20

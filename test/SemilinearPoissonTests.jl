@@ -1,10 +1,10 @@
 using Test
 using LinearAlgebra
-using VariationalDD
+using EnergyMinimizingDD
 
-const SPFEM = VariationalDD.FEMDiscretizations
-const SPEnergies = VariationalDD.Energies
-const SPSolvers = VariationalDD.Solvers
+const SPFEM = EnergyMinimizingDD.FEMDiscretizations
+const SPEnergies = EnergyMinimizingDD.Energies
+const SPSolvers = EnergyMinimizingDD.Solvers
 
 @testset "generic semilinear Poisson FEM" begin
   function semilinear_energy(; N=6, m=4, potential, dpotential, ddpotential,
