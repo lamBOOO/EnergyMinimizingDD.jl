@@ -114,14 +114,21 @@ function legend_line_marker_elements(
   methods,
   markers;
   colors = [color_for(i) for i in eachindex(methods)],
+  linestyles = fill(:solid, length(methods)),
+  linewidths = fill(2.5, length(methods)),
+  markersizes = fill(MARKERSIZE, length(methods)),
 )
   return [
     [
-      LineElement(color = colors[i], linewidth = 2.5),
+      LineElement(
+        color = colors[i],
+        linestyle = linestyles[i],
+        linewidth = linewidths[i],
+      ),
       MarkerElement(
         color = colors[i],
         marker = markers[method],
-        markersize = MARKERSIZE,
+        markersize = markersizes[i],
       ),
     ] for (i, method) in enumerate(methods)
   ]
@@ -1398,6 +1405,10 @@ function fig17_semilinear_poisson()
     "raspen",
     "var_dd",
     "var_dd_history",
+    "var_dd_quadratic",
+    "newton_pcg_as_1",
+    "var_dd_quadratic_history",
+    "newton_pcg_as_2",
   )
   labels = Dict(
     "nonlinear_as" => "nAS + optimal damping",
@@ -1410,6 +1421,10 @@ function fig17_semilinear_poisson()
     "raspen" => "RASPEN",
     "var_dd" => "varDD",
     "var_dd_history" => "varDD + history (1)",
+    "var_dd_quadratic" => "quadratic-model varDD",
+    "newton_pcg_as_1" => "Newton–PCG(AS, 1)",
+    "var_dd_quadratic_history" => "quadratic-model varDD + history (1)",
+    "newton_pcg_as_2" => "Newton–PCG(AS, 2)",
   )
   markers = Dict(
     "nonlinear_as" => :circle,
@@ -1422,15 +1437,21 @@ function fig17_semilinear_poisson()
     "raspen" => :pentagon,
     "var_dd" => :diamond,
     "var_dd_history" => :utriangle,
+    "var_dd_quadratic" => :star4,
+    "newton_pcg_as_1" => :circle,
+    "var_dd_quadratic_history" => :star6,
+    "newton_pcg_as_2" => :rect,
   )
   colors = tab10_colors(length(methods))
-  positive_residuals = conv.relative_residual[conv.relative_residual .> 0]
-  ylimits = (1e-8, maximum(positive_residuals) * 2)
+  initial_residuals = conv.relative_residual[
+    (conv.outer .== 0) .& isfinite.(conv.relative_residual)
+  ]
+  ylimits = (1e-8, max(maximum(initial_residuals), 1.0) * 2)
   ytick_exps = sort(
     collect(floor(Int, log10(ylimits[2])):-2:ceil(Int, log10(ylimits[1])))
   )
 
-  fig = Figure(size=(max(990, 330 * length(ms)), 540))
+  fig = Figure(size=(max(990, 330 * length(ms)), 490))
   Label(
     fig[0, 1:length(ms)],
     "−Δu + βu³ = f  in Ω,    β = 1,    u = 0  on ∂Ω";
@@ -1479,11 +1500,181 @@ function fig17_semilinear_poisson()
     legend_line_marker_elements(methods, markers; colors),
     [labels[method] for method in methods];
     orientation=:horizontal,
-    nbanks=3,
+    nbanks=5,
     framevisible=true,
   )
   rowgap!(fig.layout, 8)
   savefigs(fig, "fig17_semilinear_poisson")
+end
+
+# Paper-facing subset of Figure 17, mirroring the focused linear-source
+# comparison in Figure 12b. Here q counts the current iterate as the first
+# global vector, so q=1 is plain EMDD and q=2 adds u_{k-1}.
+function fig17b_semilinear_poisson_paper()
+  conv = loadtable("study11_semilinear_conv.csv")
+  solutions = loadtable("study11_semilinear_solution.csv")
+  parts = loadtable("study11_semilinear_partitions.csv")
+  ms = sort(unique(conv.m))
+  primary_methods = (
+    "var_dd",
+    "var_dd_history",
+    "var_dd_quadratic",
+    "var_dd_quadratic_history",
+    "nonlinear_ras",
+  )
+  reference_methods = (
+    "newton_pcg_as_1",
+    "newton_pcg_as_2",
+    "newton_pcg_as_4",
+    "newton_pcg_as_8",
+  )
+  methods = (primary_methods..., reference_methods...)
+  labels = Dict(
+    "var_dd" => "EMDD (q = 1)",
+    "var_dd_history" => "EMDD (q = 2)",
+    "var_dd_quadratic" => "quadratic EMDD (q = 1)",
+    "var_dd_quadratic_history" => "quadratic EMDD (q = 2)",
+    "nonlinear_ras" => "nRAS + optimal damping",
+    "newton_pcg_as_1" => "Newton–PCG(AS, 1)",
+    "newton_pcg_as_2" => "Newton–PCG(AS, 2)",
+    "newton_pcg_as_4" => "Newton–PCG(AS, 4)",
+    "newton_pcg_as_8" => "Newton–PCG(AS, 8)",
+  )
+  markers = Dict(
+    "var_dd" => :diamond,
+    "var_dd_history" => :utriangle,
+    "var_dd_quadratic" => :star4,
+    "var_dd_quadratic_history" => :star6,
+    "nonlinear_ras" => :rect,
+    "newton_pcg_as_1" => :circle,
+    "newton_pcg_as_2" => :rect,
+    "newton_pcg_as_4" => :dtriangle,
+    "newton_pcg_as_8" => :hexagon,
+  )
+  full_colors = Makie.resample_cmap(:tab10, 10)
+  primary_colors = [
+    full_colors[9],
+    full_colors[10],
+    full_colors[1],
+    full_colors[6],
+    full_colors[2],
+  ]
+  reference_colors = [
+    RGBf(0.55, 0.55, 0.55),
+    RGBf(0.45, 0.45, 0.45),
+    RGBf(0.35, 0.35, 0.35),
+    RGBf(0.20, 0.20, 0.20),
+  ]
+  colors = [primary_colors..., reference_colors...]
+  linestyles = [
+    fill(:solid, length(primary_methods))...,
+    fill(:dash, length(reference_methods))...,
+  ]
+  linewidths = [
+    fill(2.8, length(primary_methods))...,
+    fill(1.8, length(reference_methods))...,
+  ]
+  markersizes = [
+    fill(MARKERSIZE, length(primary_methods))...,
+    fill(6, length(reference_methods))...,
+  ]
+  initial_residuals = conv.relative_residual[
+    (conv.outer .== 0) .& isfinite.(conv.relative_residual)
+  ]
+  ylimits = (1e-8, max(maximum(initial_residuals), 1.0) * 2)
+  ytick_exps = sort(
+    collect(floor(Int, log10(ylimits[2])):-2:ceil(Int, log10(ylimits[1])))
+  )
+
+  fig = Figure(size=(PAPER_FULL_WIDTH, 490))
+  Label(
+    fig[0, 1:length(ms)],
+    "−Δu + βu³ = f  in Ω,    β = 1,    u = 0  on ∂Ω";
+    fontsize=22,
+    font=:bold,
+  )
+  for (column, m) in enumerate(ms)
+    ax = Axis(
+      fig[1, column];
+      xlabel="outer iteration",
+      ylabel=column == 1 ? "relative residual" : "",
+      title="m = $m",
+      yscale=log10,
+      yticks=LogTicks(ytick_exps),
+      limits=(nothing, ylimits),
+    )
+    for (index, method) in enumerate(methods)
+      mask =
+        (conv.m .== m) .&
+        (conv.method .== method) .&
+        (conv.relative_residual .> 0)
+      add_series!(
+        ax,
+        pick(conv, :outer, mask),
+        pick(conv, :relative_residual, mask);
+        label=labels[method],
+        color=colors[index],
+        linestyle=linestyles[index],
+        marker=markers[method],
+        linewidth=linewidths[index],
+        markersize=markersizes[index],
+      )
+    end
+    hlines!(ax, [1e-7]; color=:black, linestyle=:dot, linewidth=1.2)
+    add_semilinear_solution_inset!(
+      fig[1, column], solutions; halign=0.68, inset_size=0.23
+    )
+    add_triangle_partition_inset!(
+      fig[1, column],
+      parts,
+      m;
+      halign=0.99,
+      inset_size=0.23,
+      inset_title="partition",
+    )
+  end
+  Label(
+    fig[2, 1:length(ms)],
+    "Primary DD comparison";
+    fontsize=16,
+    font=:bold,
+  )
+  Legend(
+    fig[3, 1:length(ms)],
+    legend_line_marker_elements(
+      primary_methods,
+      markers;
+      colors=primary_colors,
+      linewidths=fill(2.8, length(primary_methods)),
+    ),
+    [labels[method] for method in primary_methods];
+    orientation=:horizontal,
+    nbanks=2,
+    framevisible=true,
+  )
+  Label(
+    fig[4, 1:length(ms)],
+    "Newton references (quadratic convergence)";
+    fontsize=16,
+    font=:bold,
+  )
+  Legend(
+    fig[5, 1:length(ms)],
+    legend_line_marker_elements(
+      reference_methods,
+      markers;
+      colors=reference_colors,
+      linestyles=fill(:dash, length(reference_methods)),
+      linewidths=fill(1.8, length(reference_methods)),
+      markersizes=fill(6, length(reference_methods)),
+    ),
+    [labels[method] for method in reference_methods];
+    orientation=:horizontal,
+    nbanks=1,
+    framevisible=true,
+  )
+  rowgap!(fig.layout, 8)
+  savefigs(fig, "fig17b_semilinear_poisson_paper")
 end
 
 # ---------------------------------------------------------------------------
@@ -2186,6 +2377,7 @@ function make_all_figures()
   fig15_gp_ground_states()
   fig16_gp_energy_gap()
   fig17_semilinear_poisson()
+  fig17b_semilinear_poisson_paper()
   fig18_poisson_scaling()
   fig19_poisson_contrast()
   fig20_poisson_history()
