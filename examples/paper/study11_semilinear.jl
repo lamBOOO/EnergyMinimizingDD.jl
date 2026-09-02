@@ -266,6 +266,7 @@ function run_study11()
           maxiter=maxiter,
           tolerance=tolerance,
           history_depth=0,
+          quadratic_model=true,
         )
       elseif method == :var_dd_quadratic_history
         nonlinear_source_vardd(
@@ -275,6 +276,7 @@ function run_study11()
           maxiter=maxiter,
           tolerance=tolerance,
           history_depth=1,
+          quadratic_model=true,
         )
       end
 
