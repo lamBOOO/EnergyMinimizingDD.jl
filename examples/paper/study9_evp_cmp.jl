@@ -6,6 +6,8 @@
 isdefined(Main, :PAPER_COMMON) || include("common.jl")
 isdefined(Main, :EVP_COMMON) || include("evp_common.jl")
 
+const EVP_COMPARISON_POTENTIAL_SCALE = 1.0
+
 function append_evp_history!(rows, method, m, lambda_reference, result)
   for entry in result.history
     push!(rows.method, string(method))
@@ -60,6 +62,7 @@ end
 function run_study9()
   files = (
     "study9_evp_cmp.csv",
+    "study9_evp_solution.csv",
     "study9_partitions.csv",
     "study9_evp_local_stats.csv",
     "study9_evp_combination_stats.csv",
@@ -98,14 +101,30 @@ function run_study9()
     method=String[], m=Int[], outer_iteration=Int[], iterations=Int[],
     converged=Int[], relative_residual=Float64[],
   )
+  solution_rows = (N=Int[], idx=Int[], value=Float64[])
   part_rows = (m=Int[], N=Int[], idx=Int[], owner=Int[], mult=Int[])
 
   for m in ms
     K, M, _, dofspar, _, core = schroedinger_setup(
-      N, m, overlap; return_core_partition=true
+      N,
+      m,
+      overlap;
+      P=x -> EVP_COMPARISON_POTENTIAL_SCALE * exp(sqrt(x[1]^2 + x[2]^2)),
+      return_core_partition=true,
     )
     schwarz = schwarz_setup(K, dofspar; core_dofs=core)
-    lambda_reference = dense_reference_lambda(K, M)
+    reference = eigen(Symmetric(Matrix(K)), Symmetric(Matrix(M)))
+    lambda_reference = reference.values[1]
+    if isempty(solution_rows.value)
+      reference_solution = collect(reference.vectors[:, 1])
+      reference_solution ./= sqrt(dot(reference_solution, M * reference_solution))
+      sum(reference_solution) < 0 && (reference_solution .*= -1)
+      for (index, value) in enumerate(reference_solution)
+        push!(solution_rows.N, N)
+        push!(solution_rows.idx, index)
+        push!(solution_rows.value, value)
+      end
+    end
 
     owner, mult = metis_cell_partition(N, m, overlap)
     for idx in eachindex(owner)
@@ -143,6 +162,7 @@ function run_study9()
     end
   end
   savetable("study9_evp_cmp.csv", rows)
+  savetable("study9_evp_solution.csv", solution_rows)
   savetable("study9_partitions.csv", part_rows)
   savetable("study9_evp_local_stats.csv", local_rows)
   savetable("study9_evp_combination_stats.csv", combination_rows)
