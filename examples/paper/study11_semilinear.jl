@@ -41,7 +41,7 @@ function run_study11()
   end
   println("study11: manufactured cubic semilinear Poisson problem")
 
-  N = SMALL ? 8 : 32
+  N = SMALL ? 8 : 16
   ms = SMALL ? [2] : [2, 4, 8]
   overlap = 2
   maxiter = SMALL ? 6 : 40
