@@ -1,4 +1,4 @@
-using VariationalDD.Energies
+using EnergyMinimizingDD.Energies
 using LinearAlgebra
 using FiniteDiff
 using Gridap

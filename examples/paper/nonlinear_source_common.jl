@@ -1,6 +1,6 @@
 # Shared one-level nonlinear-source baselines and triangular partition output.
 # This remains example infrastructure: AS/RAS are comparison methods, not
-# part of the VariationalDD package solver API.
+# part of the EnergyMinimizingDD package solver API.
 
 const NONLINEAR_SOURCE_METHODS = (
   :nonlinear_as,

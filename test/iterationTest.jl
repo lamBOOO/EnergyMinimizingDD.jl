@@ -1,6 +1,6 @@
-using VariationalDD.Energies
-using VariationalDD.FEMDiscretizations
-using VariationalDD.Solvers
+using EnergyMinimizingDD.Energies
+using EnergyMinimizingDD.FEMDiscretizations
+using EnergyMinimizingDD.Solvers
 using Test
 
 function test_iteration_count(result, expected_iterations)

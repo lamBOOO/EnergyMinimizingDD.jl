@@ -1,7 +1,7 @@
-module VariationalDD
+module EnergyMinimizingDD
 
 include("./Energies.jl")
 include("./FEMDiscretizations.jl")
 include("./Solvers.jl")
 
-end # module
+end # module EnergyMinimizingDD

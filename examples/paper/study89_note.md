@@ -6,7 +6,7 @@ each local result into the next subdomain, giving it a serial critical path of
 `m` local solves per sweep. The history variant requires no additional local
 solves and enlarges only the small second-level problem. Study 8 additionally
 compares post-combination damping with omega = 0.25, 0.5, and 0.75.
-The stored cost is the number of local subdomain solves: one variational DD
+The stored cost is the number of local subdomain solves: one energy-minimizing DD
 sweep, one additive Schwarz stationary step, one RAS stationary step, and one
 additive-Schwarz preconditioner application each count as `m` subdomain solves.
 Figure 12 divides this work count by `m` and plots outer solves.

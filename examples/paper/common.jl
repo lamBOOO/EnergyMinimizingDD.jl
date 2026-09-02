@@ -9,9 +9,9 @@
 
 const PAPER_COMMON = true
 
-using VariationalDD.FEMDiscretizations
-using VariationalDD.Energies
-using VariationalDD.Solvers
+using EnergyMinimizingDD.FEMDiscretizations
+using EnergyMinimizingDD.Energies
+using EnergyMinimizingDD.Solvers
 using Gridap
 using GridapDistributed
 using Metis

@@ -1,6 +1,6 @@
-using VariationalDD.Energies
-using VariationalDD.FEMDiscretizations
-using VariationalDD.Solvers
+using EnergyMinimizingDD.Energies
+using EnergyMinimizingDD.FEMDiscretizations
+using EnergyMinimizingDD.Solvers
 
 N = 45
 m = 9

@@ -1,4 +1,4 @@
-name = "VariationalDD"
+name = "EnergyMinimizingDD"
 uuid = "9c6c9d9d-5f2b-4a5e-9c3d-4a7bb2f3d6af"
 version = "0.1.0"
 

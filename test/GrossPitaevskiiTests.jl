@@ -1,8 +1,8 @@
 using Test
 using LinearAlgebra
-using VariationalDD.Energies
-using VariationalDD.FEMDiscretizations
-using VariationalDD.Solvers
+using EnergyMinimizingDD.Energies
+using EnergyMinimizingDD.FEMDiscretizations
+using EnergyMinimizingDD.Solvers
 
 include(joinpath(@__DIR__, "..", "examples", "paper", "common.jl"))
 include(joinpath(@__DIR__, "..", "examples", "paper", "study10_gp.jl"))

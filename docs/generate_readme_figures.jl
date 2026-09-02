@@ -1,11 +1,11 @@
-using VariationalDD
+using EnergyMinimizingDD
 using CairoMakie
 using LinearAlgebra
 using Printf
 
-const FEM = VariationalDD.FEMDiscretizations
-const E = VariationalDD.Energies
-const S = VariationalDD.Solvers
+const FEM = EnergyMinimizingDD.FEMDiscretizations
+const E = EnergyMinimizingDD.Energies
+const S = EnergyMinimizingDD.Solvers
 
 const ASSET_DIR = joinpath(@__DIR__, "src", "assets")
 const PURPLE = RGBf(0.42, 0.27, 0.65)
@@ -202,7 +202,7 @@ function make_iteration_figure(energy, subdomains, N)
   rowsize!(fig.layout, 3, Fixed(108))
 
   save(
-    joinpath(ASSET_DIR, "variational-dd-poisson-iteration.png"),
+    joinpath(ASSET_DIR, "energy-minimizing-dd-poisson-iteration.png"),
     fig;
     px_per_unit=1.25,
   )

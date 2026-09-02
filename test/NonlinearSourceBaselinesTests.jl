@@ -1,7 +1,7 @@
 using Test
 using LinearAlgebra
 using SparseArrays
-using VariationalDD
+using EnergyMinimizingDD
 
 isdefined(Main, :PAPER_COMMON) || include("../examples/paper/common.jl")
 isdefined(Main, :NONLINEAR_SOURCE_METHODS) ||
@@ -19,7 +19,7 @@ isdefined(Main, :NONLINEAR_SOURCE_METHODS) ||
   energy_function(u) = 0.5 * dot(u, K * u) + 0.1 * sum(exp, -u) - dot(b, u)
   gradient_function(u) = K * u .- 0.1 .* exp.(-u) .- b
   hessian_function(u) = K + spdiagm(0 => 0.1 .* exp.(-u))
-  energy = VariationalDD.Energies.NonlinearEnergy(
+  energy = EnergyMinimizingDD.Energies.NonlinearEnergy(
     "tiny exponential problem",
     energy_function,
     gradient_function,

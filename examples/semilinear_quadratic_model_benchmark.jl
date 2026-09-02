@@ -14,14 +14,14 @@
 #
 #   julia --project=. examples/semilinear_quadratic_model_benchmark.jl
 
-using VariationalDD
+using EnergyMinimizingDD
 using LinearAlgebra
 using Printf
 using Statistics
 
-const FEM = VariationalDD.FEMDiscretizations
-const Energies = VariationalDD.Energies
-const Solvers = VariationalDD.Solvers
+const FEM = EnergyMinimizingDD.FEMDiscretizations
+const Energies = EnergyMinimizingDD.Energies
+const Solvers = EnergyMinimizingDD.Solvers
 
 const MODES = (
   (1.50, 1, 1),

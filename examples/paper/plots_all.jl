@@ -505,7 +505,7 @@ function fig03_evp_baseline()
   fig = Figure(size = (600, 400))
   ax = Axis(fig[1, 1]; xlabel = "iteration", ylabel = "eigenvalue error", yscale = log10)
   for (i, (method, label)) in
-      enumerate((("var_dd", "variational DD"), ("inverse_iteration", "inverse iteration")))
+      enumerate((("var_dd", "energy-minimizing DD"), ("inverse_iteration", "inverse iteration")))
     mask = (tbl.method .== method) .& (tbl.err .> 1e-13)
     add_series!(
       ax,

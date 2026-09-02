@@ -4,11 +4,11 @@ Pkg.develop(path=dirname(@__DIR__))
 Pkg.instantiate()
 
 using Documenter
-using VariationalDD
+using EnergyMinimizingDD
 
 makedocs(
-    sitename = "VariationalDD",
-    modules = [VariationalDD],
+    sitename = "EnergyMinimizingDD",
+    modules = [EnergyMinimizingDD],
     checkdocs = :none,
     format = Documenter.HTML(),
     pages = [
