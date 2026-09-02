@@ -20,6 +20,10 @@ const SEMILINEAR_SOURCE_METHODS = (
   :raspen,
   :var_dd,
   :var_dd_history,
+  :var_dd_quadratic,
+  :newton_pcg_as_1,
+  :var_dd_quadratic_history,
+  :newton_pcg_as_2,
 )
 
 "Work counters whose units remain separate because nonlinear and linear local solves are not equivalent."
@@ -192,6 +196,7 @@ function nonlinear_source_vardd(
   maxiter,
   tolerance,
   history_depth,
+  quadratic_model=false,
 )
   initial_residual = norm(Energies.gradient(energy, u0))
   u, _, energy_history, _, residuals = Solvers.var_dd(
@@ -201,10 +206,13 @@ function nonlinear_source_vardd(
     maxiter=maxiter,
     tol=tolerance * initial_residual,
     history_depth=history_depth,
+    quadratic_model=quadratic_model,
     verbose=false,
   )
+  batches = length(energy_history) - 1
   work = NonlinearSourceWork(
-    nonlinear_local_batches=length(energy_history) - 1,
+    nonlinear_local_batches=quadratic_model ? 0 : batches,
+    linear_as_batches=quadratic_model ? batches : 0,
   )
   return nonlinear_source_result(
     u,

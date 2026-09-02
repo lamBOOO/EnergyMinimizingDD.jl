@@ -41,7 +41,7 @@ function run_study11()
   end
   println("study11: manufactured cubic semilinear Poisson problem")
 
-  N = SMALL ? 8 : 16
+  N = SMALL ? 8 : 32
   ms = SMALL ? [2] : [2, 4, 8]
   overlap = 2
   maxiter = SMALL ? 6 : 40
@@ -170,14 +170,41 @@ function run_study11()
           tolerance=tolerance,
           history_depth=4,
         )
-      elseif method in (:newton_pcg_as_4, :newton_pcg_as_8)
+      elseif method == :newton_pcg_as_8
         nonlinear_source_newton_pcg_as(
           energy,
           dofspar;
           u0=initial,
           maxiter=maxiter,
           tolerance=tolerance,
-          inner_iterations=(method == :newton_pcg_as_4 ? 4 : 8),
+          inner_iterations=8,
+        )
+      elseif method == :newton_pcg_as_4
+        nonlinear_source_newton_pcg_as(
+          energy,
+          dofspar;
+          u0=initial,
+          maxiter=maxiter,
+          tolerance=tolerance,
+          inner_iterations=4,
+        )
+      elseif method == :newton_pcg_as_2
+        nonlinear_source_newton_pcg_as(
+          energy,
+          dofspar;
+          u0=initial,
+          maxiter=maxiter,
+          tolerance=tolerance,
+          inner_iterations=2,
+        )
+      elseif method == :newton_pcg_as_1
+        nonlinear_source_newton_pcg_as(
+          energy,
+          dofspar;
+          u0=initial,
+          maxiter=maxiter,
+          tolerance=tolerance,
+          inner_iterations=1,
         )
       elseif method == :energy_imex_pcg_as
         nonlinear_source_energy_imex_pcg_as(
@@ -213,14 +240,41 @@ function run_study11()
           inner_maxiter=SMALL ? 8 : 40,
           inner_relative_tolerance=1e-6,
         )
-      else
+      elseif method == :var_dd
         nonlinear_source_vardd(
           energy,
           dofspar;
           u0=initial,
           maxiter=maxiter,
           tolerance=tolerance,
-          history_depth=(method == :var_dd_history ? 1 : 0),
+          history_depth=0,
+        )
+      elseif method == :var_dd_history
+        nonlinear_source_vardd(
+          energy,
+          dofspar;
+          u0=initial,
+          maxiter=maxiter,
+          tolerance=tolerance,
+          history_depth=1,
+        )
+      elseif method == :var_dd_quadratic
+        nonlinear_source_vardd(
+          energy,
+          dofspar;
+          u0=initial,
+          maxiter=maxiter,
+          tolerance=tolerance,
+          history_depth=0,
+        )
+      elseif method == :var_dd_quadratic_history
+        nonlinear_source_vardd(
+          energy,
+          dofspar;
+          u0=initial,
+          maxiter=maxiter,
+          tolerance=tolerance,
+          history_depth=1,
         )
       end
 

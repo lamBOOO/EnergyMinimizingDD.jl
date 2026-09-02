@@ -30,7 +30,19 @@ the package solver API:
   PCG with the one-level additive Schwarz preconditioner, and globalizes the
   inexact Newton direction by an Armijo energy line search. The `ν=accurate`
   experiment uses a relative inner residual tolerance of `1e-10`. The main
-  comparison shows `ν=4` and `ν=8` separately.
+  comparison shows `ν=1`, `ν=2`, `ν=4`, and `ν=8` separately.
+- **quadratic EMDD** freezes the second-order Taylor model of the nonlinear
+  energy at the start of each outer sweep. Its local candidates and global
+  recombination minimize that quadratic model over the same enriched spaces
+  as plain EMDD, while stopping and convergence histories use the original
+  nonlinear energy and residual. The comparison includes both `q=1` and the
+  one-vector-history variant `q=2`.
+
+The focused figure treats standard EMDD, quadratic-model EMDD, and nRAS as
+the primary DD comparison. Newton--PCG is shown as a visually de-emphasized
+reference with quadratic convergence; its faster convergence is context rather
+than the main like-for-like comparison. Using a quadratic local model does not
+by itself give quadratic convergence to quadratic-model EMDD.
 - **energy-IMEX--PCG(AS)** is the stabilized pseudo-time linearization of
   Spicher and Wihler [SpicherWihler2026], §3.1--3.2, equations (3.1) and (3.7):
   \[
@@ -62,7 +74,8 @@ the following counters separate:
 1. parallel **nonlinear local-minimization batches** (nonlinear RAS,
    Anderson--RAS, ASPIN, RASPEN, and varDD),
 2. parallel **linear AS-solve batches** (Newton, energy-IMEX, ASPIN, and the
-   RASPEN Jacobian solve), and
+   RASPEN Jacobian solve, as well as the linear local batches of quadratic
+   EMDD), and
 3. global Jacobian/operator products.
 
 A nonlinear local minimization is not counted as one linear triangular solve.
@@ -71,7 +84,7 @@ GMRES Jacobian action then needs a parallel batch of local linearized solves.
 
 The controlled sensitivity study uses:
 
-- `m = 2, 4, 8` in the main convergence figure;
+- `m = 4, 16, 64` on the `N = 64` mesh in the main convergence figure;
 - `N = 16, 32, 64`, corresponding to `h, h/2, h/4`, with overlap layers
   `1, 2, 4` so that the physical overlap is fixed;
 - Newton inner work `ν = 1, 2, 4, 8, accurate`;
