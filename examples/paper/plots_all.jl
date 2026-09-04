@@ -2506,6 +2506,74 @@ function fig27_evp_local_work()
 end
 
 # ---------------------------------------------------------------------------
+# Fig 28: compact paper figure comparing variants of the method
+# ---------------------------------------------------------------------------
+function fig28_method_variants()
+  tbl = loadtable("study12_variants.csv")
+  methods = (
+    "emdd",
+    "memdd",
+    "remdd",
+    "emdd_multiplicity",
+    "emdd_nicolaides",
+    "remdd_nicolaides",
+  )
+  labels = Dict(
+    method => tbl.label[findfirst(tbl.method .== method)] for method in methods
+  )
+  markers = Dict(
+    "emdd" => :circle,
+    "memdd" => :star5,
+    "remdd" => :utriangle,
+    "emdd_multiplicity" => :cross,
+    "emdd_nicolaides" => :rect,
+    "remdd_nicolaides" => :diamond,
+  )
+  colors = tab10_colors(length(methods))
+  ms = sort(unique(tbl.m))
+  xmax = maximum(tbl.iteration) + 2
+  fig = Figure(; size=(PAPER_FULL_WIDTH, 350))
+  for (column, m) in enumerate(ms)
+    N = tbl.N[findfirst(tbl.m .== m)]
+    ax = Axis(
+      fig[1, column];
+      xlabel="outer sweep k",
+      ylabel=column == 1 ? "relative residual" : "",
+      yscale=log10,
+      yticks=LogTicks(collect(0:-2:-10)),
+      title="m = $m, 1/h = $N",
+      limits=((0, xmax), (5e-11, 2.0)),
+    )
+    for (index, method) in enumerate(methods)
+      mask =
+        (tbl.m .== m) .& (tbl.method .== method) .&
+        (tbl.relative_residual .> 0)
+      add_series!(
+        ax,
+        pick(tbl, :iteration, mask),
+        pick(tbl, :relative_residual, mask);
+        color=colors[index],
+        marker=markers[method],
+        markersize=5,
+      )
+    end
+  end
+  Legend(
+    fig[2, 1:length(ms)],
+    legend_line_marker_elements(
+      methods, markers; colors, markersizes=fill(5, length(methods))
+    ),
+    [labels[method] for method in methods];
+    orientation=:horizontal,
+    nbanks=2,
+    framevisible=true,
+    labelsize=12,
+  )
+  rowgap!(fig.layout, 6)
+  return savefigs(fig, "fig28_method_variants")
+end
+
+# ---------------------------------------------------------------------------
 
 function make_all_figures()
   println("plots: generating all figures from data/*.csv")
@@ -2540,6 +2608,7 @@ function make_all_figures()
   fig25_evp_linear_work()
   fig26_evp_history()
   fig27_evp_local_work()
+  fig28_method_variants()
   println("plots: done -> $(FIG_DIR)")
 end
 
