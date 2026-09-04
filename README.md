@@ -169,3 +169,7 @@ julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.test()'
 ## Project status
 
 EnergyMinimizingDD.jl is experimental research software. The implementation is covered by automated tests, but the public API may evolve before a stable release. Questions, bug reports, benchmark contributions, and focused pull requests are welcome through [GitHub Issues](https://github.com/lamBOOO/EnergyMinimizingDD.jl/issues).
+
+## Development notice
+
+AI/LLM-based tools are used to assist with coding in this repository. AI-assisted changes are reviewed and remain the responsibility of the project maintainers.
