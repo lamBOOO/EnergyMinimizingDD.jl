@@ -1262,6 +1262,157 @@ function fig14_gp_convergence()
   savefigs(fig, "fig14_gp_convergence")
 end
 
+# Paper-facing subset of Figure 14, mirroring Figures 12b and 17b. Only the
+# Henning--Jarlebring section 2.3 benchmark (kappa = 500) is shown, and q
+# counts the current iterate as the first global vector, so q=1 is plain
+# additive EMDD and q=2 adds u_{k-1}. The exact-metric GFDN variants are
+# de-emphasized because each of their iterations contains a global sparse
+# Cholesky factorization and is therefore not a cost unit equivalent to one
+# sweep of the primary comparison methods.
+function fig14b_gp_convergence_paper()
+  tbl = loadtable("study10_gp_conv.csv")
+  parts = loadtable("study10_partitions.csv")
+  solutions = loadtable("study10_gp_solutions.csv")
+  beta = maximum(tbl.beta)
+  ms = sort(unique(tbl.m))
+  primary_methods = (
+    "gp_additive",
+    "gp_additive_history",
+    "gfdn_au_as",
+    "cg_gfdn_au_as",
+  )
+  reference_methods = ("gfdn_au_exact", "cg_gfdn_au_exact")
+  methods = (primary_methods..., reference_methods...)
+  labels = Dict(
+    "gp_additive" => "EMDD (q = 1)",
+    "gp_additive_history" => "EMDD (q = 2)",
+    "gfdn_au_as" => "GFDN(aᵤ)+AS",
+    "cg_gfdn_au_as" => "CG-GFDN(aᵤ)+AS",
+    "gfdn_au_exact" => "GFDN(aᵤ), exact metric solve",
+    "cg_gfdn_au_exact" => "CG-GFDN(aᵤ), exact metric solve",
+  )
+  markers = Dict(
+    "gp_additive" => :circle,
+    "gp_additive_history" => :hexagon,
+    "gfdn_au_as" => :rect,
+    "cg_gfdn_au_as" => :utriangle,
+    "gfdn_au_exact" => :diamond,
+    "cg_gfdn_au_exact" => :cross,
+  )
+  primary_colors = tab10_colors(length(primary_methods))
+  reference_colors = [RGBf(0.50, 0.50, 0.50), RGBf(0.25, 0.25, 0.25)]
+  colors = [primary_colors..., reference_colors...]
+  linestyles = [
+    fill(:solid, length(primary_methods))...,
+    fill(:dash, length(reference_methods))...,
+  ]
+  linewidths = [
+    fill(2.8, length(primary_methods))...,
+    fill(1.8, length(reference_methods))...,
+  ]
+  markersizes = [
+    fill(MARKERSIZE, length(primary_methods))...,
+    fill(6, length(reference_methods))...,
+  ]
+  mask_beta = tbl.beta .== beta
+  positive_residuals = tbl.resnorm[mask_beta .& (tbl.resnorm .> 0)]
+  ylimits = (1e-7, maximum(positive_residuals) * 2)
+  ytick_exps = sort(
+    collect(floor(Int, log10(ylimits[2])):-2:ceil(Int, log10(ylimits[1])))
+  )
+
+  fig = Figure(size=(PAPER_FULL_WIDTH, 470))
+  Label(
+    fig[0, 1:length(ms)],
+    rich(
+      "−Δu + V u + κ|u|²u = λu  in Ω,    κ = $(Int(beta)),    ‖u‖",
+      subscript("L²(Ω)"),
+      " = 1",
+    );
+    fontsize=22,
+    font=:bold,
+  )
+  for (column, m) in enumerate(ms)
+    ax = Axis(
+      fig[1, column];
+      xlabel="outer iteration",
+      ylabel=column == 1 ? "residual norm ‖rₖ‖₂" : "",
+      title="m = $m",
+      yscale=log10,
+      yticks=LogTicks(ytick_exps),
+      limits=(nothing, ylimits),
+    )
+    for (index, method) in enumerate(methods)
+      mask = mask_beta .& (tbl.m .== m) .& (tbl.method .== method) .&
+             (tbl.resnorm .> 0)
+      add_series!(
+        ax,
+        pick(tbl, :iteration, mask),
+        logfloor(pick(tbl, :resnorm, mask));
+        label=labels[method],
+        color=colors[index],
+        linestyle=linestyles[index],
+        marker=markers[method],
+        linewidth=linewidths[index],
+        markersize=markersizes[index],
+      )
+    end
+    add_gp_solution_inset!(
+      fig[1, column], solutions, beta; halign=0.68, inset_size=0.23
+    )
+    add_partition_inset!(
+      fig[1, column],
+      parts,
+      m;
+      halign=0.99,
+      inset_size=0.23,
+      inset_title="partition",
+    )
+  end
+  Label(
+    fig[2, 1:length(ms)],
+    "Primary ground-state solver comparison";
+    fontsize=16,
+    font=:bold,
+  )
+  Legend(
+    fig[3, 1:length(ms)],
+    legend_line_marker_elements(
+      primary_methods,
+      markers;
+      colors=primary_colors,
+      linewidths=fill(2.8, length(primary_methods)),
+    ),
+    [labels[method] for method in primary_methods];
+    orientation=:horizontal,
+    nbanks=2,
+    framevisible=true,
+  )
+  Label(
+    fig[4, 1:length(ms)],
+    "Exact-metric references (non-equivalent outer work)";
+    fontsize=16,
+    font=:bold,
+  )
+  Legend(
+    fig[5, 1:length(ms)],
+    legend_line_marker_elements(
+      reference_methods,
+      markers;
+      colors=reference_colors,
+      linestyles=fill(:dash, length(reference_methods)),
+      linewidths=fill(1.8, length(reference_methods)),
+      markersizes=fill(6, length(reference_methods)),
+    ),
+    [labels[method] for method in reference_methods];
+    orientation=:horizontal,
+    nbanks=1,
+    framevisible=true,
+  )
+  rowgap!(fig.layout, 8)
+  savefigs(fig, "fig14b_gp_convergence_paper")
+end
+
 function fig16_gp_energy_gap()
   tbl = loadtable("study10_gp_conv.csv")
   parts = loadtable("study10_partitions.csv")
@@ -2374,6 +2525,7 @@ function make_all_figures()
   fig12d_poisson_weak_scaling()
   fig13_evp_cmp()
   fig14_gp_convergence()
+  fig14b_gp_convergence_paper()
   fig15_gp_ground_states()
   fig16_gp_energy_gap()
   fig17_semilinear_poisson()

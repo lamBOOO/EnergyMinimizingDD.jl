@@ -351,6 +351,23 @@ function inf_step_with_info(
   return (u=result.u, info=info)
 end
 
+"""
+    _gp_local_space(u_cur, idx_sub)
+
+Basis of the local trial space `V_i + span{u_cur}` used by the Gross--Pitaevskii
+local minimizations. The first column is the exterior part of `u_cur`, the
+remaining columns are the active coordinate vectors.
+"""
+function _gp_local_space(u_cur::Vector{Float64}, idx_sub::AbstractVector)
+  local_space = zeros(Float64, length(u_cur), 1 + length(idx_sub))
+  local_space[:, 1] .= u_cur
+  zero_out_local!(view(local_space, :, 1), idx_sub)
+  for (k, j) in pairs(idx_sub)
+    local_space[j, k+1] = 1.0
+  end
+  return local_space
+end
+
 function inf_step(
   e::Energies.GrossPitaevskiiRayleighQuotient{Float64},
   u_cur::Vector{Float64},
@@ -364,14 +381,38 @@ function inf_step(
     )
   end
 
-  n = length(u_cur)
-  local_space = zeros(Float64, n, 1 + length(idx_sub))
-  local_space[:, 1] .= u_cur
-  zero_out_local!(view(local_space, :, 1), idx_sub)
-  for (k, j) in pairs(idx_sub)
-    local_space[j, k+1] = 1.0
+  return _minimize_subspace(e, _gp_local_space(u_cur, idx_sub); initial = u_cur)
+end
+
+function inf_step_with_info(
+  e::Energies.GrossPitaevskiiRayleighQuotient{Float64},
+  u_cur::Vector{Float64},
+  idx_sub::AbstractVector;
+  collect_info::Bool=false,
+)
+  if iszero(e.beta)
+    return inf_step_with_info(
+      Energies.GeneralizedRayleighQuotient(e.K, e.M),
+      u_cur,
+      idx_sub;
+      collect_info,
+    )
   end
-  return _minimize_subspace(e, local_space; initial = u_cur)
+
+  local_space = _gp_local_space(u_cur, idx_sub)
+  stats = Ref{Any}(nothing)
+  u = _minimize_subspace(e, local_space; initial=u_cur, info_ref=stats)
+  return (
+    u=u,
+    info=(
+      dimension=size(local_space, 2),
+      iterations=stats[].iterations,
+      converged=stats[].converged,
+      residual=stats[].gradient_norm,
+      k_nnz=-1,
+      factor_nnz=-1,
+    ),
+  )
 end
 
 function inf_step(
@@ -670,6 +711,7 @@ function _minimize_subspace(
   initial::AbstractVector{Float64} = X[:, 1],
   maxiter::Int = 200,
   tol::Float64 = 1e-9,
+  info_ref::Union{Nothing,Ref} = nothing,
 )
   maxiter > 0 || throw(ArgumentError("maxiter must be positive"))
   tol > 0 || throw(ArgumentError("tol must be positive"))
@@ -709,6 +751,11 @@ function _minimize_subspace(
     ),
   )
   u = Q * Optim.minimizer(result)
+  isnothing(info_ref) || (info_ref[] = (
+    iterations=Optim.iterations(result),
+    converged=Optim.converged(result),
+    gradient_norm=Optim.g_residual(result),
+  ))
 
   # Fix the arbitrary sign for stable histories and post-processing.
   if dot(initial, e.M * u) < 0

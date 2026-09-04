@@ -294,6 +294,83 @@ function gp_cg_gfdn_au_exact_history(
   )
 end
 
+"""
+    run_study10_local_work(; ms, betas, maxiter, tol)
+
+Record the inner L-BFGS statistics of every local Gross--Pitaevskii
+minimization performed by EMDD with `q=1` and `q=2`. One outer sweep consists
+of `m` such local minimizations, which is the honest cost unit to compare
+against the `m` local *linear* solves of one AS-inexact GFDN iteration.
+"""
+function run_study10_local_work(;
+  N=SMALL ? 16 : 32,
+  ms=SMALL ? [2] : [2, 4, 8],
+  betas=SMALL ? [HJ_GP_KAPPA] : [10.0, 100.0, HJ_GP_KAPPA],
+  overlap=2,
+  maxiter=SMALL ? 10 : 30,
+  tol=1e-6,
+)
+  rows = (
+    method=String[],
+    beta=Float64[],
+    m=Int[],
+    outer_iteration=Int[],
+    subdomain=Int[],
+    dimension=Int[],
+    iterations=Int[],
+    converged=Bool[],
+  )
+  K_ref, M_ref, _, _, _, _, U_ref = hj_gp_discretization(N, 1; overlap=overlap)
+  paper_initial = hj_gp_initial_vector(U_ref, M_ref)
+
+  for m in ms
+    K, M, quartic, cubic, _, dofspar, U = hj_gp_discretization(N, m; overlap)
+    u0 = hj_gp_initial_vector(U, M)
+    for beta in betas
+      e = Energies.GrossPitaevskiiRayleighQuotient(K, M, beta, quartic, cubic)
+      for (method, history_depth) in
+          (("gp_additive", 0), ("gp_additive_history", 1))
+        stats = NamedTuple[]
+        callback = (iteration, subdomain, info) ->
+          push!(stats, merge((outer=iteration, subdomain=subdomain), info))
+        Solvers.var_dd(
+          e,
+          dofspar;
+          u0=u0,
+          maxiter=maxiter,
+          tol=tol,
+          history_depth=history_depth,
+          local_solve_callback=callback,
+          verbose=false,
+        )
+        for stat in stats
+          push!(rows.method, method)
+          push!(rows.beta, beta)
+          push!(rows.m, m)
+          push!(rows.outer_iteration, stat.outer)
+          push!(rows.subdomain, stat.subdomain)
+          push!(rows.dimension, stat.dimension)
+          push!(rows.iterations, stat.iterations)
+          push!(rows.converged, stat.converged)
+        end
+        counts = [stat.iterations for stat in stats]
+        @printf(
+          "  kappa=%5.1f m=%d %-20s sweeps=%2d local solves=%3d L-BFGS its/solve: mean=%5.1f max=%3d\n",
+          beta,
+          m,
+          method,
+          length(counts) ÷ m,
+          length(counts),
+          sum(counts) / length(counts),
+          maximum(counts),
+        )
+      end
+    end
+  end
+  savetable("study10_gp_local_work.csv", rows)
+  return rows
+end
+
 function run_study10()
   N = SMALL ? 16 : 32
   ms = SMALL ? [2] : [2, 4, 8]

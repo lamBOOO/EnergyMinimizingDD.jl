@@ -87,3 +87,14 @@ ground-state density `|u_star|^2` for `kappa=500`.
 
 The beta-zero implementation dispatches directly to the generalized linear
 Rayleigh quotient, providing an exact regression to the linear EVP algorithm.
+
+The separate `run_study10_local_work()` routine records the inner L-BFGS
+statistics of every local minimization performed by EMDD with `q=1` and `q=2`
+(`study10_gp_local_work.csv`). It is kept out of `run_study10` because it repeats
+the EMDD solves only to collect per-local-problem work. The local reduced
+problems are minimized to stagnation of the L-BFGS iteration and terminate at
+gradient norms around `1e-7`, i.e., short of the requested `g_abstol=1e-9`, so
+the reported iteration counts are an upper bound on the work a well-chosen inner
+tolerance would need. Averaged over all sweeps, one local minimization takes
+about 36, 28, and 21 inner iterations for `m=2,4,8`; the counts decrease with
+`m` because the local problems shrink.
