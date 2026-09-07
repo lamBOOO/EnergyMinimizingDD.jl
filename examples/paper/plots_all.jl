@@ -315,6 +315,50 @@ function add_semilinear_solution_inset!(
   return sax
 end
 
+function add_evp_solution_inset!(
+  figpos,
+  solutions;
+  halign=0.68,
+  valign=0.97,
+  inset_size=0.23,
+)
+  N = solutions.N[1]
+  values = solutions.value
+  sax = Axis(
+    figpos;
+    width=Relative(inset_size),
+    height=Relative(inset_size),
+    halign,
+    valign,
+    tellwidth=false,
+    tellheight=false,
+    aspect=DataAspect(),
+    limits=(0, 1, 0, 1),
+  )
+  translate!(sax.blockscene, 0, 0, 150)
+  hidedecorations!(sax)
+  hidespines!(sax)
+  heatmap!(
+    sax,
+    collect(all_nodes(N)),
+    collect(all_nodes(N)),
+    field_matrix_with_bc(values, N);
+    colormap=:viridis,
+    colorrange=(0, maximum(values)),
+  )
+  text!(
+    sax,
+    0.5,
+    0.96;
+    text="ground state",
+    align=(:center, :top),
+    fontsize=9,
+    color=:white,
+    font=:bold,
+  )
+  return sax
+end
+
 function add_triangle_partition_inset!(
   figpos,
   parts,
@@ -1101,23 +1145,27 @@ end
 # ---------------------------------------------------------------------------
 function fig13_evp_cmp()
   tbl = loadtable("study9_evp_cmp.csv")
+  solutions = loadtable("study9_evp_solution.csv")
   parts = loadtable("study9_partitions.csv")
   ms = sort(unique(tbl.m))
-  labels = Dict(
-    "var_dd" => "varDD",
-    "var_dd_history" => "varDD + history (1)",
-    "lopsd_as" => "LOPSD+AS",
-    "lobpcg_as" => "LOBPCG+AS",
-    "jd_gmres_as" => "JD–GMRES(AS)",
-    "si_lanczos_pcg_as" => "SI-Lanczos–PCG(AS)",
-  )
-  methods = (
+  primary_methods = (
     "var_dd",
     "var_dd_history",
     "lopsd_as",
     "lobpcg_as",
+  )
+  reference_methods = (
     "jd_gmres_as",
     "si_lanczos_pcg_as",
+  )
+  methods = (primary_methods..., reference_methods...)
+  labels = Dict(
+    "var_dd" => "EMDD (q = 1)",
+    "var_dd_history" => "EMDD (q = 2)",
+    "lopsd_as" => "LOPSD+AS",
+    "lobpcg_as" => "LOBPCG+AS",
+    "jd_gmres_as" => "JD–GMRES(AS)",
+    "si_lanczos_pcg_as" => "SI-Lanczos–PCG(AS)",
   )
   markers = Dict(
     "var_dd" => :circle,
@@ -1127,16 +1175,33 @@ function fig13_evp_cmp()
     "jd_gmres_as" => :diamond,
     "si_lanczos_pcg_as" => :pentagon,
   )
-  colors = tab10_colors(length(methods))
+  primary_colors = tab10_colors(length(primary_methods))
+  reference_colors = [
+    RGBf(0.45, 0.45, 0.45),
+    RGBf(0.20, 0.20, 0.20),
+  ]
+  colors = [primary_colors..., reference_colors...]
+  linestyles = [
+    fill(:solid, length(primary_methods))...,
+    fill(:dash, length(reference_methods))...,
+  ]
+  linewidths = [
+    fill(2.8, length(primary_methods))...,
+    fill(1.8, length(reference_methods))...,
+  ]
+  markersizes = [
+    fill(MARKERSIZE, length(primary_methods))...,
+    fill(6, length(reference_methods))...,
+  ]
   finite_res = tbl.relative_residual[tbl.relative_residual .> 0]
   ylims = (1e-6 * 0.5, maximum(finite_res) * 1.5)
   ytick_exps = sort(collect(floor(Int, log10(ylims[2])):-2:ceil(Int, log10(ylims[1]))))
   yticks = LogTicks(ytick_exps)
-  fig = Figure(size = (max(990, 330 * length(ms)), 390))
+  fig = Figure(size=(PAPER_FULL_WIDTH, 490))
   for (j, m) in enumerate(ms)
     ax = Axis(
       fig[1, j];
-      xlabel = "iteration",
+      xlabel = "outer iteration",
       ylabel = j == 1 ? "relative residual" : "",
       yscale = log10,
       yticks = yticks,
@@ -1154,18 +1219,63 @@ function fig13_evp_cmp()
         logfloor(pick(tbl, :relative_residual, mask));
         label = labels[method],
         color = colors[i],
+        linestyle = linestyles[i],
         marker = markers[method],
+        linewidth = linewidths[i],
+        markersize = markersizes[i],
       )
     end
-    add_partition_inset!(fig[1, j], parts, m)
+    add_evp_solution_inset!(
+      fig[1, j], solutions; halign=0.68, inset_size=0.23
+    )
+    add_partition_inset!(
+      fig[1, j],
+      parts,
+      m;
+      halign=0.99,
+      inset_size=0.23,
+      inset_title="partition",
+    )
   end
-  Legend(
+  Label(
     fig[2, 1:length(ms)],
-    legend_line_marker_elements(methods, markers; colors),
-    [labels[method] for method in methods];
+    "Primary eigensolver comparison";
+    fontsize=16,
+    font=:bold,
+  )
+  Legend(
+    fig[3, 1:length(ms)],
+    legend_line_marker_elements(
+      primary_methods,
+      markers;
+      colors=primary_colors,
+      linewidths=fill(2.8, length(primary_methods)),
+    ),
+    [labels[method] for method in primary_methods];
     orientation = :horizontal,
-    nbanks = 2,
+    nbanks = 1,
     framevisible = true,
+  )
+  Label(
+    fig[4, 1:length(ms)],
+    "Inner-solve references (non-equivalent outer work)";
+    fontsize=16,
+    font=:bold,
+  )
+  Legend(
+    fig[5, 1:length(ms)],
+    legend_line_marker_elements(
+      reference_methods,
+      markers;
+      colors=reference_colors,
+      linestyles=fill(:dash, length(reference_methods)),
+      linewidths=fill(1.8, length(reference_methods)),
+      markersizes=fill(6, length(reference_methods)),
+    ),
+    [labels[method] for method in reference_methods];
+    orientation=:horizontal,
+    nbanks=1,
+    framevisible=true,
   )
   rowgap!(fig.layout, 8)
   savefigs(fig, "fig13_evp_cmp")
