@@ -9,7 +9,11 @@ const EVP_SENSITIVITY_METHODS = (
   :var_dd_history,
   :lobpcg_as,
   :jd_gmres_as,
-  :si_lanczos_pcg_as,
+  :si_lanczos_pcg_as_2,
+  :si_lanczos_pcg_as_4,
+  :si_lanczos_pcg_as_8,
+  :si_lanczos_pcg_as_16,
+  :si_lanczos_pcg_as_32,
 )
 
 function oscillatory_diffusion(frequency; contrast=1e3)

@@ -69,12 +69,27 @@ function add_series!(
   color = nothing,
   linestyle = :solid,
   marker = :circle,
+  marker_stride = 1,
   markersize = MARKERSIZE,
+  markerstrokecolor = :transparent,
+  markerstrokewidth = 0,
   linewidth = 2.5,
 )
   c = isnothing(color) ? PALETTE[1] : color
   lines!(ax, x, y; label = label, color = c, linestyle = linestyle, linewidth = linewidth)
-  scatter!(ax, x, y; color = c, marker = marker, markersize = markersize)
+  marker_stride >= 1 || throw(ArgumentError("marker_stride must be positive"))
+  marker_indices = collect(1:marker_stride:length(x))
+  !isempty(x) && last(marker_indices) != length(x) && push!(marker_indices, length(x))
+  scatter!(
+    ax,
+    x[marker_indices],
+    y[marker_indices];
+    color = c,
+    marker = marker,
+    markersize = markersize,
+    strokecolor = markerstrokecolor,
+    strokewidth = markerstrokewidth,
+  )
 end
 
 function add_legend!(ax; position = :rt)
@@ -117,6 +132,8 @@ function legend_line_marker_elements(
   linestyles = fill(:solid, length(methods)),
   linewidths = fill(2.5, length(methods)),
   markersizes = fill(MARKERSIZE, length(methods)),
+  markerstrokecolors = fill(:transparent, length(methods)),
+  markerstrokewidths = fill(0, length(methods)),
 )
   return [
     [
@@ -129,6 +146,8 @@ function legend_line_marker_elements(
         color = colors[i],
         marker = markers[method],
         markersize = markersizes[i],
+        strokecolor = markerstrokecolors[i],
+        strokewidth = markerstrokewidths[i],
       ),
     ] for (i, method) in enumerate(methods)
   ]
@@ -1154,50 +1173,53 @@ function fig13_evp_cmp()
     "lopsd_as",
     "lobpcg_as",
   )
-  reference_methods = (
-    "jd_gmres_as",
-    "si_lanczos_pcg_as",
+  lanczos_methods = (
+    "si_lanczos_pcg_as_4",
+    "si_lanczos_pcg_as_8",
+    "si_lanczos_pcg_as_16",
   )
-  methods = (primary_methods..., reference_methods...)
+  methods = (primary_methods..., lanczos_methods...)
   labels = Dict(
     "var_dd" => "EMDD (q = 1)",
     "var_dd_history" => "EMDD (q = 2)",
     "lopsd_as" => "LOPSD+AS",
     "lobpcg_as" => "LOBPCG+AS",
-    "jd_gmres_as" => "JD–GMRES(AS)",
-    "si_lanczos_pcg_as" => "SI-Lanczos–PCG(AS)",
+    "si_lanczos_pcg_as_4" => "SI-Lanczos–PCG(AS, 4)",
+    "si_lanczos_pcg_as_8" => "SI-Lanczos–PCG(AS, 8)",
+    "si_lanczos_pcg_as_16" => "SI-Lanczos–PCG(AS, 16)",
   )
   markers = Dict(
     "var_dd" => :circle,
     "var_dd_history" => :hexagon,
     "lopsd_as" => :rect,
     "lobpcg_as" => :utriangle,
-    "jd_gmres_as" => :diamond,
-    "si_lanczos_pcg_as" => :pentagon,
+    "si_lanczos_pcg_as_4" => :cross,
+    "si_lanczos_pcg_as_8" => :xcross,
+    "si_lanczos_pcg_as_16" => :star4,
   )
   primary_colors = tab10_colors(length(primary_methods))
-  reference_colors = [
-    RGBf(0.45, 0.45, 0.45),
-    RGBf(0.20, 0.20, 0.20),
+  lanczos_colors = [
+    RGBf(level, level, level) for level in (0.55, 0.38, 0.20)
   ]
-  colors = [primary_colors..., reference_colors...]
+  lanczos_linestyles = [(:dot, :dense), (:dash, :dense), (:dashdot, :dense)]
+  colors = [primary_colors..., lanczos_colors...]
   linestyles = [
     fill(:solid, length(primary_methods))...,
-    fill(:dash, length(reference_methods))...,
+    lanczos_linestyles...,
   ]
   linewidths = [
     fill(2.8, length(primary_methods))...,
-    fill(1.8, length(reference_methods))...,
+    fill(1.8, length(lanczos_methods))...,
   ]
   markersizes = [
     fill(MARKERSIZE, length(primary_methods))...,
-    fill(6, length(reference_methods))...,
+    fill(6, length(lanczos_methods))...,
   ]
   finite_res = tbl.relative_residual[tbl.relative_residual .> 0]
   ylims = (1e-6 * 0.5, maximum(finite_res) * 1.5)
   ytick_exps = sort(collect(floor(Int, log10(ylims[2])):-2:ceil(Int, log10(ylims[1]))))
   yticks = LogTicks(ytick_exps)
-  fig = Figure(size=(PAPER_FULL_WIDTH, 490))
+  fig = Figure(size=(PAPER_FULL_WIDTH, 500))
   for (j, m) in enumerate(ms)
     ax = Axis(
       fig[1, j];
@@ -1206,7 +1228,7 @@ function fig13_evp_cmp()
       yscale = log10,
       yticks = yticks,
       title = "m = $m",
-      limits = (nothing, ylims),
+      limits = ((0, 50), ylims),
     )
     for (i, method) in enumerate(methods)
       mask =
@@ -1223,6 +1245,9 @@ function fig13_evp_cmp()
         marker = markers[method],
         linewidth = linewidths[i],
         markersize = markersizes[i],
+        marker_stride = 8,
+        markerstrokecolor = :black,
+        markerstrokewidth = 0.7,
       )
     end
     add_evp_solution_inset!(
@@ -1232,7 +1257,8 @@ function fig13_evp_cmp()
       fig[1, j],
       parts,
       m;
-      halign=0.99,
+      halign=0.98,
+      valign=0.96,
       inset_size=0.23,
       inset_title="partition",
     )
@@ -1250,6 +1276,8 @@ function fig13_evp_cmp()
       markers;
       colors=primary_colors,
       linewidths=fill(2.8, length(primary_methods)),
+      markerstrokecolors=fill(:black, length(primary_methods)),
+      markerstrokewidths=fill(0.7, length(primary_methods)),
     ),
     [labels[method] for method in primary_methods];
     orientation = :horizontal,
@@ -1258,21 +1286,23 @@ function fig13_evp_cmp()
   )
   Label(
     fig[4, 1:length(ms)],
-    "Inner-solve references (non-equivalent outer work)";
+    "SI-Lanczos references (fixed PCG iterations)";
     fontsize=16,
     font=:bold,
   )
   Legend(
     fig[5, 1:length(ms)],
     legend_line_marker_elements(
-      reference_methods,
+      lanczos_methods,
       markers;
-      colors=reference_colors,
-      linestyles=fill(:dash, length(reference_methods)),
-      linewidths=fill(1.8, length(reference_methods)),
-      markersizes=fill(6, length(reference_methods)),
+      colors=lanczos_colors,
+      linestyles=lanczos_linestyles,
+      linewidths=fill(1.8, length(lanczos_methods)),
+      markersizes=fill(6, length(lanczos_methods)),
+      markerstrokecolors=fill(:black, length(lanczos_methods)),
+      markerstrokewidths=fill(0.7, length(lanczos_methods)),
     ),
-    [labels[method] for method in reference_methods];
+    [labels[method] for method in lanczos_methods];
     orientation=:horizontal,
     nbanks=1,
     framevisible=true,

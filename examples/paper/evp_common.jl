@@ -14,7 +14,19 @@ const EVP_COMPARISON_METHODS = (
   :lopsd_as,
   :lobpcg_as,
   :jd_gmres_as,
-  :si_lanczos_pcg_as,
+  :si_lanczos_pcg_as_2,
+  :si_lanczos_pcg_as_4,
+  :si_lanczos_pcg_as_8,
+  :si_lanczos_pcg_as_16,
+  :si_lanczos_pcg_as_32,
+)
+
+const EVP_LANCZOS_PCG_ITERATIONS = Dict(
+  :si_lanczos_pcg_as_2 => 2,
+  :si_lanczos_pcg_as_4 => 4,
+  :si_lanczos_pcg_as_8 => 8,
+  :si_lanczos_pcg_as_16 => 16,
+  :si_lanczos_pcg_as_32 => 32,
 )
 
 rayleigh(K, M, x) = dot(x, K * x) / dot(x, M * x)
@@ -230,7 +242,12 @@ function evp_si_lanczos_pcg_as(
     inner_iterations += inner.iterations
     k_products += inner.k_products
     z = copy(inner.x)
-    Kz = copy(inner.Kx)
+    # Form K*z explicitly before orthogonalization. For a tightly converged
+    # inner solve, recovering it as rhs-r is accurate enough; after only a few
+    # PCG steps, however, the resulting recurrence-level roundoff can be
+    # amplified when the new direction is nearly in the current subspace.
+    Kz = K * z
+    k_products += 1
 
     # Full two-pass K-orthogonalization preserves the symmetric
     # shift-and-invert subspace despite finite-precision inner solves.
@@ -249,7 +266,14 @@ function evp_si_lanczos_pcg_as(
     KV = hcat(KV, Kz)
     MV = hcat(MV, Mz)
 
-    reduced = eigen(Symmetric(V' * KV), Symmetric(V' * MV))
+    reduced_stiffness = Symmetric(V' * KV)
+    reduced_mass = Symmetric(V' * MV)
+    # Fixed, low PCG budgets may make the inverse application almost
+    # collinear with the retained Ritz vector after a restart. Stop at the
+    # last valid Ritz pair instead of passing a numerically dependent basis
+    # to the definite generalized eigensolver.
+    (!isposdef(reduced_stiffness) || !isposdef(reduced_mass)) && break
+    reduced = eigen(reduced_stiffness, reduced_mass)
     coefficient = reduced.vectors[:, 1]
     x = V * coefficient
     Kx = KV * coefficient
@@ -607,15 +631,18 @@ function evp_method_result(
       inner_maxiter=SMALL ? 8 : 20,
       restart_dimension=20,
     )
-  elseif method == :si_lanczos_pcg_as
+  elseif haskey(EVP_LANCZOS_PCG_ITERATIONS, method)
     return evp_si_lanczos_pcg_as(
       K,
       M,
       schwarz;
       maxiter,
       relative_tolerance,
-      inner_relative_tolerance=1e-10,
-      inner_maxiter=SMALL ? 80 : 500,
+      # These are deliberately fixed-work applications of PCG(AS), not
+      # accurate inner solves. Otherwise AS is hidden inside an effectively
+      # exact shift-and-invert operation and is not a meaningful baseline.
+      inner_relative_tolerance=0.0,
+      inner_maxiter=EVP_LANCZOS_PCG_ITERATIONS[method],
       restart_dimension=20,
     )
   end

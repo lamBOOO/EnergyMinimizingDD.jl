@@ -78,10 +78,11 @@ isdefined(Main, :EVP_COMMON) ||
       K,
       M,
       schwarz;
-      maxiter=20,
+      maxiter=50,
       relative_tolerance=1e-6,
-      inner_maxiter=100,
-      restart_dimension=12,
+      inner_relative_tolerance=0.0,
+      inner_maxiter=8,
+      restart_dimension=20,
     ),
   )
   for (method, result) in results
@@ -91,6 +92,21 @@ isdefined(Main, :EVP_COMMON) ||
     @test all(isfinite, result.u)
     method in (:jd, :si_lanczos) &&
       @test last(result.history).linear_as_batches > length(result.history) - 1
+  end
+  @test all(stat -> stat.iterations == 8, results[:si_lanczos].inner_stats)
+
+  for (method, iterations) in EVP_LANCZOS_PCG_ITERATIONS
+    fixed_work = evp_method_result(
+      method,
+      K,
+      M,
+      subdomains,
+      schwarz;
+      maxiter=1,
+      relative_tolerance=1e-6,
+    )
+    @test only(fixed_work.inner_stats).iterations == iterations
+    @test !only(fixed_work.inner_stats).converged
   end
 
   local_info = NamedTuple[]

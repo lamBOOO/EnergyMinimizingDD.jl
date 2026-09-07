@@ -104,10 +104,10 @@ the same M-normalized initial vector and stops on the same true residual
 reduction. Figure 13 compares varDD, varDD with one previous iterate, LOPSD+AS,
 LOBPCG+AS [Knyazev2001], Jacobi--Davidson with an AS-preconditioned flexible
 GMRES correction solve [SleijpenVanDerVorst1996, GensebergerEtAl2010], and
-shift-and-invert Lanczos with accurate PCG(AS) applications
-[Simoncini2005]. The last method applies `K^{-1}*M` with inner relative
-tolerance `1e-10`; it is therefore an intentionally expensive classical
-reference rather than a one-AS-application method.
+five inexact shift-and-invert Lanczos variants [Simoncini2005]. To expose the
+effect and cost of the AS preconditioner, those variants use exactly 2, 4, 8,
+16, or 32 PCG(AS) iterations per inverse application rather than solving each
+inner system to a tight tolerance.
 
 The eigenproblem work counters remain deliberately non-equivalent:
 
