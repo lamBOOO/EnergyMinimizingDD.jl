@@ -95,6 +95,20 @@ isdefined(Main, :EVP_COMMON) ||
   end
   @test all(stat -> stat.iterations == 8, results[:si_lanczos].inner_stats)
 
+  for (method, iterations) in EVP_JD_GMRES_ITERATIONS
+    fixed_work = evp_method_result(
+      method,
+      K,
+      M,
+      subdomains,
+      schwarz;
+      maxiter=1,
+      relative_tolerance=1e-6,
+    )
+    @test only(fixed_work.inner_stats).iterations == iterations
+    @test !only(fixed_work.inner_stats).converged
+  end
+
   for (method, iterations) in EVP_LANCZOS_PCG_ITERATIONS
     fixed_work = evp_method_result(
       method,

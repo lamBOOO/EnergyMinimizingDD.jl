@@ -13,12 +13,20 @@ const EVP_COMPARISON_METHODS = (
   :var_dd_history,
   :lopsd_as,
   :lobpcg_as,
-  :jd_gmres_as,
+  :jd_gmres_as_1,
+  :jd_gmres_as_2,
+  :jd_gmres_as_4,
   :si_lanczos_pcg_as_2,
   :si_lanczos_pcg_as_4,
   :si_lanczos_pcg_as_8,
   :si_lanczos_pcg_as_16,
   :si_lanczos_pcg_as_32,
+)
+
+const EVP_JD_GMRES_ITERATIONS = Dict(
+  :jd_gmres_as_1 => 1,
+  :jd_gmres_as_2 => 2,
+  :jd_gmres_as_4 => 4,
 )
 
 const EVP_LANCZOS_PCG_ITERATIONS = Dict(
@@ -629,6 +637,19 @@ function evp_method_result(
       relative_tolerance,
       inner_relative_tolerance=1e-2,
       inner_maxiter=SMALL ? 8 : 20,
+      restart_dimension=20,
+    )
+  elseif haskey(EVP_JD_GMRES_ITERATIONS, method)
+    return evp_jd_gmres_as(
+      K,
+      M,
+      schwarz;
+      maxiter,
+      relative_tolerance,
+      # Fixed-work FGMRES(AS) correction solves, directly comparable across
+      # the prescribed iteration budgets.
+      inner_relative_tolerance=0.0,
+      inner_maxiter=EVP_JD_GMRES_ITERATIONS[method],
       restart_dimension=20,
     )
   elseif haskey(EVP_LANCZOS_PCG_ITERATIONS, method)
