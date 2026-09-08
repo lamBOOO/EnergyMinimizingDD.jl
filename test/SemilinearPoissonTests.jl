@@ -1,6 +1,7 @@
 using Test
 using LinearAlgebra
 using EnergyMinimizingDD
+using Gridap
 
 const SPFEM = EnergyMinimizingDD.FEMDiscretizations
 const SPEnergies = EnergyMinimizingDD.Energies
@@ -24,6 +25,30 @@ const SPSolvers = EnergyMinimizingDD.Solvers
       "semilinear test", ea, ga, ha, ndofs
     )
     return energy, subdomains, core, U, K, initial
+  end
+
+  @testset "graded L-shaped model and custom semilinear mesh" begin
+    model = SPFEM.FEM_LShapeModel(2; grading=0.4)
+    @test num_cells(model) == 24
+    @test_throws ArgumentError SPFEM.FEM_LShapeModel(0)
+    @test_throws ArgumentError SPFEM.FEM_LShapeModel(2; grading=1.0)
+
+    result = SPFEM.FEM_SemilinearPoisson(
+      2,
+      2;
+      potential=s -> s^2 / 2,
+      potential_gradient=s -> s,
+      potential_hessian=s -> 1.0,
+      forcing=x -> 1.0,
+      overlap=1,
+      model=model,
+    )
+    _, _, _, subdomains, _, ndofs, stiffness, initial, core = result
+    @test ndofs == 5
+    @test size(stiffness) == (ndofs, ndofs)
+    @test length(initial) == ndofs
+    @test sort(unique(vcat(subdomains...))) == collect(1:ndofs)
+    @test sort(unique(vcat(core...))) == collect(1:ndofs)
   end
 
   @testset "analytic exponential derivatives and convexity" begin

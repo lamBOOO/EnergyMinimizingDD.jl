@@ -15,6 +15,7 @@ const SEMILINEAR_MODES = (
   (0.35, 3, 2),
 )
 const SEMILINEAR_BETA = 1.0
+const SEMILINEAR_BETAS = (1.0, 10.0, 100.0)
 
 semilinear_exact(x) = sum(
   coefficient * sinpi(kx * x[1]) * sinpi(ky * x[2]) for
@@ -36,8 +37,12 @@ function run_study11()
     "study11_semilinear_work.csv",
   )
   if !needs_run(files...)
-    println("study11: cached, skipping")
-    return
+    cached = loadtable(files[1])
+    if hasproperty(cached, :beta) &&
+       sort(unique(cached.beta)) == collect(SEMILINEAR_BETAS)
+      println("study11: cached, skipping")
+      return
+    end
   end
   println("study11: manufactured cubic semilinear Poisson problem")
 
@@ -48,6 +53,7 @@ function run_study11()
   tolerance = SMALL ? 1e-6 : 1e-7
 
   convergence = (
+    beta=Float64[],
     m=Int[],
     method=String[],
     outer=Int[],
@@ -55,6 +61,7 @@ function run_study11()
     relative_residual=Float64[],
   )
   summary = (
+    beta=Float64[],
     m=Int[],
     method=String[],
     outer_iterations=Int[],
@@ -63,6 +70,7 @@ function run_study11()
     relative_nodal_error=Float64[],
   )
   work = (
+    beta=Float64[],
     m=Int[],
     method=String[],
     outer_iterations=Int[],
@@ -72,6 +80,8 @@ function run_study11()
   )
   solutions = (N=Int[], idx=Int[], value=Float64[])
 
+  for beta in SEMILINEAR_BETAS
+    forcing(x) = semilinear_minus_laplacian(x) + beta * semilinear_exact(x)^3
   energy_assembler,
   gradient_assembler,
   hessian_assembler,
@@ -82,10 +92,10 @@ function run_study11()
   initial = FEMDiscretizations.FEM_SemilinearPoisson(
     N,
     first(ms);
-    potential=s -> SEMILINEAR_BETA * s^4 / 4,
-    potential_gradient=s -> SEMILINEAR_BETA * s^3,
-    potential_hessian=s -> 3 * SEMILINEAR_BETA * s^2,
-    forcing=semilinear_forcing,
+    potential=s -> beta * s^4 / 4,
+    potential_gradient=s -> beta * s^3,
+    potential_hessian=s -> 3 * beta * s^2,
+    forcing=forcing,
     overlap=overlap,
     quadrature_degree=8,
     initial_guess=x -> 0.0,
@@ -113,13 +123,16 @@ function run_study11()
 
   exact_fe = interpolate_everywhere(semilinear_exact, U)
   exact_values = collect(get_free_dof_values(exact_fe))
-  for (index, value) in enumerate(exact_values)
-    push!(solutions.N, N)
-    push!(solutions.idx, index)
-    push!(solutions.value, value)
+  if beta == first(SEMILINEAR_BETAS)
+    for (index, value) in enumerate(exact_values)
+      push!(solutions.N, N)
+      push!(solutions.idx, index)
+      push!(solutions.value, value)
+    end
   end
 
   for m in ms
+    @info m
     energy_assembler,
     gradient_assembler,
     hessian_assembler,
@@ -132,15 +145,16 @@ function run_study11()
     mass = FEMDiscretizations.FEM_SemilinearPoisson(
       N,
       m;
-      potential=s -> SEMILINEAR_BETA * s^4 / 4,
-      potential_gradient=s -> SEMILINEAR_BETA * s^3,
-      potential_hessian=s -> 3 * SEMILINEAR_BETA * s^2,
-      forcing=semilinear_forcing,
+      potential=s -> beta * s^4 / 4,
+      potential_gradient=s -> beta * s^3,
+      potential_hessian=s -> 3 * beta * s^2,
+      forcing=forcing,
       overlap=overlap,
       quadrature_degree=8,
       initial_guess=x -> 0.0,
       return_mass_matrix=true,
     )
+    @info "  ndofs = $ndofs, core_ndofs = $(length(core_dofspar))"
     energy = Energies.NonlinearEnergy(
       "cubic semilinear Poisson",
       energy_assembler,
@@ -150,7 +164,7 @@ function run_study11()
     )
 
     for method in SEMILINEAR_SOURCE_METHODS
-      result = if method in (:nonlinear_as, :nonlinear_ras)
+      @time result = if method in (:nonlinear_as, :nonlinear_ras)
         nonlinear_source_schwarz_baseline(
           energy,
           dofspar;
@@ -282,6 +296,7 @@ function run_study11()
 
       initial_residual = result.residual_history[1]
       for outer in eachindex(result.energy_history)
+        push!(convergence.beta, beta)
         push!(convergence.m, m)
         push!(convergence.method, string(method))
         push!(convergence.outer, outer - 1)
@@ -295,6 +310,7 @@ function run_study11()
         )
       end
 
+      push!(summary.beta, beta)
       push!(summary.m, m)
       push!(summary.method, string(method))
       push!(summary.outer_iterations, length(result.energy_history) - 1)
@@ -310,6 +326,7 @@ function run_study11()
         summary.relative_nodal_error,
         norm(result.u - exact_values) / norm(exact_values),
       )
+      push!(work.beta, beta)
       push!(work.m, m)
       push!(work.method, string(method))
       push!(work.outer_iterations, length(result.energy_history) - 1)
@@ -317,7 +334,8 @@ function run_study11()
       push!(work.linear_as_batches, result.linear_as_batches)
       push!(work.global_jacobian_products, result.global_jacobian_products)
       @printf(
-        "  m = %d, %-21s: %2d outer, relres %.2e, nodal error %.2e\n",
+        "  beta = %.0f, m = %d, %-21s: %2d outer, relres %.2e, nodal error %.2e\n",
+        beta,
         m,
         string(method),
         summary.outer_iterations[end],
@@ -325,6 +343,7 @@ function run_study11()
         summary.relative_nodal_error[end],
       )
     end
+  end
   end
 
   savetable("study11_semilinear_conv.csv", convergence)

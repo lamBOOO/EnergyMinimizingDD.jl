@@ -155,6 +155,7 @@ The two-level construction is unchanged: both the local and global subproblems m
 - [Getting started and package overview](docs/src/index.md)
 - [API reference](docs/src/api.md)
 - [Example programs and notebooks](examples)
+- [Section 6.1 semilinear L-shaped Fig. 17b study](examples/paper/study11b_semilinear_l_shape.jl)
 - [Benchmark methodology and fairness conventions](examples/paper/study89_note.md)
 - [Reusable benchmark references](examples/paper/references.bib)
 

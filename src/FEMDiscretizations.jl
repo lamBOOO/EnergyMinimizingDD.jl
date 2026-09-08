@@ -162,14 +162,70 @@ function FEM_GrossPitaevskii(
   return K, M, quartic, cubic_gradient, density_matrix, dofspar, U
 end
 
+"""
+    FEM_LShapeModel(N; grading=0.0)
+
+Build a triangular mesh of
+
+    (-1,1)^2 \\ ([-1,0] x [0,1])
+
+with `N` cells per unit length. For `0 <= grading < 1`, vertices are moved
+toward the re-entrant corner by the radial-in-the-max-norm map
+`x -> x*norm(x,Inf)^(grading/(1-grading))`. Thus local mesh widths near the
+origin scale like `h*r^grading`. In particular, `grading=0.4` uses the same
+corner-grading exponent as Spicher--Wihler (2026), Section 6.1.
+"""
+function FEM_LShapeModel(N::Int; grading::Real = 0.0)
+  N > 0 || throw(ArgumentError("N must be positive"))
+  0 <= grading < 1 || throw(ArgumentError(
+    "grading must satisfy 0 <= grading < 1",
+  ))
+
+  background = CartesianDiscreteModel(
+    (-1.0, 1.0, -1.0, 1.0),
+    (2N, 2N);
+    isperiodic = (false, false),
+  )
+  cell_coordinates = get_cell_coordinates(get_grid(background))
+  keep_cell = map(cell_coordinates) do coordinates
+    center = sum(coordinates) / length(coordinates)
+    !(center[1] < 0 && center[2] > 0)
+  end
+  portion = Gridap.Geometry.DiscreteModelPortion(background, keep_cell)
+  triangular = simplexify(portion)
+
+  old_grid = get_grid(triangular)
+  exponent = grading / (1 - grading)
+  grade(point) = begin
+    radius = max(abs(point[1]), abs(point[2]))
+    iszero(radius) ? point : point * radius^exponent
+  end
+  grid = Gridap.Geometry.UnstructuredGrid(
+    grade.(Gridap.Geometry.get_node_coordinates(old_grid)),
+    Gridap.Geometry.get_cell_node_ids(old_grid),
+    Gridap.Geometry.get_reffes(old_grid),
+    Gridap.Geometry.get_cell_type(old_grid),
+  )
+  topology = Gridap.Geometry.UnstructuredGridTopology(grid)
+  # Rebuild the labels after removing the upper-left quadrant. Restricting
+  # the background labels alone would leave the two new cut edges unmarked.
+  labels = Gridap.Geometry.FaceLabeling(topology)
+  return Gridap.Geometry.UnstructuredDiscreteModel(grid, topology, labels)
+end
+
 "Build the common triangular P1 space and METIS core/overlap partitions."
-function _partitioned_triangular_p1_space(N::Int, m::Int, overlap::Int)
+function _partitioned_triangular_p1_space(
+  N::Int,
+  m::Int,
+  overlap::Int;
+  model = nothing,
+)
   m > 0 || throw(ArgumentError("m must be positive"))
   overlap >= 0 || throw(ArgumentError("overlap must be nonnegative"))
 
-  model = simplexify(CartesianDiscreteModel(
+  model = isnothing(model) ? simplexify(CartesianDiscreteModel(
     (0, 1.0, 0, 1.0), (N, N); isperiodic = (false, false)
-  ))
+  )) : model
   reffe = ReferenceFE(lagrangian, Float64, 1)
   V = TestFESpace(model, reffe, dirichlet_tags = ["boundary"])
   U = TrialFESpace(V, 0)
@@ -200,7 +256,8 @@ end
     FEM_SemilinearPoisson(N, m=9; potential, potential_gradient,
                           potential_hessian, forcing=x->1.0, overlap=2,
                           quadrature_degree=6, initial_guess=x->0.0,
-                          return_mass_matrix=false)
+                          return_mass_matrix=false, model=nothing,
+                          quadrature_rule=nothing)
 
 Assemble the triangular P1 discretization of the generic semilinear energy
 
@@ -212,7 +269,12 @@ assemblers use an analytic residual and sparse Hessian. Local overlapping DOFs
 and the original METIS core DOFs are returned in the result tuple. With
 `return_mass_matrix=true`, the consistent mass matrix
 is appended to the return tuple; this supports stabilized pseudo-time
-linearizations without changing the common nine-value interface.
+linearizations without changing the common nine-value interface. Pass a
+two-dimensional Gridap `model` to assemble on a mesh other than the default
+unit-square mesh; [`FEM_LShapeModel`](@ref) supplies the model used by the
+Section 6.1 example. A Gridap `quadrature_rule` overrides
+`quadrature_degree`, allowing that example to use the paper's edge-midpoint
+triangle rule exactly.
 """
 function FEM_SemilinearPoisson(
   N::Int,
@@ -225,13 +287,17 @@ function FEM_SemilinearPoisson(
     quadrature_degree::Int = 6,
     initial_guess::I = (x -> 0.0),
     return_mass_matrix::Bool = false,
+    model = nothing,
+    quadrature_rule = nothing,
 ) where {V<:Function,DV<:Function,DDV<:Function,F<:Function,I<:Function}
   quadrature_degree > 0 ||
     throw(ArgumentError("quadrature_degree must be positive"))
 
-  setup = _partitioned_triangular_p1_space(N, m, overlap)
+  setup = _partitioned_triangular_p1_space(N, m, overlap; model=model)
   Vh, Uh, omega = setup.V, setup.U, setup.omega
-  dOmega = Measure(omega, quadrature_degree)
+  dOmega = isnothing(quadrature_rule) ?
+           Measure(omega, quadrature_degree) :
+           Measure(omega, quadrature_rule)
   ndofs = setup.ndofs
   dirichlet_values = get_dirichlet_dof_values(Uh)
   caches = [
