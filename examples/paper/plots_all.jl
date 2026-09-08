@@ -36,7 +36,7 @@ set_theme!(
 )
 
 const PALETTE = Makie.wong_colors()
-const MARKERSIZE = 8
+const MARKERSIZE = 10
 
 """
     tab10_colors(n)
@@ -69,12 +69,27 @@ function add_series!(
   color = nothing,
   linestyle = :solid,
   marker = :circle,
+  marker_stride = 1,
   markersize = MARKERSIZE,
+  markerstrokecolor = :transparent,
+  markerstrokewidth = 0,
   linewidth = 2.5,
 )
   c = isnothing(color) ? PALETTE[1] : color
   lines!(ax, x, y; label = label, color = c, linestyle = linestyle, linewidth = linewidth)
-  scatter!(ax, x, y; color = c, marker = marker, markersize = markersize)
+  marker_stride >= 1 || throw(ArgumentError("marker_stride must be positive"))
+  marker_indices = collect(1:marker_stride:length(x))
+  !isempty(x) && last(marker_indices) != length(x) && push!(marker_indices, length(x))
+  scatter!(
+    ax,
+    x[marker_indices],
+    y[marker_indices];
+    color = c,
+    marker = marker,
+    markersize = markersize,
+    strokecolor = markerstrokecolor,
+    strokewidth = markerstrokewidth,
+  )
 end
 
 function add_legend!(ax; position = :rt)
@@ -117,6 +132,8 @@ function legend_line_marker_elements(
   linestyles = fill(:solid, length(methods)),
   linewidths = fill(2.5, length(methods)),
   markersizes = fill(MARKERSIZE, length(methods)),
+  markerstrokecolors = fill(:transparent, length(methods)),
+  markerstrokewidths = fill(0, length(methods)),
 )
   return [
     [
@@ -129,6 +146,8 @@ function legend_line_marker_elements(
         color = colors[i],
         marker = markers[method],
         markersize = markersizes[i],
+        strokecolor = markerstrokecolors[i],
+        strokewidth = markerstrokewidths[i],
       ),
     ] for (i, method) in enumerate(methods)
   ]
@@ -321,6 +340,7 @@ function add_evp_solution_inset!(
   halign=0.68,
   valign=0.97,
   inset_size=0.23,
+  inset_title="ground state",
 )
   N = solutions.N[1]
   values = solutions.value
@@ -350,7 +370,7 @@ function add_evp_solution_inset!(
     sax,
     0.5,
     0.96;
-    text="ground state",
+    text=inset_title,
     align=(:center, :top),
     fontsize=9,
     color=:white,
@@ -1154,50 +1174,69 @@ function fig13_evp_cmp()
     "lopsd_as",
     "lobpcg_as",
   )
-  reference_methods = (
-    "jd_gmres_as",
-    "si_lanczos_pcg_as",
+  jd_methods = (
+    "jd_gmres_as_1",
+    "jd_gmres_as_2",
+    "jd_gmres_as_4",
   )
-  methods = (primary_methods..., reference_methods...)
+  lanczos_methods = (
+    "si_lanczos_pcg_as_8",
+    "si_lanczos_pcg_as_16",
+    "si_lanczos_pcg_as_32",
+  )
+  methods = (primary_methods..., jd_methods..., lanczos_methods...)
   labels = Dict(
     "var_dd" => "EMDD (q = 1)",
     "var_dd_history" => "EMDD (q = 2)",
     "lopsd_as" => "LOPSD+AS",
     "lobpcg_as" => "LOBPCG+AS",
-    "jd_gmres_as" => "JD–GMRES(AS)",
-    "si_lanczos_pcg_as" => "SI-Lanczos–PCG(AS)",
+    "jd_gmres_as_1" => "JD-GMRES(AS, 1)",
+    "jd_gmres_as_2" => "JD-GMRES(AS, 2)",
+    "jd_gmres_as_4" => "JD-GMRES(AS, 4)",
+    "si_lanczos_pcg_as_8" => "SI-Lanczos-PCG(AS, 8)",
+    "si_lanczos_pcg_as_16" => "SI-Lanczos-PCG(AS, 16)",
+    "si_lanczos_pcg_as_32" => "SI-Lanczos-PCG(AS, 32)",
   )
   markers = Dict(
     "var_dd" => :circle,
     "var_dd_history" => :hexagon,
     "lopsd_as" => :rect,
     "lobpcg_as" => :utriangle,
-    "jd_gmres_as" => :diamond,
-    "si_lanczos_pcg_as" => :pentagon,
+    "jd_gmres_as_1" => :diamond,
+    "jd_gmres_as_2" => :pentagon,
+    "jd_gmres_as_4" => :diamond,
+    "si_lanczos_pcg_as_8" => :cross,
+    "si_lanczos_pcg_as_16" => :xcross,
+    "si_lanczos_pcg_as_32" => :star4,
   )
   primary_colors = tab10_colors(length(primary_methods))
-  reference_colors = [
-    RGBf(0.45, 0.45, 0.45),
-    RGBf(0.20, 0.20, 0.20),
+  jd_colors = fill(:purple, length(jd_methods))
+  jd_linestyles = [(:dot, :dense), (:dash, :dense), (:dashdot, :dense)]
+  lanczos_colors = [
+    RGBf(level, level, level) for level in (0.55, 0.38, 0.20)
   ]
-  colors = [primary_colors..., reference_colors...]
+  lanczos_linestyles = [(:dot, :dense), (:dash, :dense), (:dashdot, :dense)]
+  colors = [primary_colors..., jd_colors..., lanczos_colors...]
   linestyles = [
     fill(:solid, length(primary_methods))...,
-    fill(:dash, length(reference_methods))...,
+    jd_linestyles...,
+    lanczos_linestyles...,
   ]
   linewidths = [
     fill(2.8, length(primary_methods))...,
-    fill(1.8, length(reference_methods))...,
+    fill(1.8, length(jd_methods))...,
+    fill(1.8, length(lanczos_methods))...,
   ]
   markersizes = [
     fill(MARKERSIZE, length(primary_methods))...,
-    fill(6, length(reference_methods))...,
+    fill(MARKERSIZE, length(jd_methods))...,
+    fill(MARKERSIZE, length(lanczos_methods))...,
   ]
   finite_res = tbl.relative_residual[tbl.relative_residual .> 0]
   ylims = (1e-6 * 0.5, maximum(finite_res) * 1.5)
   ytick_exps = sort(collect(floor(Int, log10(ylims[2])):-2:ceil(Int, log10(ylims[1]))))
   yticks = LogTicks(ytick_exps)
-  fig = Figure(size=(PAPER_FULL_WIDTH, 490))
+  fig = Figure(size=(PAPER_FULL_WIDTH, 500))
   for (j, m) in enumerate(ms)
     ax = Axis(
       fig[1, j];
@@ -1206,7 +1245,7 @@ function fig13_evp_cmp()
       yscale = log10,
       yticks = yticks,
       title = "m = $m",
-      limits = (nothing, ylims),
+      limits = ((0, 50), ylims),
     )
     for (i, method) in enumerate(methods)
       mask =
@@ -1223,18 +1262,27 @@ function fig13_evp_cmp()
         marker = markers[method],
         linewidth = linewidths[i],
         markersize = markersizes[i],
+        marker_stride = 8,
+        markerstrokecolor = :black,
+        markerstrokewidth = 0.7,
       )
     end
     add_evp_solution_inset!(
-      fig[1, j], solutions; halign=0.68, inset_size=0.23
+      fig[1, j],
+      solutions;
+      halign=0.77,
+      valign=0.98,
+      inset_size=0.25,
+      inset_title="uₕ",
     )
     add_partition_inset!(
       fig[1, j],
       parts,
       m;
-      halign=0.99,
-      inset_size=0.23,
-      inset_title="partition",
+      halign=1.03,
+      valign=0.98,
+      inset_size=0.25,
+      inset_title="Ωᵢ",
     )
   end
   Label(
@@ -1248,8 +1296,11 @@ function fig13_evp_cmp()
     legend_line_marker_elements(
       primary_methods,
       markers;
+      markersizes=fill(MARKERSIZE, length(primary_methods)),
       colors=primary_colors,
       linewidths=fill(2.8, length(primary_methods)),
+      markerstrokecolors=fill(:black, length(primary_methods)),
+      markerstrokewidths=fill(0.7, length(primary_methods)),
     ),
     [labels[method] for method in primary_methods];
     orientation = :horizontal,
@@ -1258,21 +1309,46 @@ function fig13_evp_cmp()
   )
   Label(
     fig[4, 1:length(ms)],
-    "Inner-solve references (non-equivalent outer work)";
+    "JD-GMRES references (fixed GMRES iterations)";
     fontsize=16,
     font=:bold,
   )
   Legend(
     fig[5, 1:length(ms)],
     legend_line_marker_elements(
-      reference_methods,
+      jd_methods,
       markers;
-      colors=reference_colors,
-      linestyles=fill(:dash, length(reference_methods)),
-      linewidths=fill(1.8, length(reference_methods)),
-      markersizes=fill(6, length(reference_methods)),
+      markersizes=fill(MARKERSIZE, length(jd_methods)),
+      colors=jd_colors,
+      linestyles=jd_linestyles,
+      linewidths=fill(1.8, length(jd_methods)),
+      markerstrokecolors=fill(:black, length(jd_methods)),
+      markerstrokewidths=fill(0.7, length(jd_methods)),
     ),
-    [labels[method] for method in reference_methods];
+    [labels[method] for method in jd_methods];
+    orientation=:horizontal,
+    nbanks=1,
+    framevisible=true,
+  )
+  Label(
+    fig[6, 1:length(ms)],
+    "SI-Lanczos references (fixed PCG iterations)";
+    fontsize=16,
+    font=:bold,
+  )
+  Legend(
+    fig[7, 1:length(ms)],
+    legend_line_marker_elements(
+      lanczos_methods,
+      markers;
+      markersizes=fill(MARKERSIZE, length(lanczos_methods)),
+      colors=lanczos_colors,
+      linestyles=lanczos_linestyles,
+      linewidths=fill(1.8, length(lanczos_methods)),
+      markerstrokecolors=fill(:black, length(lanczos_methods)),
+      markerstrokewidths=fill(0.7, length(lanczos_methods)),
+    ),
+    [labels[method] for method in lanczos_methods];
     orientation=:horizontal,
     nbanks=1,
     framevisible=true,
@@ -1674,18 +1750,18 @@ function fig17_semilinear_poisson()
   labels = Dict(
     "nonlinear_as" => "nAS + optimal damping",
     "nonlinear_ras" => "nRAS + optimal damping",
-    "anderson_ras" => "Anderson–RAS (q = 4)",
-    "newton_pcg_as_4" => "Newton–PCG(AS, 4)",
-    "newton_pcg_as_8" => "Newton–PCG(AS, 8)",
-    "energy_imex_pcg_as" => "energy-IMEX–PCG(AS), Δt = 1",
+    "anderson_ras" => "Anderson-RAS (q = 4)",
+    "newton_pcg_as_4" => "Newton-PCG(AS, 4)",
+    "newton_pcg_as_8" => "Newton-PCG(AS, 8)",
+    "energy_imex_pcg_as" => "energy-IMEX-PCG(AS), Δt = 1",
     "aspin" => "ASPIN",
     "raspen" => "RASPEN",
     "var_dd" => "varDD",
     "var_dd_history" => "varDD + history (1)",
     "var_dd_quadratic" => "quadratic-model varDD",
-    "newton_pcg_as_1" => "Newton–PCG(AS, 1)",
+    "newton_pcg_as_1" => "Newton-PCG(AS, 1)",
     "var_dd_quadratic_history" => "quadratic-model varDD + history (1)",
-    "newton_pcg_as_2" => "Newton–PCG(AS, 2)",
+    "newton_pcg_as_2" => "Newton-PCG(AS, 2)",
   )
   markers = Dict(
     "nonlinear_as" => :circle,
@@ -1796,10 +1872,10 @@ function fig17b_semilinear_poisson_paper()
     "var_dd_quadratic" => "quadratic EMDD (q = 1)",
     "var_dd_quadratic_history" => "quadratic EMDD (q = 2)",
     "nonlinear_ras" => "nRAS + optimal damping",
-    "newton_pcg_as_1" => "Newton–PCG(AS, 1)",
-    "newton_pcg_as_2" => "Newton–PCG(AS, 2)",
-    "newton_pcg_as_4" => "Newton–PCG(AS, 4)",
-    "newton_pcg_as_8" => "Newton–PCG(AS, 8)",
+    "newton_pcg_as_1" => "Newton-PCG(AS, 1)",
+    "newton_pcg_as_2" => "Newton-PCG(AS, 2)",
+    "newton_pcg_as_4" => "Newton-PCG(AS, 4)",
+    "newton_pcg_as_8" => "Newton-PCG(AS, 8)",
   )
   markers = Dict(
     "var_dd" => :diamond,
@@ -2199,9 +2275,9 @@ end
 
 const SEMILINEAR_BENCHMARK_LABELS = Dict(
   "nonlinear_ras" => "nonlinear RAS",
-  "anderson_ras" => "Anderson–RAS (q = 4)",
-  "newton_pcg_as" => "Newton–PCG(AS, 4)",
-  "energy_imex_pcg_as" => "energy-IMEX–PCG(AS)",
+  "anderson_ras" => "Anderson-RAS (q = 4)",
+  "newton_pcg_as" => "Newton-PCG(AS, 4)",
+  "energy_imex_pcg_as" => "energy-IMEX-PCG(AS)",
   "aspin" => "ASPIN",
   "raspen" => "RASPEN",
   "var_dd" => "varDD",
@@ -2323,7 +2399,7 @@ end
 function fig23_semilinear_history()
   tbl = loadtable("study11_semilinear_sensitivity.csv")
   algorithms = ("anderson_ras", "var_dd_history")
-  titles = ("Anderson–RAS", "varDD")
+  titles = ("Anderson-RAS", "varDD")
   fig = Figure(size=(780, 350))
   Label(
     fig[0, 1:2],
@@ -2356,8 +2432,8 @@ const EVP_SENSITIVITY_LABELS = Dict(
   "var_dd" => "varDD",
   "var_dd_history" => "varDD + history (1)",
   "lobpcg_as" => "LOBPCG+AS",
-  "jd_gmres_as" => "JD–GMRES(AS)",
-  "si_lanczos_pcg_as" => "SI-Lanczos–PCG(AS)",
+  "jd_gmres_as" => "JD-GMRES(AS)",
+  "si_lanczos_pcg_as" => "SI-Lanczos-PCG(AS)",
 )
 
 const EVP_SENSITIVITY_METHODS = (

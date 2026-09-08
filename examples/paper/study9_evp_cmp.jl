@@ -8,6 +8,10 @@ isdefined(Main, :EVP_COMMON) || include("evp_common.jl")
 
 const EVP_COMPARISON_POTENTIAL_SCALE = 1.0
 
+evp_comparison_potential(x) = EVP_COMPARISON_POTENTIAL_SCALE * exp(
+  5 * sqrt(2 * (x[1] - 0.25)^2 + (x[2] - 0.70)^2)
+)
+
 function append_evp_history!(rows, method, m, lambda_reference, result)
   for entry in result.history
     push!(rows.method, string(method))
@@ -75,8 +79,8 @@ function run_study9()
   println("study9: EVP vs LOPSD, LOBPCG, JD, and shift-invert Lanczos with AS")
   Random.seed!(1)
 
-  N = SMALL ? 10 : 40
-  ms = SMALL ? [2] : [2, 4, 8]
+  N = SMALL ? 10 : 70
+  ms = SMALL ? [2] : [4, 16, 64]
   overlap = 2
   relative_tolerance = SMALL ? 1e-5 : 1e-6
   maxiter = SMALL ? 12 : 100
@@ -109,7 +113,7 @@ function run_study9()
       N,
       m,
       overlap;
-      P=x -> EVP_COMPARISON_POTENTIAL_SCALE * exp(sqrt(x[1]^2 + x[2]^2)),
+      P=evp_comparison_potential,
       return_core_partition=true,
     )
     schwarz = schwarz_setup(K, dofspar; core_dofs=core)
