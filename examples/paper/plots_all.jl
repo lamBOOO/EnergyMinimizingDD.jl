@@ -379,6 +379,76 @@ function add_evp_solution_inset!(
   return sax
 end
 
+function add_lshape_solution_inset!(
+  figpos, solutions; halign=0.68, valign=0.97, inset_size=0.23
+)
+  sax = Axis(
+    figpos;
+    width=Relative(inset_size),
+    height=Relative(inset_size),
+    halign=halign,
+    valign=valign,
+    tellwidth=false,
+    tellheight=false,
+    aspect=DataAspect(),
+    limits=(-1, 1, -1, 1),
+  )
+  translate!(sax.blockscene, 0, 0, 150)
+  hidedecorations!(sax)
+  hidespines!(sax)
+  vertices = Point2f[]
+  vertex_values = Float64[]
+  TriangleFace = CairoMakie.GeometryBasics.TriangleFace
+  faces = TriangleFace{Int}[]
+  for index in eachindex(solutions.idx)
+    first_vertex = length(vertices) + 1
+    append!(
+      vertices,
+      Point2f[
+        (solutions.x1[index], solutions.y1[index]),
+        (solutions.x2[index], solutions.y2[index]),
+        (solutions.x3[index], solutions.y3[index]),
+      ],
+    )
+    append!(
+      vertex_values,
+      [
+        solutions.value1[index],
+        solutions.value2[index],
+        solutions.value3[index],
+      ],
+    )
+    push!(faces, TriangleFace(first_vertex, first_vertex + 1, first_vertex + 2))
+  end
+  color_limit = maximum(abs, vertex_values)
+  mesh!(
+    sax,
+    vertices,
+    faces;
+    color=vertex_values,
+    colormap=:balance,
+    colorrange=(-color_limit, color_limit),
+    shading=NoShading,
+  )
+  wireframe!(
+    sax,
+    CairoMakie.GeometryBasics.Mesh(vertices, faces);
+    color=(:black, 0.14),
+    linewidth=0.18,
+  )
+  text!(
+    sax,
+    0.0,
+    0.92;
+    text="exact u★",
+    align=(:center, :top),
+    fontsize=9,
+    color=:black,
+    font=:bold,
+  )
+  return sax
+end
+
 function add_triangle_partition_inset!(
   figpos,
   parts,
@@ -387,6 +457,9 @@ function add_triangle_partition_inset!(
   valign = 0.97,
   inset_size = 0.23,
   inset_title = "partition",
+  limits = (0, 1, 0, 1),
+  title_color = :white,
+  title_position = (0.5, 0.96),
 )
   pmask = parts.m .== m
   pax = Axis(
@@ -398,7 +471,7 @@ function add_triangle_partition_inset!(
     tellwidth=false,
     tellheight=false,
     aspect=DataAspect(),
-    limits=(0, 1, 0, 1),
+    limits=limits,
   )
   translate!(pax.blockscene, 0, 0, 150)
   hidedecorations!(pax)
@@ -433,12 +506,12 @@ function add_triangle_partition_inset!(
   )
   text!(
     pax,
-    0.5,
-    0.96;
+    title_position[1],
+    title_position[2];
     text=inset_title,
     align=(:center, :top),
     fontsize=9,
-    color=:white,
+    color=title_color,
     font=:bold,
   )
   return pax
@@ -1807,6 +1880,7 @@ function fig17_semilinear_poisson()
     )
     for (index, method) in enumerate(methods)
       mask =
+        (conv.beta .== 1.0) .&
         (conv.m .== m) .&
         (conv.method .== method) .&
         (conv.relative_residual .> 0)
@@ -1852,6 +1926,177 @@ function fig17b_semilinear_poisson_paper()
   solutions = loadtable("study11_semilinear_solution.csv")
   parts = loadtable("study11_semilinear_partitions.csv")
   ms = sort(unique(conv.m))
+  betas = sort(unique(conv.beta))
+  primary_methods = (
+    "var_dd",
+    "var_dd_history",
+    "var_dd_quadratic",
+    "var_dd_quadratic_history",
+    "nonlinear_ras",
+  )
+  reference_methods = (
+    "newton_pcg_as_1",
+    "newton_pcg_as_2",
+    "newton_pcg_as_4",
+    # "newton_pcg_as_8",
+  )
+  methods = (primary_methods..., reference_methods...)
+  labels = Dict(
+    "var_dd" => "EMDD (q = 1)",
+    "var_dd_history" => "EMDD (q = 2)",
+    "var_dd_quadratic" => "quadratic EMDD (q = 1)",
+    "var_dd_quadratic_history" => "quadratic EMDD (q = 2)",
+    "nonlinear_ras" => "nRAS + optimal damping",
+    "newton_pcg_as_1" => "Newton–PCG(AS, 1)",
+    "newton_pcg_as_2" => "Newton–PCG(AS, 2)",
+    "newton_pcg_as_4" => "Newton–PCG(AS, 4)",
+    # "newton_pcg_as_8" => "Newton–PCG(AS, 8)",
+  )
+  markers = Dict(
+    "var_dd" => :diamond,
+    "var_dd_history" => :utriangle,
+    "var_dd_quadratic" => :star4,
+    "var_dd_quadratic_history" => :star6,
+    "nonlinear_ras" => :rect,
+    "newton_pcg_as_1" => :circle,
+    "newton_pcg_as_2" => :rect,
+    "newton_pcg_as_4" => :dtriangle,
+    # "newton_pcg_as_8" => :hexagon,
+  )
+  full_colors = Makie.resample_cmap(:tab10, 10)
+  primary_colors = tab10_colors(length(methods))
+  reference_colors = [
+    RGBf(0.55, 0.55, 0.55),
+    RGBf(0.45, 0.45, 0.45),
+    RGBf(0.35, 0.35, 0.35),
+    RGBf(0.20, 0.20, 0.20),
+  ]
+  colors = [primary_colors..., reference_colors...]
+  linestyles = [
+    fill(:solid, length(primary_methods))...,
+    fill(:dash, length(reference_methods))...,
+  ]
+  linewidths = [
+    fill(2.8, length(primary_methods))...,
+    fill(1.8, length(reference_methods))...,
+  ]
+  markersizes = [
+    fill(MARKERSIZE, length(primary_methods))...,
+    fill(6, length(reference_methods))...,
+  ]
+  initial_residuals = conv.relative_residual[
+    (conv.outer .== 0) .& isfinite.(conv.relative_residual)
+  ]
+  ylimits = (1e-8, max(maximum(initial_residuals), 1.0) * 2)
+  ytick_exps = sort(
+    collect(floor(Int, log10(ylimits[2])):-2:ceil(Int, log10(ylimits[1])))
+  )
+
+  fig = Figure(size=(PAPER_FULL_WIDTH, 850))
+  Label(
+    fig[0, 1:length(ms)],
+    "−Δu + βu³ = f  in Ω,    u = 0  on ∂Ω";
+    fontsize=22,
+    font=:bold,
+  )
+  for (row, beta) in enumerate(betas), (column, m) in enumerate(ms)
+    ax = Axis(
+      fig[row, column];
+      xlabel=row == length(betas) ? "outer iteration" : "",
+      ylabel=column == 1 ? "relative residual" : "",
+      title="β = $(Int(beta)), m = $m",
+      yscale=log10,
+      yticks=LogTicks(ytick_exps),
+      limits=(nothing, ylimits),
+    )
+    for (index, method) in enumerate(methods)
+      mask =
+        (conv.beta .== beta) .&
+        (conv.m .== m) .&
+        (conv.method .== method) .&
+        (conv.relative_residual .> 0)
+      add_series!(
+        ax,
+        pick(conv, :outer, mask),
+        pick(conv, :relative_residual, mask);
+        label=labels[method],
+        color=colors[index],
+        linestyle=linestyles[index],
+        marker=markers[method],
+        linewidth=linewidths[index],
+        markersize=markersizes[index],
+      )
+    end
+    hlines!(ax, [1e-7]; color=:black, linestyle=:dot, linewidth=1.2)
+    add_semilinear_solution_inset!(
+      fig[row, column], solutions; halign=0.68, inset_size=0.23
+    )
+    add_triangle_partition_inset!(
+      fig[row, column],
+      parts,
+      m;
+      halign=0.99,
+      inset_size=0.23,
+      inset_title="partition",
+    )
+  end
+  legend_row = length(betas) + 1
+  Label(
+    fig[legend_row, 1:length(ms)],
+    "Primary DD comparison";
+    fontsize=16,
+    font=:bold,
+  )
+  Legend(
+    fig[legend_row+1, 1:length(ms)],
+    legend_line_marker_elements(
+      primary_methods,
+      markers;
+      colors=primary_colors,
+      linewidths=fill(2.8, length(primary_methods)),
+    ),
+    [labels[method] for method in primary_methods];
+    orientation=:horizontal,
+    nbanks=1,
+    framevisible=true,
+  )
+  Label(
+    fig[legend_row+2, 1:length(ms)],
+    "Newton references";
+    fontsize=16,
+    font=:bold,
+  )
+  Legend(
+    fig[legend_row+3, 1:length(ms)],
+    legend_line_marker_elements(
+      reference_methods,
+      markers;
+      colors=reference_colors,
+      linestyles=fill(:dash, length(reference_methods)),
+      linewidths=fill(1.8, length(reference_methods)),
+      markersizes=fill(6, length(reference_methods)),
+    ),
+    [labels[method] for method in reference_methods];
+    orientation=:horizontal,
+    nbanks=1,
+    framevisible=true,
+  )
+  rowgap!(fig.layout, 8)
+  savefigs(fig, "fig17b_semilinear_poisson_paper")
+end
+
+# Exact Fig. 17b design duplicated for the non-monotone exponential problem
+# on the graded L-shaped domain from Spicher--Wihler (2026), Section 6.1.
+function fig17b_semilinear_l_shape_section61()
+  conv = loadtable("study11b_semilinear_l_shape_conv.csv")
+  solutions = loadtable("study11b_semilinear_l_shape_solution.csv")
+  parts = loadtable("study11b_semilinear_l_shape_partitions.csv")
+  ms = sort(unique(conv.m))
+  cases = unique(conv.case)
+  case_labels = Dict(
+    "exponential" => "−Δu = 12 exp(−u²) + g",
+    "cubic" => "−Δu + 100u³ = g",
+  )
   primary_methods = (
     "var_dd",
     "var_dd_history",
@@ -1923,25 +2168,27 @@ function fig17b_semilinear_poisson_paper()
     collect(floor(Int, log10(ylimits[2])):-2:ceil(Int, log10(ylimits[1])))
   )
 
-  fig = Figure(size=(PAPER_FULL_WIDTH, 490))
+  fig = Figure(size=(PAPER_FULL_WIDTH, 450))
   Label(
     fig[0, 1:length(ms)],
-    "−Δu + βu³ = f  in Ω,    β = 1,    u = 0  on ∂Ω";
+    "graded L-shaped semilinear problem,    u = 0  on ∂Ω";
     fontsize=22,
     font=:bold,
   )
-  for (column, m) in enumerate(ms)
+  for (row, case) in enumerate(cases),
+      (column, m) in enumerate(ms)
     ax = Axis(
-      fig[1, column];
-      xlabel="outer iteration",
+      fig[row, column];
+      xlabel=row == length(cases) ? "outer iteration" : "",
       ylabel=column == 1 ? "relative residual" : "",
-      title="m = $m",
+      title="$(case_labels[case]), m = $m",
       yscale=log10,
       yticks=LogTicks(ytick_exps),
       limits=(nothing, ylimits),
     )
     for (index, method) in enumerate(methods)
       mask =
+        (conv.case .== case) .&
         (conv.m .== m) .&
         (conv.method .== method) .&
         (conv.relative_residual .> 0)
@@ -1958,26 +2205,30 @@ function fig17b_semilinear_poisson_paper()
       )
     end
     hlines!(ax, [1e-7]; color=:black, linestyle=:dot, linewidth=1.2)
-    add_semilinear_solution_inset!(
-      fig[1, column], solutions; halign=0.68, inset_size=0.23
+    add_lshape_solution_inset!(
+      fig[row, column], solutions; halign=0.68, inset_size=0.23
     )
     add_triangle_partition_inset!(
-      fig[1, column],
+      fig[row, column],
       parts,
       m;
       halign=0.99,
       inset_size=0.23,
       inset_title="partition",
+      limits=(-1, 1, -1, 1),
+      title_color=:black,
+      title_position=(0.0, 0.92),
     )
   end
+  legend_row = length(cases) + 1
   Label(
-    fig[2, 1:length(ms)],
+    fig[legend_row, 1:length(ms)],
     "Primary DD comparison";
     fontsize=16,
     font=:bold,
   )
   Legend(
-    fig[3, 1:length(ms)],
+    fig[legend_row+1, 1:length(ms)],
     legend_line_marker_elements(
       primary_methods,
       markers;
@@ -1990,13 +2241,13 @@ function fig17b_semilinear_poisson_paper()
     framevisible=true,
   )
   Label(
-    fig[4, 1:length(ms)],
-    "Newton references (quadratic convergence)";
+    fig[legend_row+2, 1:length(ms)],
+    "Newton references";
     fontsize=16,
     font=:bold,
   )
   Legend(
-    fig[5, 1:length(ms)],
+    fig[legend_row+3, 1:length(ms)],
     legend_line_marker_elements(
       reference_methods,
       markers;
@@ -2011,7 +2262,7 @@ function fig17b_semilinear_poisson_paper()
     framevisible=true,
   )
   rowgap!(fig.layout, 8)
-  savefigs(fig, "fig17b_semilinear_poisson_paper")
+  savefigs(fig, "fig17b_semilinear_l_shape_section61")
 end
 
 # ---------------------------------------------------------------------------
@@ -2784,6 +3035,7 @@ function make_all_figures()
   fig16_gp_energy_gap()
   fig17_semilinear_poisson()
   fig17b_semilinear_poisson_paper()
+  fig17b_semilinear_l_shape_section61()
   fig18_poisson_scaling()
   fig19_poisson_contrast()
   fig20_poisson_history()
