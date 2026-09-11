@@ -980,7 +980,7 @@ function fig12_poisson_cmp()
     ax = Axis(
       fig[1, j];
       xlabel = "iteration",
-      ylabel = j == 1 ? "residual norm ‖Axₖ-b‖₂" : "",
+      ylabel = j == 1 ? "res. norm ‖Axₖ-b‖₂" : "",
       yscale = log10,
       yticks = yticks,
       title = "m = $m",
@@ -1011,12 +1011,21 @@ function fig12_poisson_cmp()
   savefigs(fig, "fig12_poisson_cmp")
 end
 
-# Paper-facing subset of Figure 12. Here q counts the current iterate as the
-# first global vector, so q=1 is plain additive varDD and q=2 adds u_{k-1}.
+# Paper-facing subset of Figure 12 for the standard Poisson problem and the
+# variable-coefficient manufactured problem with and without a sign change.
+# Here q counts the current iterate as the first global vector, so q=1 is plain
+# additive varDD and q=2 adds u_{k-1}.
 function fig12b_poisson_cmp_paper()
-  tbl = loadtable("study8_linear_cmp.csv")
+  problem_rows = (
+    ("standard Poisson", loadtable("study8_linear_cmp_poisson.csv")),
+    ("variable, no sign change", loadtable("study8_linear_cmp.csv")),
+    (
+      "variable, sign change",
+      loadtable("study8_linear_cmp_sign_changing.csv"),
+    ),
+  )
   parts = loadtable("study8_partitions.csv")
-  ms = sort(unique(tbl.m))
+  ms = sort(unique(problem_rows[end][2].m))
   methods = (
     "var_dd_additive",
     "var_dd_additive_history",
@@ -1039,36 +1048,52 @@ function fig12b_poisson_cmp_paper()
     "gmres_ras" => :pentagon,
   )
   colors = tab10_colors(length(methods))
-  finite_res = tbl.resnorm[tbl.resnorm .> 0]
+  finite_res = vcat([
+    tbl.resnorm[tbl.resnorm .> 0] for (_, tbl) in problem_rows
+  ]...)
   ylims = (1e-9, maximum(finite_res) * 3)
   yticks = LogTicks(collect(1:-2:-9))
-  fig = Figure(size=(PAPER_FULL_WIDTH, 330))
-  for (column, m) in enumerate(ms)
-    ax = Axis(
-      fig[1, column];
-      xlabel="iteration",
-      ylabel=column == 1 ? "residual norm ‖Axₖ-b‖₂" : "",
-      yscale=log10,
-      yticks,
-      title="m = $m",
-      limits=((0, 100), ylims),
-    )
-    for (index, method) in enumerate(methods)
-      mask = (tbl.m .== m) .& (tbl.method .== method) .& (tbl.resnorm .> 0)
-      add_series!(
-        ax,
-        pick(tbl, :solves, mask) ./ m,
-        pick(tbl, :resnorm, mask);
-        label=labels[method],
-        color=colors[index],
-        marker=markers[method],
+  fig = Figure(size=(PAPER_FULL_WIDTH, 650))
+  for (row, (problem_label, tbl)) in enumerate(problem_rows)
+    for (column, m) in enumerate(ms)
+      ax = Axis(
+        fig[row, column];
+        xlabel=row == length(problem_rows) ? "iteration" : "",
+        ylabel=column == 1 ? "$problem_label\nres. norm ‖Axₖ-b‖₂" : "",
+        ylabelsize=13,
+        yscale=log10,
+        yticks,
+        title=row == 1 ? "m = $m" : "",
+        limits=((0, 100), ylims),
       )
+      for (index, method) in enumerate(methods)
+        mask = (tbl.m .== m) .& (tbl.method .== method) .& (tbl.resnorm .> 0)
+        add_series!(
+          ax,
+          pick(tbl, :solves, mask) ./ m,
+          pick(tbl, :resnorm, mask);
+          label=labels[method],
+          color=colors[index],
+          marker=markers[method],
+          linewidth=2.8,
+          marker_stride=8,
+          markerstrokecolor=:black,
+          markerstrokewidth=0.7,
+        )
+      end
+      add_partition_inset!(fig[row, column], parts, m)
     end
-    add_partition_inset!(fig[1, column], parts, m)
   end
   Legend(
-    fig[2, 1:length(ms)],
-    legend_line_marker_elements(methods, markers; colors),
+    fig[length(problem_rows)+1, 1:length(ms)],
+    legend_line_marker_elements(
+      methods,
+      markers;
+      colors,
+      linewidths=fill(2.8, length(methods)),
+      markerstrokecolors=fill(:black, length(methods)),
+      markerstrokewidths=fill(0.7, length(methods)),
+    ),
     [labels[method] for method in methods];
     orientation=:horizontal,
     nbanks=1,
