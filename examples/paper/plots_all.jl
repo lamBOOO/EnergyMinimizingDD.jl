@@ -270,6 +270,7 @@ function add_semilinear_solution_inset!(
   halign=0.68,
   valign=0.97,
   inset_size=0.23,
+  inset_title="exact u★",
 )
   N = solutions.N[1]
   values = solutions.value
@@ -325,7 +326,7 @@ function add_semilinear_solution_inset!(
     sax,
     0.5,
     0.96;
-    text="exact u★",
+    text=inset_title,
     align=(:center, :top),
     fontsize=9,
     color=:white,
@@ -380,7 +381,12 @@ function add_evp_solution_inset!(
 end
 
 function add_lshape_solution_inset!(
-  figpos, solutions; halign=0.68, valign=0.97, inset_size=0.23
+  figpos,
+  solutions;
+  halign=0.68,
+  valign=0.97,
+  inset_size=0.23,
+  inset_title="exact u★",
 )
   sax = Axis(
     figpos;
@@ -440,7 +446,7 @@ function add_lshape_solution_inset!(
     sax,
     0.0,
     0.92;
-    text="exact u★",
+    text=inset_title,
     align=(:center, :top),
     fontsize=9,
     color=:black,
@@ -1938,7 +1944,6 @@ function fig17b_semilinear_poisson_paper()
     "newton_pcg_as_1",
     "newton_pcg_as_2",
     "newton_pcg_as_4",
-    # "newton_pcg_as_8",
   )
   methods = (primary_methods..., reference_methods...)
   labels = Dict(
@@ -1947,34 +1952,29 @@ function fig17b_semilinear_poisson_paper()
     "var_dd_quadratic" => "quadratic EMDD (q = 1)",
     "var_dd_quadratic_history" => "quadratic EMDD (q = 2)",
     "nonlinear_ras" => "nRAS + optimal damping",
-    "newton_pcg_as_1" => "Newton–PCG(AS, 1)",
-    "newton_pcg_as_2" => "Newton–PCG(AS, 2)",
-    "newton_pcg_as_4" => "Newton–PCG(AS, 4)",
-    # "newton_pcg_as_8" => "Newton–PCG(AS, 8)",
+    "newton_pcg_as_1" => "Newton-PCG(AS, 1)",
+    "newton_pcg_as_2" => "Newton-PCG(AS, 2)",
+    "newton_pcg_as_4" => "Newton-PCG(AS, 4)",
   )
   markers = Dict(
-    "var_dd" => :diamond,
-    "var_dd_history" => :utriangle,
-    "var_dd_quadratic" => :star4,
-    "var_dd_quadratic_history" => :star6,
-    "nonlinear_ras" => :rect,
-    "newton_pcg_as_1" => :circle,
-    "newton_pcg_as_2" => :rect,
-    "newton_pcg_as_4" => :dtriangle,
-    # "newton_pcg_as_8" => :hexagon,
+    "var_dd" => :circle,
+    "var_dd_history" => :hexagon,
+    "var_dd_quadratic" => :rect,
+    "var_dd_quadratic_history" => :utriangle,
+    "nonlinear_ras" => :diamond,
+    "newton_pcg_as_1" => :diamond,
+    "newton_pcg_as_2" => :pentagon,
+    "newton_pcg_as_4" => :diamond,
   )
-  full_colors = Makie.resample_cmap(:tab10, 10)
-  primary_colors = tab10_colors(length(methods))
+  primary_colors = tab10_colors(length(primary_methods))
   reference_colors = [
-    RGBf(0.55, 0.55, 0.55),
-    RGBf(0.45, 0.45, 0.45),
-    RGBf(0.35, 0.35, 0.35),
-    RGBf(0.20, 0.20, 0.20),
+    RGBf(level, level, level) for level in (0.55, 0.38, 0.20)
   ]
+  reference_linestyles = [(:dot, :dense), (:dash, :dense), (:dashdot, :dense)]
   colors = [primary_colors..., reference_colors...]
   linestyles = [
     fill(:solid, length(primary_methods))...,
-    fill(:dash, length(reference_methods))...,
+    reference_linestyles...,
   ]
   linewidths = [
     fill(2.8, length(primary_methods))...,
@@ -1982,7 +1982,7 @@ function fig17b_semilinear_poisson_paper()
   ]
   markersizes = [
     fill(MARKERSIZE, length(primary_methods))...,
-    fill(6, length(reference_methods))...,
+    fill(MARKERSIZE, length(reference_methods))...,
   ]
   initial_residuals = conv.relative_residual[
     (conv.outer .== 0) .& isfinite.(conv.relative_residual)
@@ -2025,19 +2025,28 @@ function fig17b_semilinear_poisson_paper()
         marker=markers[method],
         linewidth=linewidths[index],
         markersize=markersizes[index],
+        marker_stride=8,
+        markerstrokecolor=:black,
+        markerstrokewidth=0.7,
       )
     end
     hlines!(ax, [1e-7]; color=:black, linestyle=:dot, linewidth=1.2)
     add_semilinear_solution_inset!(
-      fig[row, column], solutions; halign=0.68, inset_size=0.23
+      fig[row, column],
+      solutions;
+      halign=0.77,
+      valign=0.98,
+      inset_size=0.25,
+      inset_title="uₕ",
     )
     add_triangle_partition_inset!(
       fig[row, column],
       parts,
       m;
-      halign=0.99,
-      inset_size=0.23,
-      inset_title="partition",
+      halign=1.03,
+      valign=0.98,
+      inset_size=0.25,
+      inset_title="Ωᵢ",
     )
   end
   legend_row = length(betas) + 1
@@ -2052,8 +2061,11 @@ function fig17b_semilinear_poisson_paper()
     legend_line_marker_elements(
       primary_methods,
       markers;
+      markersizes=fill(MARKERSIZE, length(primary_methods)),
       colors=primary_colors,
       linewidths=fill(2.8, length(primary_methods)),
+      markerstrokecolors=fill(:black, length(primary_methods)),
+      markerstrokewidths=fill(0.7, length(primary_methods)),
     ),
     [labels[method] for method in primary_methods];
     orientation=:horizontal,
@@ -2062,7 +2074,7 @@ function fig17b_semilinear_poisson_paper()
   )
   Label(
     fig[legend_row+2, 1:length(ms)],
-    "Newton references";
+    "Newton-PCG references (fixed PCG iterations)";
     fontsize=16,
     font=:bold,
   )
@@ -2071,10 +2083,12 @@ function fig17b_semilinear_poisson_paper()
     legend_line_marker_elements(
       reference_methods,
       markers;
+      markersizes=fill(MARKERSIZE, length(reference_methods)),
       colors=reference_colors,
-      linestyles=fill(:dash, length(reference_methods)),
+      linestyles=reference_linestyles,
       linewidths=fill(1.8, length(reference_methods)),
-      markersizes=fill(6, length(reference_methods)),
+      markerstrokecolors=fill(:black, length(reference_methods)),
+      markerstrokewidths=fill(0.7, length(reference_methods)),
     ),
     [labels[method] for method in reference_methods];
     orientation=:horizontal,
@@ -2108,7 +2122,6 @@ function fig17b_semilinear_l_shape_section61()
     "newton_pcg_as_1",
     "newton_pcg_as_2",
     "newton_pcg_as_4",
-    "newton_pcg_as_8",
   )
   methods = (primary_methods..., reference_methods...)
   labels = Dict(
@@ -2120,37 +2133,26 @@ function fig17b_semilinear_l_shape_section61()
     "newton_pcg_as_1" => "Newton-PCG(AS, 1)",
     "newton_pcg_as_2" => "Newton-PCG(AS, 2)",
     "newton_pcg_as_4" => "Newton-PCG(AS, 4)",
-    "newton_pcg_as_8" => "Newton-PCG(AS, 8)",
   )
   markers = Dict(
-    "var_dd" => :diamond,
-    "var_dd_history" => :utriangle,
-    "var_dd_quadratic" => :star4,
-    "var_dd_quadratic_history" => :star6,
-    "nonlinear_ras" => :rect,
-    "newton_pcg_as_1" => :circle,
-    "newton_pcg_as_2" => :rect,
-    "newton_pcg_as_4" => :dtriangle,
-    "newton_pcg_as_8" => :hexagon,
+    "var_dd" => :circle,
+    "var_dd_history" => :hexagon,
+    "var_dd_quadratic" => :rect,
+    "var_dd_quadratic_history" => :utriangle,
+    "nonlinear_ras" => :diamond,
+    "newton_pcg_as_1" => :diamond,
+    "newton_pcg_as_2" => :pentagon,
+    "newton_pcg_as_4" => :diamond,
   )
-  full_colors = Makie.resample_cmap(:tab10, 10)
-  primary_colors = [
-    full_colors[9],
-    full_colors[10],
-    full_colors[1],
-    full_colors[6],
-    full_colors[2],
-  ]
+  primary_colors = tab10_colors(length(primary_methods))
   reference_colors = [
-    RGBf(0.55, 0.55, 0.55),
-    RGBf(0.45, 0.45, 0.45),
-    RGBf(0.35, 0.35, 0.35),
-    RGBf(0.20, 0.20, 0.20),
+    RGBf(level, level, level) for level in (0.55, 0.38, 0.20)
   ]
+  reference_linestyles = [(:dot, :dense), (:dash, :dense), (:dashdot, :dense)]
   colors = [primary_colors..., reference_colors...]
   linestyles = [
     fill(:solid, length(primary_methods))...,
-    fill(:dash, length(reference_methods))...,
+    reference_linestyles...,
   ]
   linewidths = [
     fill(2.8, length(primary_methods))...,
@@ -2158,7 +2160,7 @@ function fig17b_semilinear_l_shape_section61()
   ]
   markersizes = [
     fill(MARKERSIZE, length(primary_methods))...,
-    fill(6, length(reference_methods))...,
+    fill(MARKERSIZE, length(reference_methods))...,
   ]
   initial_residuals = conv.relative_residual[
     (conv.outer .== 0) .& isfinite.(conv.relative_residual)
@@ -2202,19 +2204,28 @@ function fig17b_semilinear_l_shape_section61()
         marker=markers[method],
         linewidth=linewidths[index],
         markersize=markersizes[index],
+        marker_stride=8,
+        markerstrokecolor=:black,
+        markerstrokewidth=0.7,
       )
     end
     hlines!(ax, [1e-7]; color=:black, linestyle=:dot, linewidth=1.2)
     add_lshape_solution_inset!(
-      fig[row, column], solutions; halign=0.68, inset_size=0.23
+      fig[row, column],
+      solutions;
+      halign=0.77,
+      valign=0.98,
+      inset_size=0.25,
+      inset_title="uₕ",
     )
     add_triangle_partition_inset!(
       fig[row, column],
       parts,
       m;
-      halign=0.99,
-      inset_size=0.23,
-      inset_title="partition",
+      halign=1.03,
+      valign=0.98,
+      inset_size=0.25,
+      inset_title="Ωᵢ",
       limits=(-1, 1, -1, 1),
       title_color=:black,
       title_position=(0.0, 0.92),
@@ -2232,17 +2243,20 @@ function fig17b_semilinear_l_shape_section61()
     legend_line_marker_elements(
       primary_methods,
       markers;
+      markersizes=fill(MARKERSIZE, length(primary_methods)),
       colors=primary_colors,
       linewidths=fill(2.8, length(primary_methods)),
+      markerstrokecolors=fill(:black, length(primary_methods)),
+      markerstrokewidths=fill(0.7, length(primary_methods)),
     ),
     [labels[method] for method in primary_methods];
     orientation=:horizontal,
-    nbanks=2,
+    nbanks=1,
     framevisible=true,
   )
   Label(
     fig[legend_row+2, 1:length(ms)],
-    "Newton references";
+    "Newton-PCG references (fixed PCG iterations)";
     fontsize=16,
     font=:bold,
   )
@@ -2251,10 +2265,12 @@ function fig17b_semilinear_l_shape_section61()
     legend_line_marker_elements(
       reference_methods,
       markers;
+      markersizes=fill(MARKERSIZE, length(reference_methods)),
       colors=reference_colors,
-      linestyles=fill(:dash, length(reference_methods)),
+      linestyles=reference_linestyles,
       linewidths=fill(1.8, length(reference_methods)),
-      markersizes=fill(6, length(reference_methods)),
+      markerstrokecolors=fill(:black, length(reference_methods)),
+      markerstrokewidths=fill(0.7, length(reference_methods)),
     ),
     [labels[method] for method in reference_methods];
     orientation=:horizontal,
