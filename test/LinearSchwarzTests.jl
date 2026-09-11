@@ -7,6 +7,19 @@ end
 include(joinpath(@__DIR__, "..", "examples", "paper", "study8_linear_cmp.jl"))
 
 @testset "linear Schwarz baselines" begin
+  for (problem_setup, exact) in (
+    (study8_problem_setup, study8_exact_solution),
+    (study8_sign_changing_problem_setup, study8_sign_changing_exact_solution),
+  )
+    K_manufactured, _, b_manufactured, _, U_manufactured =
+      problem_setup(16, 1, 1; partitioning = :cartesian)
+    discrete_solution = K_manufactured \ b_manufactured
+    exact_solution = collect(
+      get_free_dof_values(interpolate_everywhere(exact, U_manufactured)),
+    )
+    @test norm(discrete_solution - exact_solution) / norm(exact_solution) < 0.02
+  end
+
   K, _, b, overlapping, _, core = laplace_setup(
     8, 3, 1; return_core_partition=true
   )

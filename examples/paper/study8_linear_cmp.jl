@@ -1,5 +1,5 @@
-# Study 8: Poisson — comparison against one-level Schwarz baselines on the
-# SAME overlapping partition:
+# Study 8: variable-coefficient elliptic problem — comparison against
+# one-level Schwarz baselines on the SAME overlapping partition:
 #   - var_dd_additive (m independent local solves)
 #   - REMDD with q=1 and q=2 (local corrections weighted by a multiplicity PoU)
 #   - two-level EMDD/REMDD with the Nicolaides coarse space
@@ -14,6 +14,78 @@
 # Cost unit: subdomain solves (one sweep / preconditioner application = m).
 
 isdefined(Main, :PAPER_COMMON) || include("common.jl")
+
+"Diffusion coefficient for the Study 8 manufactured-solution problem."
+study8_diffusion(x) = 2 + sinpi(2 * x.data[1] + 3 * x.data[2])
+
+function study8_exact_solution(x, y_frequency)
+  x_coordinate, y_coordinate = x.data
+  return exp(3 * x_coordinate * y_coordinate) *
+         sinpi(x_coordinate) *
+         sinpi(y_frequency * y_coordinate)
+end
+
+"Positive exact solution for the Study 8 manufactured-solution problem."
+study8_exact_solution(x) = study8_exact_solution(x, 1)
+
+"Sign-changing exact solution used by the third row of Figure 12b."
+study8_sign_changing_exact_solution(x) = study8_exact_solution(x, 2)
+
+function study8_forcing(x, y_frequency)
+  x_coordinate, y_coordinate = x.data
+  exponential = exp(3 * x_coordinate * y_coordinate)
+  sine_x, sine_y = sinpi(x_coordinate), sinpi(y_frequency * y_coordinate)
+  cosine_x, cosine_y = cospi(x_coordinate), cospi(y_frequency * y_coordinate)
+
+  derivative_x = exponential * sine_y * (
+    3 * y_coordinate * sine_x + pi * cosine_x
+  )
+  derivative_y = exponential * sine_x * (
+    3 * x_coordinate * sine_y + y_frequency * pi * cosine_y
+  )
+  laplacian = exponential * (
+    (9 * (x_coordinate^2 + y_coordinate^2) -
+     (1 + y_frequency^2) * pi^2) * sine_x * sine_y +
+    6pi * y_coordinate * cosine_x * sine_y +
+    6 * y_frequency * pi * x_coordinate * sine_x * cosine_y
+  )
+  phase_cosine = cospi(2 * x_coordinate + 3 * y_coordinate)
+  diffusion_gradient_dot_solution_gradient = phase_cosine * (
+    2pi * derivative_x + 3pi * derivative_y
+  )
+  return -study8_diffusion(x) * laplacian -
+         diffusion_gradient_dot_solution_gradient
+end
+
+"Forcing `-div(a grad(u))` for the positive Study 8 exact solution."
+study8_forcing(x) = study8_forcing(x, 1)
+
+"Forcing `-div(a grad(u))` for the sign-changing Figure 12b solution."
+study8_sign_changing_forcing(x) = study8_forcing(x, 2)
+
+function study8_problem_setup(N, m, overlap; kwargs...)
+  return FEMDiscretizations.FEM_Schroedinger(
+    N,
+    m;
+    P = x -> 0.0,
+    f = study8_forcing,
+    diffusion = study8_diffusion,
+    overlap = overlap,
+    kwargs...,
+  )
+end
+
+function study8_sign_changing_problem_setup(N, m, overlap; kwargs...)
+  return FEMDiscretizations.FEM_Schroedinger(
+    N,
+    m;
+    P = x -> 0.0,
+    f = study8_sign_changing_forcing,
+    diffusion = study8_diffusion,
+    overlap = overlap,
+    kwargs...,
+  )
+end
 
 function as_stationary(K, b, S; theta, maxsweeps, tol)
   x = ones(size(K, 1))
@@ -134,7 +206,86 @@ function var_dd_linear_history(K, b, dofspar; maxiter, tol, kwargs...)
   )
 end
 
+"Generate one five-method reference row used in Figure 12b."
+function run_study8_paper_problem(file, problem_label, problem_setup)
+  if !needs_run(file)
+    println("study8 $problem_label: cached, skipping")
+    return
+  end
+  println("study8 $problem_label: paper comparison")
+  Random.seed!(1)
+
+  N = SMALL ? 16 : 64
+  ms = SMALL ? [4] : [4, 16, 64]
+  overlap = 2
+  relative_tolerance = SMALL ? 1e-7 : 1e-10
+  maxsweeps = SMALL ? 50 : 400
+  reference_N = SMALL ? 16 : 64
+  reference_owners = Dict(m => metis_cell_owners(reference_N, m) for m in ms)
+  rows = (
+    method = String[],
+    m = Int[],
+    solves = Int[],
+    resnorm = Float64[],
+  )
+  record(method, m, hist) = for (solves, residual) in hist
+    push!(rows.method, method)
+    push!(rows.m, m)
+    push!(rows.solves, solves)
+    push!(rows.resnorm, residual)
+  end
+
+  for m in ms
+    owners = prolong_cell_owners(reference_owners[m], N)
+    K, _, b, dofspar, _, core_dofs = problem_setup(
+      N,
+      m,
+      overlap;
+      cell_owners = owners,
+      return_core_partition = true,
+    )
+    S = schwarz_setup(K, dofspar; core_dofs)
+    tol = relative_tolerance * norm(b - K * ones(length(b)))
+    record(
+      "var_dd_additive",
+      m,
+      var_dd_linear_history(K, b, dofspar; maxiter = maxsweeps, tol = tol),
+    )
+    record(
+      "var_dd_additive_history",
+      m,
+      var_dd_linear_history(
+        K,
+        b,
+        dofspar;
+        maxiter = maxsweeps,
+        tol = tol,
+        history_depth = 1,
+      ),
+    )
+    record("ras", m, ras_stationary(K, b, S; maxsweeps, tol))
+    record("pcg_as", m, pcg_as(K, b, S; maxiter = maxsweeps, tol))
+    record("gmres_ras", m, gmres_ras(K, b, S; maxiter = maxsweeps, tol))
+    println("  $problem_label m = $m done")
+  end
+  savetable(file, rows)
+end
+
+run_study8_poisson_paper() = run_study8_paper_problem(
+  "study8_linear_cmp_poisson.csv",
+  "standard Poisson",
+  laplace_setup,
+)
+
+run_study8_sign_changing_paper() = run_study8_paper_problem(
+  "study8_linear_cmp_sign_changing.csv",
+  "sign-changing variable coefficient",
+  study8_sign_changing_problem_setup,
+)
+
 function run_study8()
+  run_study8_poisson_paper()
+  run_study8_sign_changing_paper()
   files = (
     "study8_linear_cmp.csv",
     "study8_partitions.csv",
@@ -144,7 +295,7 @@ function run_study8()
     println("study8: cached, skipping")
     return
   end
-  println("study8: Poisson vs Schwarz baselines")
+  println("study8: variable-coefficient elliptic problem vs Schwarz baselines")
   Random.seed!(1)
 
   N = SMALL ? 16 : 64
@@ -203,7 +354,7 @@ function run_study8()
 
   for m in ms
     owners = prolong_cell_owners(reference_owners[m], N)
-    K, M, b, dofspar, U, core_dofs = laplace_setup(
+    K, M, b, dofspar, U, core_dofs = study8_problem_setup(
       N,
       m,
       overlap;

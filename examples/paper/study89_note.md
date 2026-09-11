@@ -1,4 +1,11 @@
-Studies 8 and 9 use the same overlapping one-level partitions for all methods.
+Study 8 uses the variable-coefficient manufactured problem
+
+    -div(a grad(u)) = f,  a(x,y) = 2 + sin(2*pi*x + 3*pi*y),
+    u(x,y) = exp(3*x*y) sin(pi*x) sin(pi*y),
+
+with homogeneous Dirichlet boundary conditions and the forcing obtained by
+analytic differentiation. Studies 8 and 9 use the same overlapping one-level
+partitions for all methods.
 Study 8 shows additive varDD, additive varDD with one-vector history, and
 multiplicative varDD separately. The additive local candidates are independent
 and their `m` subdomain solves can run in parallel. Multiplicative varDD feeds
@@ -10,11 +17,13 @@ The stored cost is the number of local subdomain solves: one energy-minimizing D
 sweep, one additive Schwarz stationary step, one RAS stationary step, and one
 additive-Schwarz preconditioner application each count as `m` subdomain solves.
 Figure 12 divides this work count by `m` and plots outer solves.
-The paper-facing five-method variant Figure 12b calls the method
-**energy-minimizing domain decomposition (EMDD)**. It denotes plain additive
-EMDD by `q=1` (the current iterate) and one-vector history by `q=2` (the
-current and previous iterates); this is a basis-size convention, not the
-`history_depth` keyword value.
+The paper-facing five-method variant Figure 12b shows the standard Poisson
+problem `-Delta u = 1`, the positive variable-coefficient manufactured
+solution, and its sign-changing `sin(2*pi*y)` counterpart in separate rows. It
+calls the method **energy-minimizing domain decomposition (EMDD)**. It denotes
+plain additive EMDD by `q=1` (the current iterate) and one-vector history by
+`q=2` (the current and previous iterates); this is a basis-size convention, not
+the `history_depth` keyword value.
 
 Figure 12d adds a Cartesian Poisson weak-scaling experiment. The subdomain
 grid grows from `2x2` through `8x8`; every subdomain retains `10x10` cells and
