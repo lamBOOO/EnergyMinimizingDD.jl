@@ -53,6 +53,8 @@ function make_fig18_table(;
   methods = (
     ("\\(\\mathrm{EMDD}\\;(q=1)\\)", "var_dd_additive"),
     ("\\(\\mathrm{EMDD}\\;(q=2)\\)", "var_dd_additive_history"),
+    ("\\(\\mathrm{EMDD}\\;(q=3)\\)", "emdd_q3"),
+    ("\\(\\mathrm{EMDD}\\;(q=4)\\)", "emdd_q4"),
     ("\\(\\mathrm{CG{+}AS}\\)", "pcg_as"),
     ("\\(\\mathrm{GMRES{+}RAS}\\)", "gmres_ras"),
   )
