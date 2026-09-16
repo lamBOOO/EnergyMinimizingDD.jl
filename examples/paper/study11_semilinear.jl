@@ -38,8 +38,17 @@ function run_study11()
   )
   if !needs_run(files...)
     cached = loadtable(files[1])
-    if hasproperty(cached, :beta) &&
-       sort(unique(cached.beta)) == collect(SEMILINEAR_BETAS)
+    cached_cases = if hasproperty(cached, :beta) &&
+                      hasproperty(cached, :method)
+      Set(zip(cached.beta, cached.method))
+    else
+      Set()
+    end
+    expected_cases = Set(
+      (beta, string(method)) for beta in SEMILINEAR_BETAS,
+      method in SEMILINEAR_SOURCE_METHODS
+    )
+    if cached_cases == expected_cases
       println("study11: cached, skipping")
       return
     end
@@ -183,6 +192,14 @@ function run_study11()
           maxiter=maxiter,
           tolerance=tolerance,
           history_depth=4,
+        )
+      elseif method == :nonlinear_cg_optim_as
+        nonlinear_source_optim_ncg_as(
+          energy,
+          dofspar;
+          u0=initial,
+          maxiter=maxiter,
+          tolerance=tolerance,
         )
       elseif method == :newton_pcg_as_8
         nonlinear_source_newton_pcg_as(

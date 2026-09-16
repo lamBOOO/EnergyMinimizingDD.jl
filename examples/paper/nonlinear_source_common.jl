@@ -13,6 +13,7 @@ const SEMILINEAR_SOURCE_METHODS = (
   :nonlinear_as,
   :nonlinear_ras,
   :anderson_ras,
+  :nonlinear_cg_optim_as,
   :newton_pcg_as_4,
   :newton_pcg_as_8,
   :energy_imex_pcg_as,
@@ -71,6 +72,106 @@ function nonlinear_apply_as(factors, dofs, residual)
     result[indices] .+= factor \ residual[indices]
   end
   return result
+end
+
+"Mutable current-Hessian AS preconditioner implementing Optim.jl's interface."
+mutable struct NonlinearOptimASPreconditioner{E,D}
+  energy::E
+  dofs::D
+  factors::Vector{Any}
+  hessian::Any
+  applications::Int
+  metric_products::Int
+end
+
+function NonlinearOptimASPreconditioner(energy, dofs, u0)
+  preconditioner = NonlinearOptimASPreconditioner(
+    energy, dofs, Any[], nothing, 0, 0
+  )
+  nonlinear_optim_as_prepare!(preconditioner, u0)
+  return preconditioner
+end
+
+"Refresh the local AS factors at Optim.jl's current iterate."
+function nonlinear_optim_as_prepare!(preconditioner, u)
+  H = Energies.hessian(preconditioner.energy, u)
+  preconditioner.hessian = H
+  preconditioner.factors = Any[
+    cholesky(Symmetric(sparse(H[d, d]))) for d in preconditioner.dofs
+  ]
+  return preconditioner
+end
+
+function LinearAlgebra.ldiv!(result, preconditioner::NonlinearOptimASPreconditioner, rhs)
+  result .= nonlinear_apply_as(
+    preconditioner.factors, preconditioner.dofs, rhs
+  )
+  preconditioner.applications += 1
+  return result
+end
+
+function LinearAlgebra.dot(
+  x::AbstractVector,
+  preconditioner::NonlinearOptimASPreconditioner,
+  y::AbstractVector,
+)
+  preconditioner.metric_products += 1
+  return dot(x, preconditioner.hessian * y)
+end
+
+"Optim.jl Hager--Zhang nonlinear CG with one current-Hessian AS batch per direction."
+function nonlinear_source_optim_ncg_as(
+  energy,
+  subdomains;
+  u0,
+  maxiter,
+  tolerance,
+)
+  dofs = [collect(Int, indices) for indices in subdomains]
+  initial_residual = norm(Energies.gradient(energy, u0))
+  energies = Float64[]
+  residuals = Float64[]
+  last_recorded = Ref(copy(u0))
+
+  function record_iterate(state)
+    u = state.metadata["x"]
+    push!(energies, Energies.energy(energy, u))
+    residual = norm(Energies.gradient(energy, u))
+    push!(residuals, residual)
+    last_recorded[] = copy(u)
+    return residual <= tolerance * initial_residual
+  end
+
+  objective(u) = Energies.energy(energy, u)
+  gradient!(storage, u) = copyto!(storage, Energies.gradient(energy, u))
+  preconditioner = NonlinearOptimASPreconditioner(energy, dofs, u0)
+  method = Optim.ConjugateGradient(
+    P=preconditioner,
+    precondprep=nonlinear_optim_as_prepare!,
+  )
+  options = Optim.Options(
+    iterations=maxiter,
+    x_abstol=0.0,
+    x_reltol=0.0,
+    f_abstol=NaN,
+    f_reltol=NaN,
+    g_abstol=0.0,
+    allow_f_increases=true,
+    extended_trace=true,
+    callback=record_iterate,
+    show_warnings=false,
+  )
+  result = Optim.optimize(objective, gradient!, copy(u0), method, options)
+  u = copy(Optim.minimizer(result))
+  if isempty(energies) || u != last_recorded[]
+    push!(energies, Energies.energy(energy, u))
+    push!(residuals, norm(Energies.gradient(energy, u)))
+  end
+  work = NonlinearSourceWork(
+    linear_as_batches=preconditioner.applications,
+    global_jacobian_products=preconditioner.metric_products,
+  )
+  return nonlinear_source_result(u, energies, residuals, work)
 end
 
 "PCG with a fixed number of AS applications, or an accurate relative inner solve."
@@ -222,7 +323,7 @@ function nonlinear_source_vardd(
   )
 end
 
-"Anderson acceleration (type II) of the optimally damped nonlinear RAS map."
+"NonlinearSolve.jl Anderson acceleration of the optimally damped RAS map."
 function nonlinear_source_anderson_ras(
   energy,
   subdomains,
@@ -238,45 +339,41 @@ function nonlinear_source_anderson_ras(
     core_subdomains,
     length(u0),
   )
-  u = copy(u0)
-  energies = [Energies.energy(energy, u)]
-  residuals = [norm(Energies.gradient(energy, u))]
-  initial = residuals[1]
-  iterates = Vector{Vector{Float64}}()
-  fixed_point_residuals = Vector{Vector{Float64}}()
-  work = NonlinearSourceWork()
-
-  for _ = 1:maxiter
+  initial = norm(Energies.gradient(energy, u0))
+  function fixed_point_residual(u, _)
     map = nonlinear_ras_map(energy, u, dofs, restricted)
-    work.nonlinear_local_batches += 1
-    fixed_point_residual = map.next - u
-    push!(iterates, copy(u))
-    push!(fixed_point_residuals, fixed_point_residual)
-    depth = min(history_depth, length(iterates) - 1)
-    candidate = map.next
-    if depth > 0
-      first_index = length(iterates) - depth
-      delta_x = hcat([
-        iterates[j+1] - iterates[j] for j = first_index:length(iterates)-1
-      ]...)
-      delta_f = hcat([
-        fixed_point_residuals[j+1] - fixed_point_residuals[j] for
-        j = first_index:length(fixed_point_residuals)-1
-      ]...)
-      coefficients = delta_f \ fixed_point_residual
-      accelerated = map.next - (delta_x + delta_f) * coefficients
-      # Safeguard the multisecant extrapolation by the common energy merit
-      # function. The unaccelerated nonlinear RAS step is always available.
-      if all(isfinite, accelerated) &&
-         Energies.energy(energy, accelerated) <= Energies.energy(energy, map.next)
-        candidate = accelerated
-      end
-    end
-    u = candidate
-    push!(energies, Energies.energy(energy, u))
-    push!(residuals, norm(Energies.gradient(energy, u)))
-    residuals[end] <= tolerance * initial && break
+    return map.next - u
   end
+
+  problem = NonlinearProblem(fixed_point_residual, copy(u0))
+  # In the sensitivity study, m = 0 denotes the unaccelerated fixed-point
+  # iteration. FixedPointAcceleration.jl calls that algorithm `:Simple`.
+  algorithm = history_depth == 0 ?
+              NonlinearSolve.FixedPointAccelerationJL(algorithm=:Simple) :
+              NonlinearSolve.FixedPointAccelerationJL(
+    algorithm=:Anderson,
+    m=history_depth,
+  )
+  solution = NonlinearSolve.solve(
+    problem,
+    algorithm;
+    # The package stops on the fixed-point defect, while this study reports
+    # the energy-gradient norm. A tighter defect tolerance keeps the common
+    # plotted gradient threshold meaningful without changing the algorithm.
+    abstol=0.01 * tolerance * initial,
+    maxiters=maxiter,
+  )
+  package_result = solution.original
+  inputs = package_result.Inputs_
+  u = ismissing(package_result.FixedPoint_) ?
+      copy(package_result.Outputs_[:, end]) : copy(package_result.FixedPoint_)
+  iterates = [copy(inputs[:, j]) for j in axes(inputs, 2)]
+  push!(iterates, u)
+  energies = [Energies.energy(energy, iterate) for iterate in iterates]
+  residuals = [norm(Energies.gradient(energy, iterate)) for iterate in iterates]
+  work = NonlinearSourceWork(
+    nonlinear_local_batches=package_result.Iterations_,
+  )
   return nonlinear_source_result(u, energies, residuals, work)
 end
 

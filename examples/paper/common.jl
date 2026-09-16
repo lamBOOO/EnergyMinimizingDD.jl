@@ -23,6 +23,9 @@ using Statistics
 using Printf
 using CSV
 using Tables
+using FixedPointAcceleration
+using NonlinearSolve
+using Optim
 
 const PAPER_DIR = @__DIR__
 const DATA_DIR = mkpath(joinpath(PAPER_DIR, "data"))

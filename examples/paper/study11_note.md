@@ -3,7 +3,8 @@
 All methods solve the same triangular P1 discretization of
 
 \[
--\Delta u+\beta u^3=f,\qquad \beta=1,\qquad u|_{\partial\Omega}=0,
+-\Delta u+\beta u^3=f,\qquad \beta\in\{1,10,100\},\qquad
+u|_{\partial\Omega}=0,
 \]
 
 from the same zero initial iterate and stop when the norm of the assembled
@@ -20,12 +21,18 @@ routine.
 The comparison methods are deliberately kept in the example layer rather than
 the package solver API:
 
-- **Anderson--RAS(q)** applies type-II Anderson acceleration
-  [Anderson1965, WalkerNi2011] to the optimally
-  damped nonlinear RAS fixed-point map. The unaccelerated RAS step is retained
-  as an energy-decreasing safeguard. DIIS is not shown as a second method:
-  for this fixed-point problem it is the same multisecant idea with a different
-  parametrization; the original DIIS reference is Pulay1980.
+- **Anderson--RAS(m)** uses NonlinearSolve.jl's
+  `FixedPointAccelerationJL(algorithm=:Anderson, m=m)` adapter for the
+  optimally damped nonlinear RAS fixed-point map. The package owns the
+  extrapolation, conditioning checks, and stopping logic; this study only
+  converts its iterate history to the common output schema.
+- **AS--nonlinear CG (Optim.jl)** uses Optim.jl's
+  `ConjugateGradient`, which implements Hager--Zhang CG-DESCENT with the
+  package's Hager--Zhang line search. Optim's supported `P`/`precondprep`
+  interface refreshes the current Hessian blocks and applies one parallel
+  additive-Schwarz batch to every search direction. Optim.jl does not expose
+  Fletcher--Reeves or Polak--Ribiere variants, so they are not presented as
+  package-generated curves.
 - **Newton--PCG(AS, ν)** forms the exact current Hessian, applies `ν` steps of
   PCG with the one-level additive Schwarz preconditioner, and globalizes the
   inexact Newton direction by an Armijo energy line search. The `ν=accurate`
@@ -38,11 +45,12 @@ the package solver API:
   nonlinear energy and residual. The comparison includes both `q=1` and the
   one-vector-history variant `q=2`.
 
-The focused figure treats standard EMDD, quadratic-model EMDD, and nRAS as
-the primary DD comparison. Newton--PCG is shown as a visually de-emphasized
-reference with quadratic convergence; its faster convergence is context rather
-than the main like-for-like comparison. Using a quadratic local model does not
-by itself give quadratic convergence to quadratic-model EMDD.
+The focused figure treats standard EMDD, quadratic-model EMDD, nRAS, and
+Anderson--RAS as the primary DD comparison. The Optim.jl AS-preconditioned
+nonlinear CG method and Newton--PCG are shown as visually de-emphasized
+linear-AS references. Using a quadratic
+local model does not by itself give quadratic convergence to quadratic-model
+EMDD.
 - **energy-IMEX--PCG(AS)** is the stabilized pseudo-time linearization of
   Spicher and Wihler [SpicherWihler2026], §3.1--3.2, equations (3.1) and (3.7):
   \[
@@ -73,9 +81,9 @@ the following counters separate:
 
 1. parallel **nonlinear local-minimization batches** (nonlinear RAS,
    Anderson--RAS, ASPIN, RASPEN, and varDD),
-2. parallel **linear AS-solve batches** (Newton, energy-IMEX, ASPIN, and the
-   RASPEN Jacobian solve, as well as the linear local batches of quadratic
-   EMDD), and
+2. parallel **linear AS-solve batches** (AS--nonlinear CG, Newton, energy-IMEX,
+   ASPIN, and the RASPEN Jacobian solve, as well as the linear local batches of
+   quadratic EMDD), and
 3. global Jacobian/operator products.
 
 A nonlinear local minimization is not counted as one linear triangular solve.

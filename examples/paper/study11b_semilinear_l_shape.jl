@@ -15,6 +15,8 @@ const LSHAPE_FIG17B_METHODS = (
   :var_dd_quadratic,
   :var_dd_quadratic_history,
   :nonlinear_ras,
+  :anderson_ras,
+  :nonlinear_cg_optim_as,
   :newton_pcg_as_1,
   :newton_pcg_as_2,
   :newton_pcg_as_4,
@@ -33,6 +35,24 @@ function lshape_fig17b_method(
       dofs;
       method=:nonlinear_ras,
       core_subdomains=core,
+      u0=initial,
+      maxiter=maxiter,
+      tolerance=tolerance,
+    )
+  elseif method == :anderson_ras
+    return nonlinear_source_anderson_ras(
+      energy,
+      dofs,
+      core;
+      u0=initial,
+      maxiter=maxiter,
+      tolerance=tolerance,
+      history_depth=4,
+    )
+  elseif method == :nonlinear_cg_optim_as
+    return nonlinear_source_optim_ncg_as(
+      energy,
+      dofs;
       u0=initial,
       maxiter=maxiter,
       tolerance=tolerance,
@@ -156,9 +176,14 @@ function run_study11b()
   )
   if !needs_run(files...)
     cached = loadtable(files[1])
-    expected_cases = Set((case.id, case.beta) for case in LSHAPE_NONLINEARITY_CASES)
-    cached_cases = if hasproperty(cached, :case) && hasproperty(cached, :beta)
-      Set(zip(cached.case, cached.beta))
+    expected_cases = Set(
+      (case.id, case.beta, string(method)) for case in LSHAPE_NONLINEARITY_CASES,
+      method in LSHAPE_FIG17B_METHODS
+    )
+    cached_cases = if hasproperty(cached, :case) &&
+                      hasproperty(cached, :beta) &&
+                      hasproperty(cached, :method)
+      Set(zip(cached.case, cached.beta, cached.method))
     else
       Set()
     end
