@@ -1,5 +1,7 @@
 method,fixed_layers_h20,fixed_layers_h40,fixed_layers_h60,fixed_layers_h80,fixed_layers_h100,fixed_layers_h120,fixed_ratio_h20,fixed_ratio_h40,fixed_ratio_h60,fixed_ratio_h80,fixed_ratio_h100,fixed_ratio_h120,overlap1,overlap2,overlap4,overlap8
 \(\mathrm{EMDD}\;(q=1)\),37,45,44,55,63,71,41,45,48,48,49,50,57,45,34,33
 \(\mathrm{EMDD}\;(q=2)\),17,21,21,24,26,28,19,21,22,22,22,22,26,22,18,18
+\(\mathrm{EMDD}\;(q=3)\),17,20,21,23,25,28,19,20,21,21,21,22,25,21,17,18
+\(\mathrm{EMDD}\;(q=4)\),17,20,20,23,26,28,18,20,20,21,21,21,25,21,17,18
 \(\mathrm{CG{+}AS}\),18,22,22,26,29,31,21,22,23,23,24,24,28,24,19,20
 \(\mathrm{GMRES{+}RAS}\),10,14,19,22,25,27,13,14,16,16,16,17,23,19,14,11

@@ -17,13 +17,16 @@ The stored cost is the number of local subdomain solves: one energy-minimizing D
 sweep, one additive Schwarz stationary step, one RAS stationary step, and one
 additive-Schwarz preconditioner application each count as `m` subdomain solves.
 Figure 12 divides this work count by `m` and plots outer solves.
-The paper-facing five-method variant Figure 12b shows the standard Poisson
-problem `-Delta u = 1`, the positive variable-coefficient manufactured
-solution, and its sign-changing `sin(2*pi*y)` counterpart in separate rows. It
-calls the method **energy-minimizing domain decomposition (EMDD)**. It denotes
-plain additive EMDD by `q=1` (the current iterate) and one-vector history by
-`q=2` (the current and previous iterates); this is a basis-size convention, not
-the `history_depth` keyword value.
+The paper-facing Figure 12b shows the standard Poisson problem `-Delta u = 1`
+and the nontrivial variable-coefficient problem with the sign-changing
+`sin(2*pi*y)` solution in separate rows. It calls the method
+**energy-minimizing domain decomposition (EMDD)** and compares `q=1,2`;
+`q` counts the current iterate plus the retained global iterates, so the
+corresponding `history_depth` values are `0,1`. The plotted metric is the
+relative residual `norm(A*x-b)/norm(A*x0-b)`, consistent with the other problem
+classes. The CSV output retains the absolute residual norm and the relative
+Euclidean error `norm(x-x_sol)/norm(x_sol)` to the direct discrete solution as
+additional diagnostics.
 
 Figure 12d adds a Cartesian Poisson weak-scaling experiment. The subdomain
 grid grows from `2x2` through `8x8`; every subdomain retains `10x10` cells and

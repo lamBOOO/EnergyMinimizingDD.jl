@@ -40,6 +40,15 @@ include(joinpath(@__DIR__, "..", "examples", "paper", "study8_linear_cmp.jl"))
   @test all(diff(last.(history)) .<= 1e-12)
   @test all(first.(history) .== (0:(length(history) - 1)) .* nsub(schwarz))
 
+  x_sol = K \ b
+  error_history = gmres_ras(
+    K, b, schwarz; maxiter=40, tol=1e-11, x_sol
+  )
+  @test length(first(error_history)) == 3
+  @test first(error_history)[3] ≈ norm(ones(length(b)) - x_sol) / norm(x_sol)
+  @test last(error_history)[2] < 1e-10
+  @test last(error_history)[3] < 1e-10
+
   high_contrast, _, _, _, _ = laplace_setup(
     8, 3, 1;
     diffusion=x -> x.data[1] < 0.5 ? 100.0 : 1.0,

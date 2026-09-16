@@ -100,24 +100,28 @@ function as_stationary(K, b, S; theta, maxsweeps, tol)
   return hist
 end
 
-function ras_stationary(K, b, S; maxsweeps, tol)
+function ras_stationary(K, b, S; maxsweeps, tol, x_sol=nothing)
   x = ones(size(K, 1))
-  hist = Tuple{Int,Float64}[]
+  hist = isnothing(x_sol) ? Tuple{Int,Float64}[] : Tuple{Int,Float64,Float64}[]
+  entry(solves, residual) = isnothing(x_sol) ? (solves, residual) :
+    (solves, residual, norm(x - x_sol) / norm(x_sol))
   for k = 1:maxsweeps
     r = b - K * x
-    push!(hist, ((k - 1) * nsub(S), norm(r)))
+    push!(hist, entry((k - 1) * nsub(S), norm(r)))
     norm(r) < tol && return hist
     x .+= apply_RAS(S, r)
   end
-  push!(hist, (maxsweeps * nsub(S), norm(b - K * x)))
+  push!(hist, entry(maxsweeps * nsub(S), norm(b - K * x)))
   return hist
 end
 
-function pcg_as(K, b, S; maxiter, tol)
+function pcg_as(K, b, S; maxiter, tol, x_sol=nothing)
   m = nsub(S)
   x = ones(size(K, 1))
   r = b - K * x
-  hist = [(0, norm(r))]
+  entry(solves, residual) = isnothing(x_sol) ? (solves, residual) :
+    (solves, residual, norm(x - x_sol) / norm(x_sol))
+  hist = [entry(0, norm(r))]
   z = apply_AS(S, r)
   solves = m
   p = copy(z)
@@ -127,7 +131,7 @@ function pcg_as(K, b, S; maxiter, tol)
     alpha = rz / dot(p, Kp)
     x .+= alpha .* p
     r .-= alpha .* Kp
-    push!(hist, (solves, norm(r)))
+    push!(hist, entry(solves, norm(r)))
     norm(r) < tol && return hist
     z = apply_AS(S, r)
     solves += m
@@ -147,13 +151,14 @@ reported residual is the true physical residual represented by the Arnoldi
 least-squares problem. One iteration uses one global `K` application and one
 parallel batch of `m` RAS local solves.
 """
-function gmres_ras(K, b, S; maxiter, tol)
+function gmres_ras(K, b, S; maxiter, tol, x_sol=nothing)
   n = length(b)
   m = nsub(S)
   x0 = ones(n)
   r0 = b - K * x0
   beta = norm(r0)
-  hist = [(0, beta)]
+  relative_error(x) = norm(x - x_sol) / norm(x_sol)
+  hist = isnothing(x_sol) ? [(0, beta)] : [(0, beta, relative_error(x0))]
   beta < tol && return hist
 
   V = zeros(n, maxiter + 1)
@@ -182,15 +187,22 @@ function gmres_ras(K, b, S; maxiter, tol)
     residual = norm(
       view(rhs, 1:k+1) - view(H, 1:k+1, 1:k) * coefficients
     )
-    push!(hist, (k * m, residual))
+    if isnothing(x_sol)
+      push!(hist, (k * m, residual))
+    else
+      x = x0 + view(Z, :, 1:k) * coefficients
+      push!(hist, (k * m, residual, relative_error(x)))
+    end
     residual < tol && return hist
     H[k+1, k] <= eps(beta) && return hist
   end
   return hist
 end
 
-function var_dd_linear_history(K, b, dofspar; maxiter, tol, kwargs...)
-  _, _, _, _, resnorm_hist = Solvers.var_dd(
+function var_dd_linear_history(
+  K, b, dofspar; maxiter, tol, x_sol=nothing, kwargs...
+)
+  _, _, _, solution_hist, resnorm_hist = Solvers.var_dd(
     Energies.QuadraticEnergy(K, b),
     dofspar;
     maxiter = maxiter,
@@ -200,13 +212,23 @@ function var_dd_linear_history(K, b, dofspar; maxiter, tol, kwargs...)
   )
   m = length(dofspar)
   initial_residual = norm(b - K * ones(length(b)))
+  if isnothing(x_sol)
+    return vcat(
+      [(0, initial_residual)],
+      [(k * m, rn) for (k, rn) in enumerate(resnorm_hist)],
+    )
+  end
+  relative_errors = [norm(x - x_sol) / norm(x_sol) for x in solution_hist]
   return vcat(
-    [(0, initial_residual)],
-    [(k * m, rn) for (k, rn) in enumerate(resnorm_hist)],
+    [(0, initial_residual, relative_errors[1])],
+    [
+      (k * m, rn, relative_errors[k+1]) for
+      (k, rn) in enumerate(resnorm_hist)
+    ],
   )
 end
 
-"Generate one five-method reference row used in Figure 12b."
+"Generate one reference problem row used in Figure 12b."
 function run_study8_paper_problem(file, problem_label, problem_setup)
   if !needs_run(file)
     println("study8 $problem_label: cached, skipping")
@@ -227,12 +249,19 @@ function run_study8_paper_problem(file, problem_label, problem_setup)
     m = Int[],
     solves = Int[],
     resnorm = Float64[],
+    relative_residual = Float64[],
+    relative_error = Float64[],
   )
-  record(method, m, hist) = for (solves, residual) in hist
-    push!(rows.method, method)
-    push!(rows.m, m)
-    push!(rows.solves, solves)
-    push!(rows.resnorm, residual)
+  record(method, m, hist) = begin
+    initial_residual = first(hist)[2]
+    for (solves, residual, relative_error) in hist
+      push!(rows.method, method)
+      push!(rows.m, m)
+      push!(rows.solves, solves)
+      push!(rows.resnorm, residual)
+      push!(rows.relative_residual, residual / initial_residual)
+      push!(rows.relative_error, relative_error)
+    end
   end
 
   for m in ms
@@ -244,28 +273,32 @@ function run_study8_paper_problem(file, problem_label, problem_setup)
       cell_owners = owners,
       return_core_partition = true,
     )
+    x_sol = K \ b
     S = schwarz_setup(K, dofspar; core_dofs)
     tol = relative_tolerance * norm(b - K * ones(length(b)))
     record(
       "var_dd_additive",
       m,
-      var_dd_linear_history(K, b, dofspar; maxiter = maxsweeps, tol = tol),
+      var_dd_linear_history(
+        K, b, dofspar; maxiter = maxsweeps, tol = tol, x_sol
+      ),
     )
     record(
       "var_dd_additive_history",
       m,
       var_dd_linear_history(
-        K,
-        b,
-        dofspar;
+        K, b, dofspar;
         maxiter = maxsweeps,
         tol = tol,
+        x_sol,
         history_depth = 1,
       ),
     )
-    record("ras", m, ras_stationary(K, b, S; maxsweeps, tol))
-    record("pcg_as", m, pcg_as(K, b, S; maxiter = maxsweeps, tol))
-    record("gmres_ras", m, gmres_ras(K, b, S; maxiter = maxsweeps, tol))
+    record("ras", m, ras_stationary(K, b, S; maxsweeps, tol, x_sol))
+    record("pcg_as", m, pcg_as(K, b, S; maxiter = maxsweeps, tol, x_sol))
+    record(
+      "gmres_ras", m, gmres_ras(K, b, S; maxiter = maxsweeps, tol, x_sol)
+    )
     println("  $problem_label m = $m done")
   end
   savetable(file, rows)

@@ -16,6 +16,14 @@ isdefined(Main, :gmres_ras) || include("study8_linear_cmp.jl")
 const STUDY8_SENSITIVITY_METHODS = (
   "var_dd_additive", "var_dd_additive_history", "pcg_as", "gmres_ras"
 )
+const STUDY8_SCALING_METHODS = (
+  "var_dd_additive",
+  "var_dd_additive_history",
+  "emdd_q3",
+  "emdd_q4",
+  "pcg_as",
+  "gmres_ras",
+)
 
 function inclusion_diffusion(contrast)
   return x -> begin
@@ -50,6 +58,14 @@ function study8_method_history(
       tol=absolute_tolerance,
       history_depth,
       subspace_callback,
+    )
+  elseif method in ("emdd_q3", "emdd_q4")
+    q = parse(Int, string(last(method)))
+    var_dd_linear_history(
+      K, b, dofspar;
+      maxiter,
+      tol=absolute_tolerance,
+      history_depth=q - 1,
     )
   elseif method == "pcg_as"
     pcg_as(K, b, schwarz; maxiter, tol=absolute_tolerance)
@@ -300,7 +316,8 @@ function run_study8_sensitivity()
         push!(convergence.contrast, contrast)
         push!(
           convergence.history_depth,
-          method == "var_dd_additive_history" ? history_depth : 0,
+          method == "var_dd_additive_history" ? history_depth :
+            method == "emdd_q3" ? 2 : method == "emdd_q4" ? 3 : 0,
         )
         push!(convergence.delta_over_H, delta_over_H)
         push!(convergence.iteration, iteration - 1)
@@ -343,6 +360,7 @@ function run_study8_sensitivity()
       m,
       2,
       1.0;
+      methods=STUDY8_SCALING_METHODS,
       cell_owners=nested_owners,
     )
     scaled_overlap = SMALL ? max(1, N ÷ 10) : N ÷ 20
@@ -353,13 +371,22 @@ function run_study8_sensitivity()
       m,
       scaled_overlap,
       1.0;
+      methods=STUDY8_SCALING_METHODS,
       cell_owners=nested_owners,
     )
   end
 
   overlap_N = SMALL ? 16 : 64
   for overlap in (SMALL ? [1, 2] : [1, 2, 4, 8])
-    run_configuration("overlap", "layer_sweep", overlap_N, m, overlap, 1.0)
+    run_configuration(
+      "overlap",
+      "layer_sweep",
+      overlap_N,
+      m,
+      overlap,
+      1.0;
+      methods=STUDY8_SCALING_METHODS,
+    )
   end
 
   contrast_N = SMALL ? 16 : 64

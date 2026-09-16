@@ -1018,15 +1018,14 @@ function fig12_poisson_cmp()
 end
 
 # Paper-facing subset of Figure 12 for the standard Poisson problem and the
-# variable-coefficient manufactured problem with and without a sign change.
+# sign-changing variable-coefficient manufactured problem.
 # Here q counts the current iterate as the first global vector, so q=1 is plain
-# additive varDD and q=2 adds u_{k-1}.
+# additive varDD and q=2 retains the preceding global iterate.
 function fig12b_poisson_cmp_paper()
   problem_rows = (
-    ("standard Poisson", loadtable("study8_linear_cmp_poisson.csv")),
-    ("variable, no sign change", loadtable("study8_linear_cmp.csv")),
+    ("Poisson", loadtable("study8_linear_cmp_poisson.csv")),
     (
-      "variable, sign change",
+      "variable diffusion",
       loadtable("study8_linear_cmp_sign_changing.csv"),
     ),
   )
@@ -1054,18 +1053,18 @@ function fig12b_poisson_cmp_paper()
     "gmres_ras" => :pentagon,
   )
   colors = tab10_colors(length(methods))
-  finite_res = vcat([
-    tbl.resnorm[tbl.resnorm .> 0] for (_, tbl) in problem_rows
+  finite_residuals = vcat([
+    tbl.relative_residual[tbl.relative_residual .> 0] for (_, tbl) in problem_rows
   ]...)
-  ylims = (1e-9, maximum(finite_res) * 3)
-  yticks = LogTicks(collect(1:-2:-9))
-  fig = Figure(size=(PAPER_FULL_WIDTH, 650))
+  ylims = (1e-11, maximum(finite_residuals) * 3)
+  yticks = LogTicks(collect(1:-2:-11))
+  fig = Figure(size=(PAPER_FULL_WIDTH, 500))
   for (row, (problem_label, tbl)) in enumerate(problem_rows)
     for (column, m) in enumerate(ms)
       ax = Axis(
         fig[row, column];
         xlabel=row == length(problem_rows) ? "iteration" : "",
-        ylabel=column == 1 ? "$problem_label\nres. norm ‖Axₖ-b‖₂" : "",
+        ylabel=column == 1 ? "$problem_label\nrel. res.  ‖Axₖ-b‖₂/‖Ax₀-b‖₂" : "",
         ylabelsize=13,
         yscale=log10,
         yticks,
@@ -1073,11 +1072,12 @@ function fig12b_poisson_cmp_paper()
         limits=((0, 100), ylims),
       )
       for (index, method) in enumerate(methods)
-        mask = (tbl.m .== m) .& (tbl.method .== method) .& (tbl.resnorm .> 0)
+        mask = (tbl.m .== m) .& (tbl.method .== method) .&
+          (tbl.relative_residual .> 0)
         add_series!(
           ax,
           pick(tbl, :solves, mask) ./ m,
-          pick(tbl, :resnorm, mask);
+          pick(tbl, :relative_residual, mask);
           label=labels[method],
           color=colors[index],
           marker=markers[method],
