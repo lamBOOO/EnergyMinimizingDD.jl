@@ -7,6 +7,8 @@ isdefined(Main, :check_generated_tables) ||
   methods = (
     "var_dd_additive",
     "var_dd_additive_history",
+    "emdd_q3",
+    "emdd_q4",
     "pcg_as",
     "gmres_ras",
   )
