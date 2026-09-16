@@ -3,8 +3,10 @@
 # blocks. The local work categories are retained separately because a varDD
 # local eigenproblem is not equivalent to an AS triangular solve.
 
-isdefined(Main, :PAPER_COMMON) || include("common.jl")
+isdefined(Main, :needs_run) || include("common.jl")
 isdefined(Main, :EVP_COMMON) || include("evp_common.jl")
+
+using Printf
 
 const EVP_COMPARISON_POTENTIAL_SCALE = 1.0
 
@@ -76,10 +78,10 @@ function run_study9()
     println("study9: cached, skipping")
     return
   end
-  println("study9: EVP vs LOPSD, LOBPCG, JD, and shift-invert Lanczos with AS")
+  println("study9: EVP vs LOPSD, LOPCG, LOBPCG, and JD-GMRES with AS")
   Random.seed!(1)
 
-  N = SMALL ? 10 : 70
+  N = SMALL ? 10 : 64
   ms = SMALL ? [2] : [4, 16, 64]
   overlap = 2
   relative_tolerance = SMALL ? 1e-5 : 1e-6

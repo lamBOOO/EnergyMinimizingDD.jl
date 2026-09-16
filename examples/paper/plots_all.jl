@@ -1064,7 +1064,7 @@ function fig12b_poisson_cmp_paper()
   ]...)
   ylims = (1e-11, maximum(finite_residuals) * 3)
   yticks = LogTicks(collect(1:-2:-11))
-  fig = Figure(size=(PAPER_FULL_WIDTH, 500))
+  fig = Figure(size = (max(430 * length(ms), 1200), 350))
   for (row, (problem_label, tbl)) in enumerate(problem_rows)
     for (column, m) in enumerate(ms)
       ax = Axis(
@@ -1289,12 +1289,7 @@ function fig13_evp_cmp()
     "jd_gmres_as_2",
     "jd_gmres_as_4",
   )
-  lanczos_methods = (
-    "si_lanczos_pcg_as_8",
-    "si_lanczos_pcg_as_16",
-    "si_lanczos_pcg_as_32",
-  )
-  methods = (primary_methods..., jd_methods..., lanczos_methods...)
+  methods = (primary_methods..., jd_methods...)
   labels = Dict(
     "var_dd" => "EMDD (q = 1)",
     "var_dd_history" => "EMDD (q = 2)",
@@ -1303,9 +1298,6 @@ function fig13_evp_cmp()
     "jd_gmres_as_1" => "JD-GMRES(AS, 1)",
     "jd_gmres_as_2" => "JD-GMRES(AS, 2)",
     "jd_gmres_as_4" => "JD-GMRES(AS, 4)",
-    "si_lanczos_pcg_as_8" => "SI-Lanczos-PCG(AS, 8)",
-    "si_lanczos_pcg_as_16" => "SI-Lanczos-PCG(AS, 16)",
-    "si_lanczos_pcg_as_32" => "SI-Lanczos-PCG(AS, 32)",
   )
   markers = Dict(
     "var_dd" => :circle,
@@ -1315,38 +1307,30 @@ function fig13_evp_cmp()
     "jd_gmres_as_1" => :diamond,
     "jd_gmres_as_2" => :pentagon,
     "jd_gmres_as_4" => :diamond,
-    "si_lanczos_pcg_as_8" => :cross,
-    "si_lanczos_pcg_as_16" => :xcross,
-    "si_lanczos_pcg_as_32" => :star4,
   )
   primary_colors = tab10_colors(length(primary_methods))
-  jd_colors = fill(:purple, length(jd_methods))
-  jd_linestyles = [(:dot, :dense), (:dash, :dense), (:dashdot, :dense)]
-  lanczos_colors = [
+  jd_colors = [
     RGBf(level, level, level) for level in (0.55, 0.38, 0.20)
   ]
-  lanczos_linestyles = [(:dot, :dense), (:dash, :dense), (:dashdot, :dense)]
-  colors = [primary_colors..., jd_colors..., lanczos_colors...]
+  jd_linestyles = [(:dot, :dense), (:dash, :dense), (:dashdot, :dense)]
+  colors = [primary_colors..., jd_colors...]
   linestyles = [
     fill(:solid, length(primary_methods))...,
     jd_linestyles...,
-    lanczos_linestyles...,
   ]
   linewidths = [
     fill(2.8, length(primary_methods))...,
     fill(1.8, length(jd_methods))...,
-    fill(1.8, length(lanczos_methods))...,
   ]
   markersizes = [
     fill(MARKERSIZE, length(primary_methods))...,
     fill(MARKERSIZE, length(jd_methods))...,
-    fill(MARKERSIZE, length(lanczos_methods))...,
   ]
   finite_res = tbl.relative_residual[tbl.relative_residual .> 0]
   ylims = (1e-6 * 0.5, maximum(finite_res) * 1.5)
   ytick_exps = sort(collect(floor(Int, log10(ylims[2])):-2:ceil(Int, log10(ylims[1]))))
   yticks = LogTicks(ytick_exps)
-  fig = Figure(size=(PAPER_FULL_WIDTH, 500))
+  fig = Figure(size=(PAPER_FULL_WIDTH, 390))
   for (j, m) in enumerate(ms)
     ax = Axis(
       fig[1, j];
@@ -1380,29 +1364,23 @@ function fig13_evp_cmp()
     add_evp_solution_inset!(
       fig[1, j],
       solutions;
-      halign=0.77,
-      valign=0.98,
-      inset_size=0.25,
+      halign=0.68,
+      valign=0.97,
+      inset_size=0.23,
       inset_title="uₕ",
     )
     add_partition_inset!(
       fig[1, j],
       parts,
       m;
-      halign=1.03,
-      valign=0.98,
-      inset_size=0.25,
+      halign=0.99,
+      valign=0.97,
+      inset_size=0.23,
       inset_title="Ωᵢ",
     )
   end
-  Label(
-    fig[2, 1:length(ms)],
-    "Primary eigensolver comparison";
-    fontsize=16,
-    font=:bold,
-  )
   Legend(
-    fig[3, 1:length(ms)],
+    fig[2, 1:length(ms)],
     legend_line_marker_elements(
       primary_methods,
       markers;
@@ -1417,14 +1395,8 @@ function fig13_evp_cmp()
     nbanks = 1,
     framevisible = true,
   )
-  Label(
-    fig[4, 1:length(ms)],
-    "JD-GMRES references (fixed GMRES iterations)";
-    fontsize=16,
-    font=:bold,
-  )
   Legend(
-    fig[5, 1:length(ms)],
+    fig[3, 1:length(ms)],
     legend_line_marker_elements(
       jd_methods,
       markers;
@@ -1436,29 +1408,6 @@ function fig13_evp_cmp()
       markerstrokewidths=fill(0.7, length(jd_methods)),
     ),
     [labels[method] for method in jd_methods];
-    orientation=:horizontal,
-    nbanks=1,
-    framevisible=true,
-  )
-  Label(
-    fig[6, 1:length(ms)],
-    "SI-Lanczos references (fixed PCG iterations)";
-    fontsize=16,
-    font=:bold,
-  )
-  Legend(
-    fig[7, 1:length(ms)],
-    legend_line_marker_elements(
-      lanczos_methods,
-      markers;
-      markersizes=fill(MARKERSIZE, length(lanczos_methods)),
-      colors=lanczos_colors,
-      linestyles=lanczos_linestyles,
-      linewidths=fill(1.8, length(lanczos_methods)),
-      markerstrokecolors=fill(:black, length(lanczos_methods)),
-      markerstrokewidths=fill(0.7, length(lanczos_methods)),
-    ),
-    [labels[method] for method in lanczos_methods];
     orientation=:horizontal,
     nbanks=1,
     framevisible=true,

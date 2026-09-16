@@ -16,11 +16,6 @@ const EVP_COMPARISON_METHODS = (
   :jd_gmres_as_1,
   :jd_gmres_as_2,
   :jd_gmres_as_4,
-  :si_lanczos_pcg_as_2,
-  :si_lanczos_pcg_as_4,
-  :si_lanczos_pcg_as_8,
-  :si_lanczos_pcg_as_16,
-  :si_lanczos_pcg_as_32,
 )
 
 const EVP_JD_GMRES_ITERATIONS = Dict(
