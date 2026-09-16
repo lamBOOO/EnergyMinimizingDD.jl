@@ -43,7 +43,11 @@ run_study11_sensitivity()
 run_study12()
 include("plots_all.jl")
 make_all_figures()
-include("tables_all.jl")
-make_fig18_table()
-make_fig12d_table()
+if SMALL
+  println("tables: skipped in SMALL mode (publication tables require the full parameter grids)")
+else
+  include("tables_all.jl")
+  make_fig18_table()
+  make_fig12d_table()
+end
 @printf("run_all: finished in %.1f min\n", (time() - t0) / 60)

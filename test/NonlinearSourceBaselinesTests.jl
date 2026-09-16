@@ -43,6 +43,17 @@ isdefined(Main, :NONLINEAR_SOURCE_METHODS) ||
   @test anderson.residual_history[end] < 1e-4 * initial
   @test anderson.nonlinear_local_batches == length(anderson.energy_history) - 1
 
+  nonlinear_cg = nonlinear_source_optim_ncg_as(
+    energy,
+    subdomains;
+    u0,
+    maxiter=100,
+    tolerance=1e-9,
+  )
+  @test nonlinear_cg.residual_history[end] < 1e-8 * initial
+  @test nonlinear_cg.linear_as_batches > 0
+  @test nonlinear_cg.global_jacobian_products > 0
+
   newton = nonlinear_source_newton_pcg_as(
     energy,
     subdomains;
