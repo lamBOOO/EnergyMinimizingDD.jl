@@ -9,10 +9,15 @@ using EnergyMinimizingDD
 makedocs(
     sitename = "EnergyMinimizingDD",
     modules = [EnergyMinimizingDD],
+    repo = "github.com/lamBOOO/EnergyMinimizingDD.jl/blob/{commit}{path}#{line}",
     checkdocs = :none,
     format = Documenter.HTML(),
     pages = [
         "Home" => "index.md",
         "API" => "api.md"
     ]
+)
+
+deploydocs(
+    repo = "github.com/lamBOOO/EnergyMinimizingDD.jl.git",
 )
