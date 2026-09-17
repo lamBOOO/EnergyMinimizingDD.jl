@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://github.com/lamBOOO/EnergyMinimizingDD.jl/actions/workflows/ci.yml"><img src="https://github.com/lamBOOO/EnergyMinimizingDD.jl/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
   <a href="https://julialang.org/"><img src="https://img.shields.io/badge/Julia-1.10%2B-9558B2?logo=julia&logoColor=white" alt="Julia 1.10 or newer"></a>
-  <a href="docs/src/index.md"><img src="https://img.shields.io/badge/docs-getting%20started-2B6CB0" alt="Documentation"></a>
+  <a href="https://lambooo.github.io/EnergyMinimizingDD.jl/dev/"><img src="https://img.shields.io/badge/docs-dev-2B6CB0" alt="Documentation"></a>
   <a href="#project-status"><img src="https://img.shields.io/badge/status-experimental-EA8C00" alt="Experimental status"></a>
 </p>
 
