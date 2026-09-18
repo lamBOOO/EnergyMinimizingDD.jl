@@ -381,7 +381,7 @@ function inf_step(
     )
   end
 
-  return _minimize_subspace(e, _gp_local_space(u_cur, idx_sub); initial = u_cur)
+  return _scf_subspace(e, _gp_local_space(u_cur, idx_sub); initial = u_cur)
 end
 
 function inf_step_with_info(
@@ -401,16 +401,98 @@ function inf_step_with_info(
 
   local_space = _gp_local_space(u_cur, idx_sub)
   stats = Ref{Any}(nothing)
-  u = _minimize_subspace(e, local_space; initial=u_cur, info_ref=stats)
+  u = _scf_subspace(e, local_space; initial=u_cur, info_ref=stats)
   return (
     u=u,
     info=(
       dimension=size(local_space, 2),
       iterations=stats[].iterations,
       converged=stats[].converged,
-      residual=stats[].gradient_norm,
+      residual=stats[].residual_norm,
       k_nnz=-1,
       factor_nnz=-1,
+    ),
+  )
+end
+
+function inf_step(
+  model::Energies.GrossPitaevskiiTangentQuadraticModel{Float64},
+  ::Vector{Float64},
+  idx_sub::AbstractVector,
+)
+  return tangent_quadratic_gp_step(model, idx_sub).u
+end
+
+function inf_step_with_info(
+  model::Energies.GrossPitaevskiiTangentQuadraticModel{Float64},
+  ::Vector{Float64},
+  idx_sub::AbstractVector;
+  collect_info::Bool=false,
+)
+  return tangent_quadratic_gp_step(model, idx_sub)
+end
+
+"""
+Solve one local tangent quadratic GP model by a sparse KKT system in
+`span{u, e_j : j in idx_sub}`. The last KKT equation enforces the linearized
+mass constraint, and the resulting candidate is retracted to the mass sphere.
+"""
+function tangent_quadratic_gp_step(
+  model::Energies.GrossPitaevskiiTangentQuadraticModel{Float64},
+  idx_sub::AbstractVector,
+)
+  active = collect(Int, idx_sub)
+  isempty(active) && return (
+    u=copy(model.u),
+    info=(
+      dimension=0,
+      iterations=0,
+      converged=true,
+      residual=0.0,
+      k_nnz=0,
+      factor_nnz=0,
+    ),
+  )
+
+  u = model.u
+  H = model.H
+  Mu = model.M * u
+  Hu = H * u
+  local_dimension = 1 + length(active)
+  reduced_hessian = spzeros(Float64, local_dimension, local_dimension)
+  reduced_hessian[1, 1] = dot(u, Hu)
+  reduced_hessian[1, 2:end] .= Hu[active]
+  reduced_hessian[2:end, 1] .= Hu[active]
+  reduced_hessian[2:end, 2:end] = sparse(H[active, active])
+  reduced_gradient = vcat(dot(u, model.residual), model.residual[active])
+  tangent_constraint = vcat(dot(u, Mu), Mu[active])
+
+  kkt = [
+    reduced_hessian sparse(reshape(tangent_constraint, :, 1));
+    sparse(reshape(tangent_constraint, 1, :)) spzeros(1, 1)
+  ]
+  rhs = vcat(-reduced_gradient, 0.0)
+  factor = lu(kkt)
+  solution = factor \ rhs
+  coefficients = view(solution, 1:local_dimension)
+  all(isfinite, coefficients) || throw(ErrorException(
+    "local tangent quadratic GP solve produced non-finite coefficients",
+  ))
+
+  candidate = (1 + coefficients[1]) .* u
+  candidate[active] .+= view(coefficients, 2:local_dimension)
+  Energies.normalize_M!(candidate, model.M)
+  dot(candidate, model.M * u) < 0 && (candidate .*= -1)
+  kkt_residual = norm(kkt * solution - rhs)
+  return (
+    u=candidate,
+    info=(
+      dimension=local_dimension - 1,
+      iterations=1,
+      converged=kkt_residual <= 1e-9 * max(1.0, norm(rhs)),
+      residual=kkt_residual,
+      k_nnz=nnz(kkt),
+      factor_nnz=nnz(factor.L) + nnz(factor.U),
     ),
   )
 end
@@ -698,14 +780,15 @@ function m_orthonormal_basis(X::AbstractMatrix, M::AbstractMatrix)
 end
 
 """
-    _minimize_subspace(e, X; initial=X[:, 1], maxiter=200, tol=1e-9)
+    _scf_subspace(e, X; initial=X[:, 1], maxiter=200, tol=1e-9)
 
-Minimize the scale-invariant Gross--Pitaevskii quotient in `range(X)` using
-unconstrained L-BFGS in reduced coordinates. Since the quotient itself is
-scale invariant, no normalization constraint is imposed during optimization;
-only the returned representative is M-normalized.
+Solve the Gross--Pitaevskii nonlinear eigenproblem in `range(X)` by a damped
+self-consistent-field iteration. The basis is M-orthonormal, so every SCF
+iterate is normalized explicitly. Each update uses the ground state of the
+Hamiltonian frozen at the current density and backtracks along that SCF
+direction only when needed to retain energy monotonicity.
 """
-function _minimize_subspace(
+function _scf_subspace(
   e::Energies.GrossPitaevskiiRayleighQuotient{Float64},
   X::AbstractMatrix{Float64};
   initial::AbstractVector{Float64} = X[:, 1],
@@ -725,36 +808,79 @@ function _minimize_subspace(
     alpha ./= norm(alpha)
   end
 
-  function objective(alpha)
-    dot(alpha, alpha) > eps(Float64) || return Inf
+  K_reduced = Symmetric(Q' * e.K * Q)
+
+  function reduced_density(alpha)
+    u = Q * alpha
+    if !isnothing(e.density_matrix)
+      return Symmetric(Q' * e.density_matrix(u) * Q)
+    end
+
+    # If C(x) = T(x,x,x), polarization gives
+    # T(u,u,v) = (C(u+v) - C(u-v) - 2C(v)) / 6. Thus the
+    # frozen-density action can be recovered from the legacy cubic callback.
+    C_u_plus = Vector{Float64}(undef, size(Q, 1))
+    C_u_minus = similar(C_u_plus)
+    density_Q = similar(Q)
+    for j in axes(Q, 2)
+      q = view(Q, :, j)
+      C_u_plus .= e.cubic_gradient(u .+ q)
+      C_u_minus .= e.cubic_gradient(u .- q)
+      view(density_Q, :, j) .=
+        (C_u_plus .- C_u_minus .- 2 .* e.cubic_gradient(q)) ./ 6
+    end
+    return Symmetric(Q' * density_Q)
+  end
+
+  function state_energy(alpha)
     return Energies.energy(e, Q * alpha)
   end
 
-  function reduced_gradient!(storage, alpha)
-    dot(alpha, alpha) > eps(Float64) || throw(
-      ArgumentError("reduced GP quotient is undefined at the zero vector"),
-    )
-    storage .= Q' * Energies.gradient(e, Q * alpha)
-    return storage
+  converged = false
+  residual_norm = Inf
+  iterations = 0
+  for iteration in 0:maxiter
+    H = Symmetric(K_reduced + e.beta .* reduced_density(alpha))
+    Halpha = H * alpha
+    residual = Halpha .- dot(alpha, Halpha) .* alpha
+    residual_norm = norm(residual)
+    if residual_norm <= tol
+      converged = true
+      iterations = iteration
+      break
+    end
+    iteration == maxiter && (iterations = maxiter; break)
+
+    next_alpha = eigen(H, 1:1).vectors[:, 1]
+    dot(alpha, next_alpha) < 0 && (next_alpha .*= -1)
+    direction = next_alpha .- dot(alpha, next_alpha) .* alpha
+    norm(direction) > eps(Float64) || (iterations = iteration; break)
+
+    energy0 = state_energy(alpha)
+    slope = 2 * dot(residual, direction)
+    step = 1.0
+    accepted = false
+    while step >= 2.0^-40
+      trial = alpha .+ step .* direction
+      trial ./= norm(trial)
+      trial_energy = state_energy(trial)
+      if trial_energy <= energy0 + 1e-4 * step * min(slope, 0.0) +
+                         10eps(Float64) * max(1.0, abs(energy0))
+        alpha = trial
+        accepted = true
+        break
+      end
+      step /= 2
+    end
+    iterations = iteration + 1
+    accepted || break
   end
 
-  result = Optim.optimize(
-    objective,
-    reduced_gradient!,
-    alpha,
-    Optim.LBFGS(),
-    Optim.Options(
-      iterations = maxiter,
-      g_abstol = tol,
-      allow_f_increases = false,
-      show_warnings = false,
-    ),
-  )
-  u = Q * Optim.minimizer(result)
+  u = Q * alpha
   isnothing(info_ref) || (info_ref[] = (
-    iterations=Optim.iterations(result),
-    converged=Optim.converged(result),
-    gradient_norm=Optim.g_residual(result),
+    iterations=iterations,
+    converged=converged,
+    residual_norm=residual_norm,
   ))
 
   # Fix the arbitrary sign for stable histories and post-processing.
@@ -840,7 +966,7 @@ function combine_step(
       sspace,
     )
   end
-  return _minimize_subspace(
+  return _scf_subspace(
     e,
     sspace;
     initial = initial,
@@ -1464,7 +1590,9 @@ function restrict_local_candidates!(
 end
 
 """
-    var_dd(e, subdomain_dofs; maxiter=50, tol=1e-8, quadratic_model=false, ...)
+    var_dd(e, subdomain_dofs; maxiter=50, tol=1e-8, quadratic_model=false,
+           frozen_gp_model=false, tangent_gp_model=false,
+           density_mixing_alpha=1.0, ...)
 
 Variational domain decomposition algorithm for solving various energy minimization problems.
 
@@ -1489,6 +1617,17 @@ Variational domain decomposition algorithm for solving various energy minimizati
   the start of each outer sweep and use it for the local subdomain solves. The
   second-level combination, convergence test, and histories use the original
   energy. This requires an energy Hessian.
+- `frozen_gp_model::Bool=false`: For a Gross--Pitaevskii energy, freeze the
+  nonlinear density at the current normalized global iterate and use the
+  resulting generalized linear eigenproblem for every local solve in that
+  sweep. The second-level combination remains a full nonlinear GP solve.
+- `density_mixing_alpha::Float64=1.0`: For the frozen GP model, use the mixed
+  density `alpha * rho_k + (1-alpha) * rho_{k-1}` after the first sweep.
+  `alpha=1` recovers the unmixed frozen-density method.
+- `tangent_gp_model::Bool=false`: For a Gross--Pitaevskii energy, solve one
+  quadratic Taylor model of the physical energy in each enriched local tangent
+  space. Candidates are retracted to unit mass; the second-level combination
+  still minimizes the full nonlinear GP quotient.
 - `sweep::Symbol=:additive`: Local-update mode. `:additive` forms all local
   candidates from `u_k`, so those `m` solves can run in parallel.
   `:multiplicative` feeds each local update into the next subdomain and thus
@@ -1511,6 +1650,8 @@ Variational domain decomposition algorithm for solving various energy minimizati
   `local_solve_callback(iteration, subdomain, info)` after each local solve.
   For generalized Rayleigh quotients, `info` records the augmented-pencil
   dimension, LOBPCG iterations, convergence, and sparse factor sizes. For
+  Gross--Pitaevskii energies it records the reduced dimension, SCF iterations,
+  convergence, and projected nonlinear-eigenproblem residual. For other
   nonlinear energies it records the reduced dimension, L-BFGS iterations,
   convergence, projected residual, and energy evaluations.
 - `verbose::Bool=true`: Print per-iteration convergence information
@@ -1525,6 +1666,9 @@ function var_dd(
   history_depth::Int = 0,
   mixing_omega::Float64 = 0.0,
   quadratic_model::Bool = false,
+  frozen_gp_model::Bool = false,
+  tangent_gp_model::Bool = false,
+  density_mixing_alpha::Float64 = 1.0,
   sweep::Symbol = :additive,
   restriction::Symbol = :none,
   coarse_basis = nothing,
@@ -1546,6 +1690,26 @@ function var_dd(
   restriction == :partition_of_unity && sweep != :additive && throw(
     ArgumentError("partition-of-unity restriction requires sweep=:additive"),
   )
+  quadratic_model + frozen_gp_model + tangent_gp_model <= 1 || throw(ArgumentError(
+    "quadratic_model, frozen_gp_model, and tangent_gp_model are mutually exclusive",
+  ))
+  0.0 < density_mixing_alpha <= 1.0 || throw(ArgumentError(
+    "density_mixing_alpha must satisfy 0 < density_mixing_alpha <= 1",
+  ))
+  density_mixing_alpha != 1.0 && !frozen_gp_model && throw(ArgumentError(
+    "density_mixing_alpha requires frozen_gp_model=true",
+  ))
+  frozen_gp_model && !(e isa Energies.GrossPitaevskiiRayleighQuotient) &&
+    throw(ArgumentError(
+      "frozen_gp_model is only available for GrossPitaevskiiRayleighQuotient",
+    ))
+  tangent_gp_model && !(e isa Energies.GrossPitaevskiiRayleighQuotient) &&
+    throw(ArgumentError(
+      "tangent_gp_model is only available for GrossPitaevskiiRayleighQuotient",
+    ))
+  tangent_gp_model && sweep != :additive && throw(ArgumentError(
+    "tangent_gp_model currently requires sweep=:additive",
+  ))
 
   # Initial guess, no need to normalize apparently
   u_cur = isnothing(u0) ? ones(Energies.dimension(e)) : copy(u0)
@@ -1569,6 +1733,7 @@ function var_dd(
   resnorm_hist = Float64[]
   local_update_hist = Vector{Vector{Vector{Float64}}}()
   previous_iterates = Vector{Vector{Float64}}()
+  previous_density_iterate = nothing
 
   e_cur = e(u_cur)
   push!(e_hist, e_cur)
@@ -1583,7 +1748,20 @@ function var_dd(
 
   local_updates = zeros(size(u_cur, 1), m)  # preallocate for efficiency
   for n = 1:maxiter
-    sweep_energy = quadratic_model ? Energies.quadratic_model(e, u_cur) : e
+    sweep_energy = if quadratic_model
+      Energies.quadratic_model(e, u_cur)
+    elseif frozen_gp_model
+      Energies.frozen_density_model(
+        e,
+        u_cur;
+        previous=previous_density_iterate,
+        alpha=density_mixing_alpha,
+      )
+    elseif tangent_gp_model
+      Energies.tangent_quadratic_model(e, u_cur)
+    else
+      e
+    end
     current_local_updates = Vector{Vector{Float64}}()
     multiplicative_iterate = copy(u_cur)
 
@@ -1674,6 +1852,7 @@ function var_dd(
       push!(previous_iterates, copy(u_cur))
       length(previous_iterates) > history_depth && popfirst!(previous_iterates)
     end
+    frozen_gp_model && (previous_density_iterate = copy(u_cur))
     u_cur = u_new
     e_cur = e_new
   end

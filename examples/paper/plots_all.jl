@@ -225,6 +225,7 @@ function add_gp_solution_inset!(
   halign = 0.68,
   valign = 0.97,
   inset_size = 0.23,
+  inset_title = "density",
 )
   smask = solutions.beta .== beta
   N = solutions.N[findfirst(smask)]
@@ -255,7 +256,7 @@ function add_gp_solution_inset!(
     sax,
     0.5,
     0.96;
-    text="density",
+    text=inset_title,
     align=(:center, :top),
     fontsize=9,
     color=:white,
@@ -1465,26 +1466,44 @@ function fig14_gp_convergence()
   methods = (
     "gp_additive",
     "gp_additive_history",
-    "gfdn_au_exact",
-    "cg_gfdn_au_exact",
-    "gfdn_au_as",
-    "cg_gfdn_au_as",
+    "gp_quadratic",
+    "gp_quadratic_history",
+    "gp_quadratic_history_2",
+    "gp_quadratic_history_3",
+    "gfdn_pcg_as_1",
+    "gfdn_pcg_as_2",
+    "gfdn_pcg_as_4",
+    "cg_gfdn_pcg_as_1",
+    "cg_gfdn_pcg_as_2",
+    "cg_gfdn_pcg_as_4",
   )
   labels = Dict(
     "gp_additive" => "additive GP-varDD",
     "gp_additive_history" => "additive GP-varDD + history",
-    "gfdn_au_exact" => "exact GFDN(aᵤ) (optimal step)",
-    "cg_gfdn_au_exact" => "exact CG-GFDN(aᵤ) (optimal step)",
-    "gfdn_au_as" => "AS-inexact GFDN(aᵤ) (optimal step)",
-    "cg_gfdn_au_as" => "AS-inexact CG-GFDN(aᵤ) (optimal step)",
+    "gp_quadratic" => "quadratic GP-EMDD",
+    "gp_quadratic_history" => "quadratic GP-EMDD + history",
+    "gp_quadratic_history_2" => "quadratic GP-EMDD + history (2)",
+    "gp_quadratic_history_3" => "quadratic GP-EMDD + history (3)",
+    "gfdn_pcg_as_1" => "GFDN-PCG(AS, 1)",
+    "gfdn_pcg_as_2" => "GFDN-PCG(AS, 2)",
+    "gfdn_pcg_as_4" => "GFDN-PCG(AS, 4)",
+    "cg_gfdn_pcg_as_1" => "CG-GFDN-PCG(AS, 1)",
+    "cg_gfdn_pcg_as_2" => "CG-GFDN-PCG(AS, 2)",
+    "cg_gfdn_pcg_as_4" => "CG-GFDN-PCG(AS, 4)",
   )
   markers = Dict(
     "gp_additive" => :circle,
     "gp_additive_history" => :hexagon,
-    "gfdn_au_exact" => :diamond,
-    "cg_gfdn_au_exact" => :cross,
-    "gfdn_au_as" => :rect,
-    "cg_gfdn_au_as" => :utriangle,
+    "gp_quadratic" => :star4,
+    "gp_quadratic_history" => :star6,
+    "gp_quadratic_history_2" => :rect,
+    "gp_quadratic_history_3" => :dtriangle,
+    "gfdn_pcg_as_1" => :circle,
+    "gfdn_pcg_as_2" => :rect,
+    "gfdn_pcg_as_4" => :dtriangle,
+    "cg_gfdn_pcg_as_1" => :circle,
+    "cg_gfdn_pcg_as_2" => :rect,
+    "cg_gfdn_pcg_as_4" => :dtriangle,
   )
   colors = tab10_colors(length(methods))
   positive_residuals = tbl.resnorm[tbl.resnorm .> 0]
@@ -1520,17 +1539,26 @@ function fig14_gp_convergence()
         marker = markers[method],
       )
     end
-    add_gp_solution_inset!(
-      fig[row, column], solutions, beta; halign=0.68, inset_size=0.23
-    )
+    inset_layout = semilinear_inset_layout(fig[row, column])
     add_partition_inset!(
-      fig[row, column],
+      inset_layout[1, 2],
       parts,
       m;
-      halign=0.99,
-      inset_size=0.23,
-      inset_title="partition",
+      halign=:center,
+      valign=:center,
+      inset_size=1.0,
+      inset_title="",
     )
+    add_gp_solution_inset!(
+      inset_layout[1, 1],
+      solutions,
+      beta;
+      halign=:center,
+      valign=:center,
+      inset_size=1.0,
+      inset_title="",
+    )
+    fix_semilinear_inset_sizes!(inset_layout)
   end
   Legend(
     fig[length(betas)+1, 1:length(ms)],
@@ -1546,11 +1574,9 @@ end
 
 # Paper-facing subset of Figure 14, mirroring Figures 12b and 17b. Only the
 # Henning--Jarlebring section 2.3 benchmark (kappa = 500) is shown, and q
-# counts the current iterate as the first global vector, so q=1 is plain
-# additive EMDD and q=2 adds u_{k-1}. The exact-metric GFDN variants are
-# de-emphasized because each of their iterations contains a global sparse
-# Cholesky factorization and is therefore not a cost unit equivalent to one
-# sweep of the primary comparison methods.
+# counts the current iterate as the first global vector. Nonlinear EMDD is
+# shown for q=1,2 for both nonlinear and frozen-nonlinearity EMDD.
+# The second legend compares fixed-step PCG metric inversions.
 function fig14b_gp_convergence_paper()
   tbl = loadtable("study10_gp_conv.csv")
   parts = loadtable("study10_partitions.csv")
@@ -1560,41 +1586,93 @@ function fig14b_gp_convergence_paper()
   primary_methods = (
     "gp_additive",
     "gp_additive_history",
-    "gfdn_au_as",
-    "cg_gfdn_au_as",
+    "gp_quadratic",
+    "gp_quadratic_history",
   )
-  reference_methods = ("gfdn_au_exact", "cg_gfdn_au_exact")
-  methods = (primary_methods..., reference_methods...)
+  gfdn_methods = (
+    "gfdn_pcg_as_1",
+    "gfdn_pcg_as_2",
+    "gfdn_pcg_as_4",
+  )
+  cg_gfdn_methods = (
+    "cg_gfdn_pcg_as_1",
+    "cg_gfdn_pcg_as_2",
+    "cg_gfdn_pcg_as_4",
+  )
+  metric_methods = (gfdn_methods..., cg_gfdn_methods...)
+  metric_legend_methods = (
+    gfdn_methods[1],
+    cg_gfdn_methods[1],
+    gfdn_methods[2],
+    cg_gfdn_methods[2],
+    gfdn_methods[3],
+    cg_gfdn_methods[3],
+  )
+  methods = (primary_methods..., metric_methods...)
   labels = Dict(
     "gp_additive" => "EMDD (q = 1)",
     "gp_additive_history" => "EMDD (q = 2)",
-    "gfdn_au_as" => "GFDN(aᵤ)+AS",
-    "cg_gfdn_au_as" => "CG-GFDN(aᵤ)+AS",
-    "gfdn_au_exact" => "GFDN(aᵤ), exact metric solve",
-    "cg_gfdn_au_exact" => "CG-GFDN(aᵤ), exact metric solve",
+    "gp_quadratic" => "quadratic EMDD (q = 1)",
+    "gp_quadratic_history" => "quadratic EMDD (q = 2)",
+    "gfdn_pcg_as_1" => "GFDN-PCG(AS, 1)",
+    "gfdn_pcg_as_2" => "GFDN-PCG(AS, 2)",
+    "gfdn_pcg_as_4" => "GFDN-PCG(AS, 4)",
+    "cg_gfdn_pcg_as_1" => "CG-GFDN-PCG(AS, 1)",
+    "cg_gfdn_pcg_as_2" => "CG-GFDN-PCG(AS, 2)",
+    "cg_gfdn_pcg_as_4" => "CG-GFDN-PCG(AS, 4)",
   )
   markers = Dict(
     "gp_additive" => :circle,
     "gp_additive_history" => :hexagon,
-    "gfdn_au_as" => :rect,
-    "cg_gfdn_au_as" => :utriangle,
-    "gfdn_au_exact" => :diamond,
-    "cg_gfdn_au_exact" => :cross,
+    "gp_quadratic" => :star4,
+    "gp_quadratic_history" => :star6,
+    "gfdn_pcg_as_1" => :circle,
+    "gfdn_pcg_as_2" => :rect,
+    "gfdn_pcg_as_4" => :dtriangle,
+    "cg_gfdn_pcg_as_1" => :circle,
+    "cg_gfdn_pcg_as_2" => :rect,
+    "cg_gfdn_pcg_as_4" => :dtriangle,
   )
   primary_colors = tab10_colors(length(primary_methods))
-  reference_colors = [RGBf(0.50, 0.50, 0.50), RGBf(0.25, 0.25, 0.25)]
-  colors = [primary_colors..., reference_colors...]
+  gfdn_colors = [
+    RGBf(0.25, 0.25, 0.25),
+    RGBf(0.45, 0.45, 0.45),
+    RGBf(0.62, 0.62, 0.62),
+  ]
+  cg_gfdn_colors = copy(gfdn_colors)
+  metric_linestyles = [
+    fill((:dash, :dense), length(gfdn_methods))...,
+    fill((:dot, :dense), length(cg_gfdn_methods))...,
+  ]
+  metric_colors = [gfdn_colors..., cg_gfdn_colors...]
+  metric_legend_colors = [
+    gfdn_colors[1],
+    cg_gfdn_colors[1],
+    gfdn_colors[2],
+    cg_gfdn_colors[2],
+    gfdn_colors[3],
+    cg_gfdn_colors[3],
+  ]
+  metric_legend_linestyles = [
+    (:dash, :dense),
+    (:dot, :dense),
+    (:dash, :dense),
+    (:dot, :dense),
+    (:dash, :dense),
+    (:dot, :dense),
+  ]
+  colors = [primary_colors..., metric_colors...]
   linestyles = [
     fill(:solid, length(primary_methods))...,
-    fill(:dash, length(reference_methods))...,
+    metric_linestyles...,
   ]
   linewidths = [
     fill(2.8, length(primary_methods))...,
-    fill(1.8, length(reference_methods))...,
+    fill(1.8, length(metric_methods))...,
   ]
   markersizes = [
     fill(MARKERSIZE, length(primary_methods))...,
-    fill(6, length(reference_methods))...,
+    fill(7, length(metric_methods))...,
   ]
   mask_beta = tbl.beta .== beta
   positive_residuals = tbl.resnorm[mask_beta .& (tbl.resnorm .> 0)]
@@ -1603,17 +1681,7 @@ function fig14b_gp_convergence_paper()
     collect(floor(Int, log10(ylimits[2])):-2:ceil(Int, log10(ylimits[1])))
   )
 
-  fig = Figure(size=(PAPER_FULL_WIDTH, 470))
-  Label(
-    fig[0, 1:length(ms)],
-    rich(
-      "−Δu + V u + κ|u|²u = λu  in Ω,    κ = $(Int(beta)),    ‖u‖",
-      subscript("L²(Ω)"),
-      " = 1",
-    );
-    fontsize=22,
-    font=:bold,
-  )
+  fig = Figure(size=(PAPER_FULL_WIDTH, 450))
   for (column, m) in enumerate(ms)
     ax = Axis(
       fig[1, column];
@@ -1622,7 +1690,7 @@ function fig14b_gp_convergence_paper()
       title="m = $m",
       yscale=log10,
       yticks=LogTicks(ytick_exps),
-      limits=(nothing, ylimits),
+      limits=((0, 30), ylimits),
     )
     for (index, method) in enumerate(methods)
       mask = mask_beta .& (tbl.m .== m) .& (tbl.method .== method) .&
@@ -1637,58 +1705,63 @@ function fig14b_gp_convergence_paper()
         marker=markers[method],
         linewidth=linewidths[index],
         markersize=markersizes[index],
+        marker_stride=8,
+        markerstrokecolor=:black,
+        markerstrokewidth=0.7,
       )
     end
-    add_gp_solution_inset!(
-      fig[1, column], solutions, beta; halign=0.68, inset_size=0.23
-    )
+    inset_layout = semilinear_inset_layout(fig[1, column])
     add_partition_inset!(
-      fig[1, column],
+      inset_layout[1, 2],
       parts,
       m;
-      halign=0.99,
-      inset_size=0.23,
-      inset_title="partition",
+      halign=:center,
+      valign=:center,
+      inset_size=1.0,
+      inset_title="",
     )
+    add_gp_solution_inset!(
+      inset_layout[1, 1],
+      solutions,
+      beta;
+      halign=:center,
+      valign=:center,
+      inset_size=1.0,
+      inset_title="",
+    )
+    fix_semilinear_inset_sizes!(inset_layout)
   end
-  Label(
+  Legend(
     fig[2, 1:length(ms)],
-    "Primary ground-state solver comparison";
-    fontsize=16,
-    font=:bold,
+    legend_line_marker_elements(
+      primary_methods,
+      markers;
+      markersizes=fill(MARKERSIZE, length(primary_methods)),
+      colors=primary_colors,
+      linewidths=fill(2.8, length(primary_methods)),
+      markerstrokecolors=fill(:black, length(primary_methods)),
+      markerstrokewidths=fill(0.7, length(primary_methods)),
+    ),
+    [labels[method] for method in primary_methods];
+    orientation=:horizontal,
+    nbanks=1,
+    framevisible=true,
   )
   Legend(
     fig[3, 1:length(ms)],
     legend_line_marker_elements(
-      primary_methods,
+      metric_legend_methods,
       markers;
-      colors=primary_colors,
-      linewidths=fill(2.8, length(primary_methods)),
+      markersizes=fill(7, length(metric_methods)),
+      colors=metric_legend_colors,
+      linestyles=metric_legend_linestyles,
+      linewidths=fill(1.8, length(metric_methods)),
+      markerstrokecolors=fill(:black, length(metric_methods)),
+      markerstrokewidths=fill(0.7, length(metric_methods)),
     ),
-    [labels[method] for method in primary_methods];
+    [labels[method] for method in metric_legend_methods];
     orientation=:horizontal,
     nbanks=2,
-    framevisible=true,
-  )
-  Label(
-    fig[4, 1:length(ms)],
-    "Exact-metric references (non-equivalent outer work)";
-    fontsize=16,
-    font=:bold,
-  )
-  Legend(
-    fig[5, 1:length(ms)],
-    legend_line_marker_elements(
-      reference_methods,
-      markers;
-      colors=reference_colors,
-      linestyles=fill(:dash, length(reference_methods)),
-      linewidths=fill(1.8, length(reference_methods)),
-      markersizes=fill(6, length(reference_methods)),
-    ),
-    [labels[method] for method in reference_methods];
-    orientation=:horizontal,
-    nbanks=1,
     framevisible=true,
   )
   rowgap!(fig.layout, 8)
@@ -1704,26 +1777,44 @@ function fig16_gp_energy_gap()
   methods = (
     "gp_additive",
     "gp_additive_history",
-    "gfdn_au_exact",
-    "cg_gfdn_au_exact",
-    "gfdn_au_as",
-    "cg_gfdn_au_as",
+    "gp_quadratic",
+    "gp_quadratic_history",
+    "gp_quadratic_history_2",
+    "gp_quadratic_history_3",
+    "gfdn_pcg_as_1",
+    "gfdn_pcg_as_2",
+    "gfdn_pcg_as_4",
+    "cg_gfdn_pcg_as_1",
+    "cg_gfdn_pcg_as_2",
+    "cg_gfdn_pcg_as_4",
   )
   labels = Dict(
     "gp_additive" => "additive GP-varDD",
     "gp_additive_history" => "additive GP-varDD + history",
-    "gfdn_au_exact" => "exact GFDN(aᵤ) (optimal step)",
-    "cg_gfdn_au_exact" => "exact CG-GFDN(aᵤ) (optimal step)",
-    "gfdn_au_as" => "AS-inexact GFDN(aᵤ) (optimal step)",
-    "cg_gfdn_au_as" => "AS-inexact CG-GFDN(aᵤ) (optimal step)",
+    "gp_quadratic" => "quadratic GP-EMDD",
+    "gp_quadratic_history" => "quadratic GP-EMDD + history",
+    "gp_quadratic_history_2" => "quadratic GP-EMDD + history (2)",
+    "gp_quadratic_history_3" => "quadratic GP-EMDD + history (3)",
+    "gfdn_pcg_as_1" => "GFDN-PCG(AS, 1)",
+    "gfdn_pcg_as_2" => "GFDN-PCG(AS, 2)",
+    "gfdn_pcg_as_4" => "GFDN-PCG(AS, 4)",
+    "cg_gfdn_pcg_as_1" => "CG-GFDN-PCG(AS, 1)",
+    "cg_gfdn_pcg_as_2" => "CG-GFDN-PCG(AS, 2)",
+    "cg_gfdn_pcg_as_4" => "CG-GFDN-PCG(AS, 4)",
   )
   markers = Dict(
     "gp_additive" => :circle,
     "gp_additive_history" => :hexagon,
-    "gfdn_au_exact" => :diamond,
-    "cg_gfdn_au_exact" => :cross,
-    "gfdn_au_as" => :rect,
-    "cg_gfdn_au_as" => :utriangle,
+    "gp_quadratic" => :star4,
+    "gp_quadratic_history" => :star6,
+    "gp_quadratic_history_2" => :rect,
+    "gp_quadratic_history_3" => :dtriangle,
+    "gfdn_pcg_as_1" => :circle,
+    "gfdn_pcg_as_2" => :rect,
+    "gfdn_pcg_as_4" => :dtriangle,
+    "cg_gfdn_pcg_as_1" => :circle,
+    "cg_gfdn_pcg_as_2" => :rect,
+    "cg_gfdn_pcg_as_4" => :dtriangle,
   )
   colors = tab10_colors(length(methods))
   positive_gaps = tbl.energy_gap[tbl.energy_gap .> 0]
@@ -1759,17 +1850,26 @@ function fig16_gp_energy_gap()
         marker = markers[method],
       )
     end
-    add_gp_solution_inset!(
-      fig[row, column], solutions, beta; halign=0.68, inset_size=0.23
-    )
+    inset_layout = semilinear_inset_layout(fig[row, column])
     add_partition_inset!(
-      fig[row, column],
+      inset_layout[1, 2],
       parts,
       m;
-      halign=0.99,
-      inset_size=0.23,
-      inset_title="partition",
+      halign=:center,
+      valign=:center,
+      inset_size=1.0,
+      inset_title="",
     )
+    add_gp_solution_inset!(
+      inset_layout[1, 1],
+      solutions,
+      beta;
+      halign=:center,
+      valign=:center,
+      inset_size=1.0,
+      inset_title="",
+    )
+    fix_semilinear_inset_sizes!(inset_layout)
   end
   Legend(
     fig[length(betas)+1, 1:length(ms)],

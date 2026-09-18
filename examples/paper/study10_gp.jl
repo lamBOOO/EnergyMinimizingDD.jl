@@ -3,10 +3,15 @@
 # prescribed polynomial initial state.
 #   - gp_additive: independent local nonlinear Rayleigh-quotient minimizations
 #   - gp_additive_history: additionally retain the preceding global iterate
-#   - gfdn_au_exact: exact GFDN(a_u), Definition 5.12 with optimal step (5.30)
-#   - cg_gfdn_au_exact: exact metric inversion with Fletcher--Reeves history
-#   - gfdn_au_as: energy-adaptive Sobolev gradient with one-level AS
-#   - cg_gfdn_au_as: Fletcher--Reeves acceleration of the same direction
+#   - gp_quadratic: freeze the GP density for the local linear EVP solves
+#   - gp_quadratic_history: frozen local EVPs with the preceding global iterate
+#   - gp_quadratic_history_{2,3}: frozen local EVPs with q=3,4 history
+#   - gp_tangent_quadratic[_history]: tangent physical-energy models with
+#     q=1,2 and a full nonlinear combination step
+#   - gp_density_mix_{025,050,075}[_history]: charge-mixed frozen local EVPs
+#     with alpha=0.25,0.5,0.75 and q=1,2
+#   - gfdn_pcg_as_{1,2,4}: GFDN with a fixed-step PCG(AS) metric solve
+#   - cg_gfdn_pcg_as_{1,2,4}: Fletcher--Reeves acceleration of those directions
 # Cost unit: local subdomain minimizations; the additive local work can run in
 # parallel, so one sweep has m units of work but a one-solve critical path. For
 # the GFDN baselines, one AS application likewise consists of m local solves.
@@ -188,22 +193,46 @@ function run_hj_mesh_validation(; Ns=(32, 64, 128, 256), iterations=30)
   return rows
 end
 
-"Apply GFDN/CG-GFDN with either an exact or one-AS metric inversion."
-function gp_gfdn_au_metric_history(
+"Apply exactly `iterations` PCG steps with one-level additive Schwarz."
+function gp_fixed_pcg_as(A, rhs, dofspar, iterations)
+  iterations > 0 || throw(ArgumentError("iterations must be positive"))
+  schwarz = schwarz_setup(A, dofspar)
+  x = zeros(eltype(rhs), length(rhs))
+  r = copy(rhs)
+  z = apply_AS(schwarz, r)
+  p = copy(z)
+  rz = dot(r, z)
+  for iteration = 1:iterations
+    Ap = A * p
+    denominator = dot(p, Ap)
+    (!isfinite(denominator) || denominator <= 0) && break
+    alpha = rz / denominator
+    x .+= alpha .* p
+    r .-= alpha .* Ap
+    iteration == iterations && break
+    z = apply_AS(schwarz, r)
+    rz_new = dot(r, z)
+    (!isfinite(rz_new) || rz_new <= 0) && break
+    p .= z .+ (rz_new / rz) .* p
+    rz = rz_new
+  end
+  return x
+end
+
+"GFDN/CG-GFDN with a fixed number of PCG(AS) metric iterations."
+function gp_gfdn_au_pcg_as_history(
   e,
   density_matrix,
+  dofspar,
   u0;
-  inverse,
   conjugate,
+  inner_iterations,
   maxiter,
   tol,
-  dofspar=nothing,
 )
-  inverse in (:exact, :as) ||
-    throw(ArgumentError("inverse must be :exact or :as"))
-  inverse == :as && isnothing(dofspar) &&
-    throw(ArgumentError("dofspar is required for the AS-inexact method"))
-  m = isnothing(dofspar) ? 1 : length(dofspar)
+  inner_iterations > 0 ||
+    throw(ArgumentError("inner_iterations must be positive"))
+  m = length(dofspar)
   u = copy(u0)
   Energies.normalize_M!(u, e.M)
   history = [gp_history_entry(e, u, 0)]
@@ -216,12 +245,9 @@ function gp_gfdn_au_metric_history(
     lambda = dot(u, A_u * u)
     residual = A_u * u .- lambda .* (e.M * u)
 
-    preconditioned = if inverse == :exact
-      cholesky(Symmetric(A_u)) \ residual
-    else
-      # One inexact metric solve with the overlapping one-level AS operator.
-      apply_AS(schwarz_setup(A_u, dofspar), residual)
-    end
+    preconditioned = gp_fixed_pcg_as(
+      A_u, residual, dofspar, inner_iterations
+    )
     projected = preconditioned .- u .* dot(u, e.M * preconditioned)
     gradient_norm = dot(residual, projected)
     gradient_norm > 0 || break
@@ -248,59 +274,20 @@ function gp_gfdn_au_metric_history(
     previous_direction = direction
     previous_gradient_norm = gradient_norm
     u = u_new
-    solves = inverse == :exact ? iteration : iteration * m
+    solves = iteration * m * inner_iterations
     push!(history, gp_history_entry(e, u, solves))
     last(history)[3] < tol && break
   end
   return u, history
 end
 
-function gp_gfdn_au_as_history(
-  e,
-  density_matrix,
-  dofspar,
-  u0;
-  conjugate,
-  maxiter,
-  tol,
-)
-  return gp_gfdn_au_metric_history(
-    e,
-    density_matrix,
-    u0;
-    inverse=:as,
-    conjugate=conjugate,
-    maxiter=maxiter,
-    tol=tol,
-    dofspar=dofspar,
-  )
-end
-
-function gp_cg_gfdn_au_exact_history(
-  e,
-  density_matrix,
-  u0;
-  maxiter,
-  tol,
-)
-  return gp_gfdn_au_metric_history(
-    e,
-    density_matrix,
-    u0;
-    inverse=:exact,
-    conjugate=true,
-    maxiter=maxiter,
-    tol=tol,
-  )
-end
-
 """
     run_study10_local_work(; ms, betas, maxiter, tol)
 
-Record the inner L-BFGS statistics of every local Gross--Pitaevskii
-minimization performed by EMDD with `q=1` and `q=2`. One outer sweep consists
-of `m` such local minimizations, which is the honest cost unit to compare
-against the `m` local *linear* solves of one AS-inexact GFDN iteration.
+Record the inner solver statistics of every local solve performed by nonlinear
+and quadratic EMDD with `q=1` and `q=2`. One outer sweep consists of `m` local
+solves. For nonlinear EMDD these are SCF solves; for quadratic EMDD they are
+linear generalized EVP solves with the density frozen for the whole sweep.
 """
 function run_study10_local_work(;
   N=SMALL ? 16 : 32,
@@ -324,12 +311,19 @@ function run_study10_local_work(;
   paper_initial = hj_gp_initial_vector(U_ref, M_ref)
 
   for m in ms
-    K, M, quartic, cubic, _, dofspar, U = hj_gp_discretization(N, m; overlap)
+    K, M, quartic, cubic, density_matrix, dofspar, U =
+      hj_gp_discretization(N, m; overlap)
     u0 = hj_gp_initial_vector(U, M)
     for beta in betas
-      e = Energies.GrossPitaevskiiRayleighQuotient(K, M, beta, quartic, cubic)
-      for (method, history_depth) in
-          (("gp_additive", 0), ("gp_additive_history", 1))
+      e = Energies.GrossPitaevskiiRayleighQuotient(
+        K, M, beta, quartic, cubic; density_matrix
+      )
+      for (method, history_depth, frozen_gp_model) in (
+        ("gp_additive", 0, false),
+        ("gp_additive_history", 1, false),
+        ("gp_quadratic", 0, true),
+        ("gp_quadratic_history", 1, true),
+      )
         stats = NamedTuple[]
         callback = (iteration, subdomain, info) ->
           push!(stats, merge((outer=iteration, subdomain=subdomain), info))
@@ -340,6 +334,7 @@ function run_study10_local_work(;
           maxiter=maxiter,
           tol=tol,
           history_depth=history_depth,
+          frozen_gp_model=frozen_gp_model,
           local_solve_callback=callback,
           verbose=false,
         )
@@ -355,7 +350,7 @@ function run_study10_local_work(;
         end
         counts = [stat.iterations for stat in stats]
         @printf(
-          "  kappa=%5.1f m=%d %-20s sweeps=%2d local solves=%3d L-BFGS its/solve: mean=%5.1f max=%3d\n",
+          "  kappa=%5.1f m=%d %-20s sweeps=%2d local solves=%3d inner its/solve: mean=%5.1f max=%3d\n",
           beta,
           m,
           method,
@@ -374,12 +369,19 @@ end
 function run_study10()
   N = SMALL ? 16 : 32
   ms = SMALL ? [2] : [2, 4, 8]
+  betas = SMALL ? [HJ_GP_KAPPA] : [10.0, 100.0, HJ_GP_KAPPA]
   overlap = 2
 
   # Keep the inexpensive visualization data available independently of the
   # cached nonlinear solves.
   partition_file = "study10_partitions.csv"
-  if FORCE || !isfile(datafile(partition_file))
+  partition_cache_matches = if isfile(datafile(partition_file))
+    cached = loadtable(partition_file)
+    all(cached.N .== N) && sort(unique(cached.m)) == ms
+  else
+    false
+  end
+  if FORCE || !partition_cache_matches
     partition_rows = (
       m=Int[], N=Int[], idx=Int[], owner=Int[], mult=Int[]
     )
@@ -397,7 +399,39 @@ function run_study10()
   end
 
   files = ("study10_gp_conv.csv", "study10_gp_solutions.csv")
-  if !needs_run(files...)
+  result_cache_matches = if all(isfile(datafile(file)) for file in files)
+    cached_conv = loadtable(files[1])
+    cached_solutions = loadtable(files[2])
+    expected_methods = [
+      "gp_additive",
+      "gp_additive_history",
+      "gp_quadratic",
+      "gp_quadratic_history",
+      "gp_quadratic_history_2",
+      "gp_quadratic_history_3",
+      "gp_tangent_quadratic",
+      "gp_tangent_quadratic_history",
+      "gp_density_mix_025",
+      "gp_density_mix_025_history",
+      "gp_density_mix_050",
+      "gp_density_mix_050_history",
+      "gp_density_mix_075",
+      "gp_density_mix_075_history",
+      "gfdn_pcg_as_1",
+      "gfdn_pcg_as_2",
+      "gfdn_pcg_as_4",
+      "cg_gfdn_pcg_as_1",
+      "cg_gfdn_pcg_as_2",
+      "cg_gfdn_pcg_as_4",
+    ]
+    sort(unique(cached_conv.m)) == ms &&
+      sort(unique(cached_conv.beta)) == sort(betas) &&
+      sort(unique(cached_conv.method)) == sort(expected_methods) &&
+      all(cached_solutions.N .== N)
+  else
+    false
+  end
+  if !FORCE && result_cache_matches
     println("study10: cached, skipping")
     return nothing
   end
@@ -405,7 +439,6 @@ function run_study10()
 
   # The first two rows show increasing interaction strength; the final row is
   # the Henning--Jarlebring section 2.3 benchmark.
-  betas = SMALL ? [HJ_GP_KAPPA] : [10.0, 100.0, HJ_GP_KAPPA]
   tol = 1e-6
   maxiter = SMALL ? 10 : 30
 
@@ -429,25 +462,15 @@ function run_study10()
     hj_gp_discretization(N, 1; overlap=overlap)
   paper_initial = hj_gp_initial_vector(U_ref, M_ref)
   references = Dict{Float64,Tuple{Float64,Vector{Float64}}}()
-  exact_histories = Dict()
-  exact_cg_histories = Dict()
   for beta in betas
     e_ref = Energies.GrossPitaevskiiRayleighQuotient(
-      K_ref, M_ref, beta, q_ref, g_ref
+      K_ref, M_ref, beta, q_ref, g_ref; density_matrix=density_ref
     )
     reference_solution, _, _ = gp_gfdn_au_exact_history(
       e_ref, density_ref, paper_initial; maxiter=80, tol=0.0
     )
     reference_energy = Energies.physical_energy(e_ref, reference_solution)
     references[beta] = (reference_energy, copy(reference_solution))
-    _, exact_history, _ = gp_gfdn_au_exact_history(
-      e_ref, density_ref, paper_initial; maxiter=maxiter, tol=0.0
-    )
-    exact_histories[beta] = exact_history
-    _, exact_cg_history = gp_cg_gfdn_au_exact_history(
-      e_ref, density_ref, paper_initial; maxiter=maxiter, tol=0.0
-    )
-    exact_cg_histories[beta] = exact_cg_history
     for idx in eachindex(reference_solution)
       push!(solution_rows.beta, beta)
       push!(solution_rows.N, N)
@@ -462,13 +485,6 @@ function run_study10()
       Energies.chemical_potential(e_ref, reference_solution),
       Energies.residual_norm(e_ref, reference_solution),
     )
-    if beta == HJ_GP_KAPPA
-      @printf(
-        "    paper: E_GS ≈ 10.8995, lambda_GS ≈ 27.7133; exact GFDN energy gap after %d iterations = %.2e\n",
-        maxiter,
-        abs(last(exact_history)[2] - reference_energy),
-      )
-    end
   end
 
   function record(method, beta, m, reference_energy, history)
@@ -492,42 +508,129 @@ function run_study10()
       hj_gp_discretization(N, m; overlap=overlap)
     u0 = hj_gp_initial_vector(U, M)
     for beta in betas
-      e = Energies.GrossPitaevskiiRayleighQuotient(K, M, beta, quartic, cubic)
+      e = Energies.GrossPitaevskiiRayleighQuotient(
+        K, M, beta, quartic, cubic; density_matrix
+      )
       reference_energy, _ = references[beta]
       _, additive = gp_var_dd_history(e, dofspar, u0; maxiter=maxiter, tol=tol)
       _, with_history = gp_var_dd_history(
         e, dofspar, u0; maxiter=maxiter, tol=tol, history_depth=1
       )
+      _, quadratic = gp_var_dd_history(
+        e, dofspar, u0; maxiter=maxiter, tol=tol, frozen_gp_model=true
+      )
+      _, quadratic_history = gp_var_dd_history(
+        e,
+        dofspar,
+        u0;
+        maxiter=maxiter,
+        tol=tol,
+        history_depth=1,
+        frozen_gp_model=true,
+      )
+      _, quadratic_history_2 = gp_var_dd_history(
+        e,
+        dofspar,
+        u0;
+        maxiter=maxiter,
+        tol=tol,
+        history_depth=2,
+        frozen_gp_model=true,
+      )
+      _, quadratic_history_3 = gp_var_dd_history(
+        e,
+        dofspar,
+        u0;
+        maxiter=maxiter,
+        tol=tol,
+        history_depth=3,
+        frozen_gp_model=true,
+      )
       record("gp_additive", beta, m, reference_energy, additive)
       record("gp_additive_history", beta, m, reference_energy, with_history)
-      record("gfdn_au_exact", beta, m, reference_energy, exact_histories[beta])
+      record("gp_quadratic", beta, m, reference_energy, quadratic)
       record(
-        "cg_gfdn_au_exact",
+        "gp_quadratic_history",
         beta,
         m,
         reference_energy,
-        exact_cg_histories[beta],
+        quadratic_history,
       )
-      _, gfdn = gp_gfdn_au_as_history(
-        e,
-        density_matrix,
-        dofspar,
-        u0;
-        conjugate=false,
-        maxiter=maxiter,
-        tol=tol,
+      record(
+        "gp_quadratic_history_2",
+        beta,
+        m,
+        reference_energy,
+        quadratic_history_2,
       )
-      _, cg_gfdn = gp_gfdn_au_as_history(
-        e,
-        density_matrix,
-        dofspar,
-        u0;
-        conjugate=true,
-        maxiter=maxiter,
-        tol=tol,
+      record(
+        "gp_quadratic_history_3",
+        beta,
+        m,
+        reference_energy,
+        quadratic_history_3,
       )
-      record("gfdn_au_as", beta, m, reference_energy, gfdn)
-      record("cg_gfdn_au_as", beta, m, reference_energy, cg_gfdn)
+      for history_depth in 0:1
+        _, tangent_history = gp_var_dd_history(
+          e,
+          dofspar,
+          u0;
+          maxiter,
+          tol,
+          history_depth,
+          tangent_gp_model=true,
+        )
+        suffix = history_depth == 0 ? "" : "_history"
+        record(
+          "gp_tangent_quadratic$(suffix)",
+          beta,
+          m,
+          reference_energy,
+          tangent_history,
+        )
+      end
+      for (alpha_tag, alpha) in (("025", 0.25), ("050", 0.5), ("075", 0.75))
+        for history_depth in 0:1
+          _, mixed_history = gp_var_dd_history(
+            e,
+            dofspar,
+            u0;
+            maxiter,
+            tol,
+            history_depth,
+            frozen_gp_model=true,
+            density_mixing_alpha=alpha,
+          )
+          suffix = history_depth == 0 ? "" : "_history"
+          record(
+            "gp_density_mix_$(alpha_tag)$(suffix)",
+            beta,
+            m,
+            reference_energy,
+            mixed_history,
+          )
+        end
+      end
+      for conjugate in (false, true), inner_iterations in (1, 2, 4)
+        _, history = gp_gfdn_au_pcg_as_history(
+          e,
+          density_matrix,
+          dofspar,
+          u0;
+          conjugate,
+          inner_iterations,
+          maxiter,
+          tol,
+        )
+        prefix = conjugate ? "cg_gfdn" : "gfdn"
+        record(
+          "$(prefix)_pcg_as_$(inner_iterations)",
+          beta,
+          m,
+          reference_energy,
+          history,
+        )
+      end
       println("  kappa = $beta, m = $m done")
     end
   end
