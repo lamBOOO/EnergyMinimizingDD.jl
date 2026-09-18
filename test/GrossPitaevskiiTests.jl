@@ -1,5 +1,6 @@
 using Test
 using LinearAlgebra
+using SparseArrays
 using EnergyMinimizingDD.Energies
 using EnergyMinimizingDD.FEMDiscretizations
 using EnergyMinimizingDD.Solvers
@@ -65,7 +66,11 @@ include(joinpath(@__DIR__, "..", "examples", "paper", "study10_gp.jl"))
     weights = collect(range(0.5, 1.0; length=n))
     quartic(u) = sum(weights .* u .^ 4)
     cubic(u) = weights .* u .^ 3
+    density(u) = Diagonal(weights .* u .^ 2)
     e = Energies.GrossPitaevskiiRayleighQuotient(K, M, 3.0, quartic, cubic)
+    e_with_density = Energies.GrossPitaevskiiRayleighQuotient(
+      K, M, 3.0, quartic, cubic; density_matrix=density
+    )
     u0 = ones(n)
     reference = Solvers.combine_step(
       e,
@@ -76,6 +81,16 @@ include(joinpath(@__DIR__, "..", "examples", "paper", "study10_gp.jl"))
     )
     @test abs(dot(reference, M * reference) - 1) ≤ 1e-12
     @test Energies.residual_norm(e, reference) ≤ 1e-7
+    explicit_density_reference = Solvers.combine_step(
+      e_with_density,
+      hcat(u0, Matrix{Float64}(I, n, n));
+      initial=u0,
+      maxiter=1000,
+      tol=1e-11,
+    )
+    @test abs(dot(reference, M * explicit_density_reference)) ≈ 1.0 atol = 1e-9
+    @test Energies.energy(e, explicit_density_reference) ≈
+      Energies.energy(e, reference) atol = 1e-10
     scaled_reference = Solvers.combine_step(
       e,
       hcat(u0, Matrix{Float64}(I, n, n));
@@ -89,6 +104,139 @@ include(joinpath(@__DIR__, "..", "examples", "paper", "study10_gp.jl"))
     @test_throws ArgumentError Solvers.combine_step(e, zeros(n, 2))
 
     parts = [Int32[1, 2, 3, 4, 5], Int32[4, 5, 6, 7, 8]]
+    normalized_u0 = copy(u0)
+    Energies.normalize_M!(normalized_u0, M)
+    frozen = Energies.frozen_density_model(e_with_density, u0)
+    @test frozen.A ≈ K + 3.0 .* density(normalized_u0)
+    @test frozen.B === M
+    @test_throws ArgumentError Energies.frozen_density_model(e, u0)
+
+    previous = collect(range(0.3, 1.1; length=n))
+    normalized_previous = copy(previous)
+    Energies.normalize_M!(normalized_previous, M)
+    mixed_frozen = Energies.frozen_density_model(
+      e_with_density, u0; previous, alpha=0.25
+    )
+    @test mixed_frozen.A ≈ K + 3.0 .* (
+      0.25 .* density(normalized_u0) .+
+      0.75 .* density(normalized_previous)
+    )
+    @test_throws ArgumentError Energies.frozen_density_model(
+      e_with_density, u0; previous, alpha=0.0
+    )
+    @test_throws DimensionMismatch Energies.frozen_density_model(
+      e_with_density, u0; previous=ones(n - 1), alpha=0.5
+    )
+
+    tangent_model = Energies.tangent_quadratic_model(e_with_density, u0)
+    @test tangent_model.u ≈ normalized_u0
+    @test tangent_model.residual ≈
+      Energies.projected_residual(e_with_density, normalized_u0)
+    @test tangent_model.H ≈
+      K + 9.0 .* density(normalized_u0)
+    @test abs(dot(tangent_model.u, M * tangent_model.u) - 1) ≤ 1e-12
+    @test abs(dot(tangent_model.u, tangent_model.residual)) ≤ 1e-11
+    @test_throws ArgumentError Energies.tangent_quadratic_model(e, u0)
+
+    frozen_candidates = hcat(
+      [Solvers.inf_step(frozen, u0, part) for part in parts]...,
+    )
+    expected_quadratic_step = Solvers.combine_step(
+      e_with_density, hcat(u0, frozen_candidates); initial=u0
+    )
+    quadratic_step, _, quadratic_energies, quadratic_solutions, _ =
+      Solvers.var_dd(
+        e_with_density,
+        parts;
+        u0=u0,
+        maxiter=1,
+        tol=eps(Float64),
+        frozen_gp_model=true,
+        verbose=false,
+      )
+    @test min(
+      norm(quadratic_step - expected_quadratic_step),
+      norm(quadratic_step + expected_quadratic_step),
+    ) ≤ 1e-7
+    @test all(diff(quadratic_energies) .≤ 1e-10)
+    @test abs(dot(last(quadratic_solutions), M * last(quadratic_solutions)) - 1) ≤
+      1e-10
+
+    mixed_first_step, _, _, _, _ = Solvers.var_dd(
+      e_with_density,
+      parts;
+      u0=u0,
+      maxiter=1,
+      tol=eps(Float64),
+      frozen_gp_model=true,
+      density_mixing_alpha=0.25,
+      verbose=false,
+    )
+    @test min(
+      norm(mixed_first_step - quadratic_step),
+      norm(mixed_first_step + quadratic_step),
+    ) ≤ 1e-7
+    mixed_solution, _, mixed_energies, mixed_solutions, mixed_residuals =
+      Solvers.var_dd(
+        e_with_density,
+        parts;
+        u0=u0,
+        maxiter=3,
+        tol=eps(Float64),
+        history_depth=1,
+        frozen_gp_model=true,
+        density_mixing_alpha=0.5,
+        verbose=false,
+      )
+    @test all(isfinite, mixed_energies)
+    @test all(diff(mixed_energies) .≤ 1e-10)
+    @test all(isfinite, mixed_residuals)
+    @test abs(dot(mixed_solution, M * mixed_solution) - 1) ≤ 1e-10
+    @test all(abs(dot(x, M * x) - 1) ≤ 1e-10 for x in mixed_solutions[2:end])
+    @test_throws ArgumentError Solvers.var_dd(
+      e_with_density, parts; density_mixing_alpha=0.5, verbose=false
+    )
+
+    tangent_candidates = hcat(
+      [Solvers.inf_step(tangent_model, u0, part) for part in parts]...,
+    )
+    @test all(
+      abs(dot(candidate, M * candidate) - 1) ≤ 1e-10 for
+      candidate in eachcol(tangent_candidates)
+    )
+    expected_tangent_step = Solvers.combine_step(
+      e_with_density, hcat(u0, tangent_candidates); initial=u0
+    )
+    tangent_step, _, tangent_energies, tangent_solutions, _ = Solvers.var_dd(
+      e_with_density,
+      parts;
+      u0=u0,
+      maxiter=1,
+      tol=eps(Float64),
+      tangent_gp_model=true,
+      verbose=false,
+    )
+    @test min(
+      norm(tangent_step - expected_tangent_step),
+      norm(tangent_step + expected_tangent_step),
+    ) ≤ 1e-7
+    @test all(diff(tangent_energies) .≤ 1e-10)
+    @test abs(dot(last(tangent_solutions), M * last(tangent_solutions)) - 1) ≤
+      1e-10
+    @test_throws ArgumentError Solvers.var_dd(
+      Energies.GeneralizedRayleighQuotient(K, M),
+      parts;
+      tangent_gp_model=true,
+      verbose=false,
+    )
+    @test_throws ArgumentError Solvers.var_dd(
+      e_with_density,
+      parts;
+      frozen_gp_model=true,
+      tangent_gp_model=true,
+      verbose=false,
+    )
+
     solution, _, energies, solutions, residuals = Solvers.var_dd(
       e, parts; u0=u0, maxiter=40, tol=1e-7, history_depth=1, verbose=false
     )
@@ -97,12 +245,20 @@ include(joinpath(@__DIR__, "..", "examples", "paper", "study10_gp.jl"))
     @test last(residuals) ≤ 1e-7
     @test Energies.physical_energy(e, solution) ≈
       Energies.physical_energy(e, reference) atol = 1e-8
+    @test_throws ArgumentError Solvers.var_dd(
+      Energies.GeneralizedRayleighQuotient(K, M),
+      parts;
+      frozen_gp_model=true,
+      verbose=false,
+    )
   end
 
   @testset "finite-element nonlinear assembly" begin
     K, M, quartic, cubic, density_matrix, parts, _ =
       FEMDiscretizations.FEM_GrossPitaevskii(5, 2; overlap=1)
-    e = Energies.GrossPitaevskiiRayleighQuotient(K, M, 1.0, quartic, cubic)
+    e = Energies.GrossPitaevskiiRayleighQuotient(
+      K, M, 1.0, quartic, cubic; density_matrix
+    )
     u = collect(range(0.2, 1.0; length=size(K, 1)))
     direction = collect(range(-0.4, 0.3; length=length(u)))
     h = 1e-6
@@ -125,40 +281,32 @@ include(joinpath(@__DIR__, "..", "examples", "paper", "study10_gp.jl"))
     @test last(residuals) ≤ first(residuals)
     @test last(residuals) < 1e-5
 
-    _, gfdn_history = gp_gfdn_au_as_history(
-      e,
-      density_matrix,
-      parts,
-      ones(length(u));
-      conjugate=false,
-      maxiter=12,
-      tol=1e-5,
-    )
-    _, cg_history = gp_gfdn_au_as_history(
-      e,
-      density_matrix,
-      parts,
-      ones(length(u));
-      conjugate=true,
-      maxiter=12,
-      tol=1e-5,
-    )
-    _, exact_cg_history = gp_cg_gfdn_au_exact_history(
-      e,
-      density_matrix,
-      ones(length(u));
-      maxiter=12,
-      tol=1e-5,
-    )
-    @test all(diff(getindex.(gfdn_history, 2)) .≤ 1e-10)
-    @test all(diff(getindex.(cg_history, 2)) .≤ 1e-10)
-    @test all(diff(getindex.(exact_cg_history, 2)) .≤ 1e-10)
-    @test last(gfdn_history)[3] < first(gfdn_history)[3]
-    @test last(cg_history)[3] < first(cg_history)[3]
-    @test last(exact_cg_history)[3] < first(exact_cg_history)[3]
-    @test maximum(getindex.(gfdn_history, 4)) ≤ 1e-12
-    @test maximum(getindex.(cg_history, 4)) ≤ 1e-12
-    @test maximum(getindex.(exact_cg_history, 4)) ≤ 1e-12
+    histories = []
+    for conjugate in (false, true), inner_iterations in (1, 2, 4)
+      _, history = gp_gfdn_au_pcg_as_history(
+        e,
+        density_matrix,
+        parts,
+        ones(length(u));
+        conjugate,
+        inner_iterations,
+        maxiter=12,
+        tol=1e-5,
+      )
+      push!(histories, history)
+      @test all(diff(getindex.(history, 2)) .≤ 1e-10)
+      @test last(history)[3] < first(history)[3]
+      @test maximum(getindex.(history, 4)) ≤ 1e-12
+    end
+
+    normalized = ones(length(u))
+    Energies.normalize_M!(normalized, M)
+    A_u = sparse(K + density_matrix(normalized))
+    rhs = A_u * normalized .- dot(normalized, A_u * normalized) .* (M * normalized)
+    as_direction = apply_AS(schwarz_setup(A_u, parts), rhs)
+    pcg1_direction = gp_fixed_pcg_as(A_u, rhs, parts, 1)
+    @test abs(dot(as_direction, pcg1_direction)) ≈
+      norm(as_direction) * norm(pcg1_direction) rtol=1e-12
   end
 
   @testset "Henning--Jarlebring exact GFDN benchmark" begin
