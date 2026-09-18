@@ -264,6 +264,10 @@ function add_gp_solution_inset!(
   return sax
 end
 
+const SEMILINEAR_INSET_SIZE = 40
+const SEMILINEAR_INSET_GAP = 2
+const SEMILINEAR_INSET_MARGIN = 2
+
 function add_semilinear_solution_inset!(
   figpos,
   solutions;
@@ -335,6 +339,39 @@ function add_semilinear_solution_inset!(
     )
   end
   return sax
+end
+
+"Fixed-size, top-right layout shared by the two semilinear paper insets."
+function semilinear_inset_layout(
+  figpos;
+  inset_size=SEMILINEAR_INSET_SIZE,
+  gap=SEMILINEAR_INSET_GAP,
+  margin=SEMILINEAR_INSET_MARGIN,
+)
+  layout = GridLayout(
+    figpos;
+    width=2 * inset_size + gap,
+    height=inset_size,
+    halign=:right,
+    valign=:top,
+    tellwidth=false,
+    tellheight=false,
+    alignmode=Outside(margin),
+    default_colgap=gap,
+  )
+  return layout
+end
+
+function fix_semilinear_inset_sizes!(
+  layout;
+  inset_size=SEMILINEAR_INSET_SIZE,
+  gap=SEMILINEAR_INSET_GAP,
+)
+  colsize!(layout, 1, Fixed(inset_size))
+  colsize!(layout, 2, Fixed(inset_size))
+  rowsize!(layout, 1, Fixed(inset_size))
+  colgap!(layout, 1, Fixed(gap))
+  return layout
 end
 
 function add_evp_solution_inset!(
@@ -1792,7 +1829,6 @@ function fig17_semilinear_poisson()
   ms = sort(unique(conv.m))
   methods = (
     "nonlinear_as",
-    "nonlinear_ras",
     "anderson_ras",
     "nonlinear_cg_optim_as",
     "newton_pcg_as_4",
@@ -1809,7 +1845,6 @@ function fig17_semilinear_poisson()
   )
   labels = Dict(
     "nonlinear_as" => "nAS + optimal damping",
-    "nonlinear_ras" => "nRAS + optimal damping",
     "anderson_ras" => "Anderson-RAS (m = 4, NonlinearSolve.jl)",
     "nonlinear_cg_optim_as" => "AS-NCG (Optim.jl, Hager-Zhang)",
     "newton_pcg_as_4" => "Newton-PCG(AS, 4)",
@@ -1826,7 +1861,6 @@ function fig17_semilinear_poisson()
   )
   markers = Dict(
     "nonlinear_as" => :circle,
-    "nonlinear_ras" => :rect,
     "anderson_ras" => :cross,
     "nonlinear_cg_optim_as" => :ltriangle,
     "newton_pcg_as_4" => :dtriangle,
@@ -1924,7 +1958,6 @@ function fig17b_semilinear_poisson_paper()
     "nonlinear_cg_optim_as",
   )
   reference_methods = (
-    "nonlinear_ras",
     "anderson_ras",
     "newton_pcg_as_1",
     "newton_pcg_as_2",
@@ -1936,7 +1969,6 @@ function fig17b_semilinear_poisson_paper()
     "var_dd_history" => "EMDD (q = 2)",
     "var_dd_quadratic" => "qEMDD (q = 1)",
     "var_dd_quadratic_history" => "qEMDD (q = 2)",
-    "nonlinear_ras" => "nRAS + optimal damping",
     "anderson_ras" => "Anderson-RAS (m = 4)",
     "nonlinear_cg_optim_as" => "AS-NCG (Hager-Zhang)",
     "newton_pcg_as_1" => "Newton–PCG(AS, 1)",
@@ -1949,7 +1981,6 @@ function fig17b_semilinear_poisson_paper()
     "var_dd_history" => :hexagon,
     "var_dd_quadratic" => :rect,
     "var_dd_quadratic_history" => :utriangle,
-    "nonlinear_ras" => :utriangle,
     "anderson_ras" => :cross,
     "nonlinear_cg_optim_as" => :diamond,
     "newton_pcg_as_1" => :circle,
@@ -1959,7 +1990,6 @@ function fig17b_semilinear_poisson_paper()
   )
   primary_colors = tab10_colors(length(primary_methods))
   reference_colors = [
-    RGBf(0.95, 0.72, 0.05),
     RGBf(0.78, 0.57, 0.02),
     RGBf(0.55, 0.55, 0.55),
     RGBf(0.45, 0.45, 0.45),
@@ -1986,11 +2016,6 @@ function fig17b_semilinear_poisson_paper()
   ytick_exps = sort(
     collect(floor(Int, log10(ylimits[2])):-2:ceil(Int, log10(ylimits[1])))
   )
-  inset_size = 0.23
-  solution_halign = 0.66
-  partition_halign = 0.98
-  inset_valign = 0.98
-
   fig = Figure(size=(PAPER_FULL_WIDTH, 600))
   for (row, beta) in enumerate(betas), (column, m) in enumerate(ms)
     ax = Axis(
@@ -2024,23 +2049,25 @@ function fig17b_semilinear_poisson_paper()
       )
     end
     hlines!(ax, [1e-7]; color=:black, linestyle=:dot, linewidth=1.2)
-    add_semilinear_solution_inset!(
-      fig[row, column],
-      solutions;
-      halign=solution_halign,
-      valign=inset_valign,
-      inset_size=inset_size,
-      inset_title=nothing,
-    )
+    inset_layout = semilinear_inset_layout(fig[row, column])
     add_triangle_partition_inset!(
-      fig[row, column],
+      inset_layout[1, 2],
       parts,
       m;
-      halign=partition_halign,
-      valign=inset_valign,
-      inset_size=inset_size,
+      halign=:center,
+      valign=:center,
+      inset_size=1.0,
       inset_title=nothing,
     )
+    add_semilinear_solution_inset!(
+      inset_layout[1, 1],
+      solutions;
+      halign=:center,
+      valign=:center,
+      inset_size=1.0,
+      inset_title=nothing,
+    )
+    fix_semilinear_inset_sizes!(inset_layout)
   end
   legend_row = length(betas) + 1
   Legend(
@@ -2073,7 +2100,7 @@ function fig17b_semilinear_poisson_paper()
     ),
     [labels[method] for method in reference_methods];
     orientation=:horizontal,
-    nbanks=2,
+    nbanks=1,
     framevisible=true,
   )
   rowgap!(fig.layout, 8)
@@ -2096,7 +2123,6 @@ function fig17b_semilinear_l_shape_section61()
     "nonlinear_cg_optim_as",
   )
   reference_methods = (
-    "nonlinear_ras",
     "anderson_ras",
     "newton_pcg_as_1",
     "newton_pcg_as_2",
@@ -2108,7 +2134,6 @@ function fig17b_semilinear_l_shape_section61()
     "var_dd_history" => "EMDD (q = 2)",
     "var_dd_quadratic" => "qEMDD (q = 1)",
     "var_dd_quadratic_history" => "qEMDD (q = 2)",
-    "nonlinear_ras" => "nRAS + optimal damping",
     "anderson_ras" => "Anderson-RAS (m = 4)",
     "nonlinear_cg_optim_as" => "AS-NCG (Hager-Zhang)",
     "newton_pcg_as_1" => "Newton-PCG(AS, 1)",
@@ -2120,7 +2145,6 @@ function fig17b_semilinear_l_shape_section61()
     "var_dd_history" => :hexagon,
     "var_dd_quadratic" => :rect,
     "var_dd_quadratic_history" => :utriangle,
-    "nonlinear_ras" => :utriangle,
     "anderson_ras" => :cross,
     "nonlinear_cg_optim_as" => :ltriangle,
     "newton_pcg_as_1" => :circle,
@@ -2129,7 +2153,6 @@ function fig17b_semilinear_l_shape_section61()
   )
   primary_colors = tab10_colors(length(primary_methods))
   reference_colors = [
-    RGBf(0.95, 0.72, 0.05),
     RGBf(0.78, 0.57, 0.02),
     RGBf(0.55, 0.55, 0.55),
     RGBf(0.45, 0.45, 0.45),
@@ -2156,11 +2179,6 @@ function fig17b_semilinear_l_shape_section61()
   ytick_exps = sort(
     collect(floor(Int, log10(ylimits[2])):-2:ceil(Int, log10(ylimits[1])))
   )
-  inset_size = 0.23
-  solution_halign = 0.66
-  partition_halign = 0.98
-  inset_valign = 0.98
-
   fig = Figure(size=(PAPER_FULL_WIDTH, 390))
   for (row, case) in enumerate(cases),
       (column, m) in enumerate(ms)
@@ -2195,26 +2213,28 @@ function fig17b_semilinear_l_shape_section61()
       )
     end
     hlines!(ax, [1e-7]; color=:black, linestyle=:dot, linewidth=1.2)
-    add_lshape_solution_inset!(
-      fig[row, column],
-      solutions;
-      halign=solution_halign,
-      valign=inset_valign,
-      inset_size=inset_size,
-      inset_title=nothing,
-    )
+    inset_layout = semilinear_inset_layout(fig[row, column])
     add_triangle_partition_inset!(
-      fig[row, column],
+      inset_layout[1, 2],
       parts,
       m;
-      halign=partition_halign,
-      valign=inset_valign,
-      inset_size=inset_size,
+      halign=:center,
+      valign=:center,
+      inset_size=1.0,
       inset_title=nothing,
       limits=(-1, 1, -1, 1),
       title_color=:black,
       title_position=(0.0, 0.92),
     )
+    add_lshape_solution_inset!(
+      inset_layout[1, 1],
+      solutions;
+      halign=:center,
+      valign=:center,
+      inset_size=1.0,
+      inset_title=nothing,
+    )
+    fix_semilinear_inset_sizes!(inset_layout)
   end
   legend_row = length(cases) + 1
   Legend(
@@ -2247,7 +2267,7 @@ function fig17b_semilinear_l_shape_section61()
     ),
     [labels[method] for method in reference_methods];
     orientation=:horizontal,
-    nbanks=2,
+    nbanks=1,
     framevisible=true,
   )
   rowgap!(fig.layout, 8)
@@ -2514,7 +2534,6 @@ end
 # ---------------------------------------------------------------------------
 
 const SEMILINEAR_BENCHMARK_LABELS = Dict(
-  "nonlinear_ras" => "nonlinear RAS",
   "anderson_ras" => "Anderson-RAS (m = 4, NonlinearSolve.jl)",
   "newton_pcg_as" => "Newton-PCG(AS, 4)",
   "energy_imex_pcg_as" => "energy-IMEX-PCG(AS)",
@@ -2525,7 +2544,6 @@ const SEMILINEAR_BENCHMARK_LABELS = Dict(
 )
 
 const SEMILINEAR_BENCHMARK_METHODS = (
-  "nonlinear_ras",
   "anderson_ras",
   "newton_pcg_as",
   "energy_imex_pcg_as",
@@ -2536,7 +2554,6 @@ const SEMILINEAR_BENCHMARK_METHODS = (
 )
 
 const SEMILINEAR_BENCHMARK_MARKERS = Dict(
-  "nonlinear_ras" => :rect,
   "anderson_ras" => :cross,
   "newton_pcg_as" => :dtriangle,
   "energy_imex_pcg_as" => :star5,

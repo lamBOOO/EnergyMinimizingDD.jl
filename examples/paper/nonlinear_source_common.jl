@@ -11,7 +11,6 @@ const NONLINEAR_SOURCE_METHODS = (
 
 const SEMILINEAR_SOURCE_METHODS = (
   :nonlinear_as,
-  :nonlinear_ras,
   :anderson_ras,
   :nonlinear_cg_optim_as,
   :newton_pcg_as_4,

@@ -45,7 +45,7 @@ the package solver API:
   nonlinear energy and residual. The comparison includes both `q=1` and the
   one-vector-history variant `q=2`.
 
-The focused figure treats standard EMDD, quadratic-model EMDD, nRAS, and
+The focused figure treats standard EMDD, quadratic-model EMDD, and
 Anderson--RAS as the primary DD comparison. The Optim.jl AS-preconditioned
 nonlinear CG method and Newton--PCG are shown as visually de-emphasized
 linear-AS references. Using a quadratic
@@ -79,8 +79,8 @@ An outer iteration is shown because it is the common algorithmic convergence
 measure, but it is not a common cost unit. Therefore the CSVs and figures keep
 the following counters separate:
 
-1. parallel **nonlinear local-minimization batches** (nonlinear RAS,
-   Anderson--RAS, ASPIN, RASPEN, and varDD),
+1. parallel **nonlinear local-minimization batches** (Anderson--RAS, ASPIN,
+   RASPEN, and varDD),
 2. parallel **linear AS-solve batches** (AS--nonlinear CG, Newton, energy-IMEX,
    ASPIN, and the RASPEN Jacobian solve, as well as the linear local batches of
    quadratic EMDD), and
@@ -96,7 +96,11 @@ The controlled sensitivity study uses:
 - `N = 16, 32, 64`, corresponding to `h, h/2, h/4`, with overlap layers
   `1, 2, 4` so that the physical overlap is fixed;
 - Newton inner work `ν = 1, 2, 4, 8, accurate`;
-- Anderson and varDD history depths `q = 0, 1, 2, 4, 8`.
+- Anderson and varDD stored-history depths `0, 1, 2, 4, 8`. For varDD these
+  correspond to paper history sizes `q = 1, 2, 3, 5, 9` because `q` also
+  counts the current iterate. The observed outer iteration counts are
+  `53, 22, 22, 20, 20`: `q = 2` captures the substantial improvement, and
+  larger history spaces save at most two additional sweeps in this experiment.
 
 ## References
 
