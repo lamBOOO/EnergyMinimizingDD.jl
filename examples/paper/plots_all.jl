@@ -1539,17 +1539,26 @@ function fig14_gp_convergence()
         marker = markers[method],
       )
     end
-    add_gp_solution_inset!(
-      fig[row, column], solutions, beta; halign=0.68, inset_size=0.23
-    )
+    inset_layout = semilinear_inset_layout(fig[row, column])
     add_partition_inset!(
-      fig[row, column],
+      inset_layout[1, 2],
       parts,
       m;
-      halign=0.99,
-      inset_size=0.23,
-      inset_title="partition",
+      halign=:center,
+      valign=:center,
+      inset_size=1.0,
+      inset_title="",
     )
+    add_gp_solution_inset!(
+      inset_layout[1, 1],
+      solutions,
+      beta;
+      halign=:center,
+      valign=:center,
+      inset_size=1.0,
+      inset_title="",
+    )
+    fix_semilinear_inset_sizes!(inset_layout)
   end
   Legend(
     fig[length(betas)+1, 1:length(ms)],
@@ -1658,8 +1667,8 @@ function fig14b_gp_convergence_paper()
     metric_linestyles...,
   ]
   linewidths = [
-    fill(2.0, length(primary_methods))...,
-    fill(2.0, length(metric_methods))...,
+    fill(2.8, length(primary_methods))...,
+    fill(1.8, length(metric_methods))...,
   ]
   markersizes = [
     fill(MARKERSIZE, length(primary_methods))...,
@@ -1701,24 +1710,26 @@ function fig14b_gp_convergence_paper()
         markerstrokewidth=0.7,
       )
     end
-    add_gp_solution_inset!(
-      fig[1, column],
-      solutions,
-      beta;
-      halign=0.77,
-      valign=0.98,
-      inset_size=0.25,
-      inset_title="|uₕ|²",
-    )
+    inset_layout = semilinear_inset_layout(fig[1, column])
     add_partition_inset!(
-      fig[1, column],
+      inset_layout[1, 2],
       parts,
       m;
-      halign=1.03,
-      valign=0.98,
-      inset_size=0.25,
-      inset_title="Ωᵢ",
+      halign=:center,
+      valign=:center,
+      inset_size=1.0,
+      inset_title="",
     )
+    add_gp_solution_inset!(
+      inset_layout[1, 1],
+      solutions,
+      beta;
+      halign=:center,
+      valign=:center,
+      inset_size=1.0,
+      inset_title="",
+    )
+    fix_semilinear_inset_sizes!(inset_layout)
   end
   Legend(
     fig[2, 1:length(ms)],
@@ -1727,7 +1738,7 @@ function fig14b_gp_convergence_paper()
       markers;
       markersizes=fill(MARKERSIZE, length(primary_methods)),
       colors=primary_colors,
-      linewidths=fill(2.0, length(primary_methods)),
+      linewidths=fill(2.8, length(primary_methods)),
       markerstrokecolors=fill(:black, length(primary_methods)),
       markerstrokewidths=fill(0.7, length(primary_methods)),
     ),
@@ -1744,7 +1755,7 @@ function fig14b_gp_convergence_paper()
       markersizes=fill(7, length(metric_methods)),
       colors=metric_legend_colors,
       linestyles=metric_legend_linestyles,
-      linewidths=fill(2.0, length(metric_methods)),
+      linewidths=fill(1.8, length(metric_methods)),
       markerstrokecolors=fill(:black, length(metric_methods)),
       markerstrokewidths=fill(0.7, length(metric_methods)),
     ),
@@ -1839,17 +1850,26 @@ function fig16_gp_energy_gap()
         marker = markers[method],
       )
     end
-    add_gp_solution_inset!(
-      fig[row, column], solutions, beta; halign=0.68, inset_size=0.23
-    )
+    inset_layout = semilinear_inset_layout(fig[row, column])
     add_partition_inset!(
-      fig[row, column],
+      inset_layout[1, 2],
       parts,
       m;
-      halign=0.99,
-      inset_size=0.23,
-      inset_title="partition",
+      halign=:center,
+      valign=:center,
+      inset_size=1.0,
+      inset_title="",
     )
+    add_gp_solution_inset!(
+      inset_layout[1, 1],
+      solutions,
+      beta;
+      halign=:center,
+      valign=:center,
+      inset_size=1.0,
+      inset_title="",
+    )
+    fix_semilinear_inset_sizes!(inset_layout)
   end
   Legend(
     fig[length(betas)+1, 1:length(ms)],
