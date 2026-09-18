@@ -173,7 +173,7 @@ function run_study11()
     )
 
     for method in SEMILINEAR_SOURCE_METHODS
-      @time result = if method in (:nonlinear_as, :nonlinear_ras)
+      @time result = if method == :nonlinear_as
         nonlinear_source_schwarz_baseline(
           energy,
           dofspar;

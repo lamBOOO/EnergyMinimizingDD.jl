@@ -14,7 +14,6 @@ const LSHAPE_FIG17B_METHODS = (
   :var_dd_history,
   :var_dd_quadratic,
   :var_dd_quadratic_history,
-  :nonlinear_ras,
   :anderson_ras,
   :nonlinear_cg_optim_as,
   :newton_pcg_as_1,
@@ -29,17 +28,7 @@ const LSHAPE_NONLINEARITY_CASES = (
 function lshape_fig17b_method(
   method, energy, dofs, core, initial; maxiter, tolerance
 )
-  if method == :nonlinear_ras
-    return nonlinear_source_schwarz_baseline(
-      energy,
-      dofs;
-      method=:nonlinear_ras,
-      core_subdomains=core,
-      u0=initial,
-      maxiter=maxiter,
-      tolerance=tolerance,
-    )
-  elseif method == :anderson_ras
+  if method == :anderson_ras
     return nonlinear_source_anderson_ras(
       energy,
       dofs,

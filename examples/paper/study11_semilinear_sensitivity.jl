@@ -40,17 +40,7 @@ function run_semilinear_sensitivity_method(
   tolerance,
   parameter=0,
 )
-  if method == :nonlinear_ras
-    return nonlinear_source_schwarz_baseline(
-      problem.energy,
-      problem.dofs;
-      method=:nonlinear_ras,
-      core_subdomains=problem.core,
-      u0=problem.initial,
-      maxiter,
-      tolerance,
-    )
-  elseif method == :anderson_ras
+  if method == :anderson_ras
     return nonlinear_source_anderson_ras(
       problem.energy,
       problem.dofs,
@@ -122,8 +112,20 @@ end
 function run_study11_sensitivity()
   output = "study11_semilinear_sensitivity.csv"
   if !needs_run(output)
-    println("study11 sensitivity: cached, skipping")
-    return
+    cached = loadtable(output)
+    expected_methods = Set((
+      "anderson_ras",
+      "newton_pcg_as",
+      "energy_imex_pcg_as",
+      "aspin",
+      "raspen",
+      "var_dd",
+      "var_dd_history",
+    ))
+    if Set(cached.method) ⊆ expected_methods
+      println("study11 sensitivity: cached, skipping")
+      return
+    end
   end
   println("study11 sensitivity: mesh, Newton inner work, and history")
 
@@ -172,7 +174,6 @@ function run_study11_sensitivity()
   mesh_sizes = SMALL ? [8, 12] : [16, 32, 64]
   overlaps = SMALL ? [1, 2] : [1, 2, 4]
   mesh_methods = (
-    :nonlinear_ras,
     :anderson_ras,
     :newton_pcg_as,
     :energy_imex_pcg_as,
