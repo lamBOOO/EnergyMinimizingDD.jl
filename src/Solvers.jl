@@ -131,9 +131,11 @@ function multiplicative_inf_step(
   idx_sub::AbstractVector,
 )
   α = quadratic_local_coefficients(e, u_cur, idx_sub)
-  iszero(α[1]) && throw(ArgumentError(
-    "multiplicative projective update is undefined because its current-iterate coefficient is zero",
-  ))
+  iszero(α[1]) && throw(
+    ArgumentError(
+      "multiplicative projective update is undefined because its current-iterate coefficient is zero",
+    ),
+  )
   u_new = copy(u_cur)
   for (k, j) in pairs(idx_sub)
     u_new[j] += α[k+1] / α[1]
@@ -146,9 +148,11 @@ function multiplicative_inf_step(
   ::Vector{Float64},
   ::AbstractVector,
 )
-  throw(ArgumentError(
-    "sweep=:multiplicative is currently implemented only for QuadraticEnergy, not $(typeof(e))",
-  ))
+  throw(
+    ArgumentError(
+      "sweep=:multiplicative is currently implemented only for QuadraticEnergy, not $(typeof(e))",
+    ),
+  )
 end
 
 function inf_step(
@@ -220,7 +224,7 @@ function generalized_rayleigh_inf_step(
   e::Energies.GeneralizedRayleighQuotient{Float64},
   u_cur::Vector{Float64},
   idx_sub::AbstractVector;
-  collect_info::Bool=false,
+  collect_info::Bool = false,
 )
   localdim = 1 + length(idx_sub)
 
@@ -242,8 +246,10 @@ function generalized_rayleigh_inf_step(
     M_block = sparse(M[idx_sub, idx_sub])
     K_cross = sparse(reshape(K_u[idx_sub], :, 1))
     M_cross = sparse(reshape(M_u[idx_sub], :, 1))
-    K_local = [sparse(reshape([dot(u_cur, K_u)], 1, 1)) K_cross'; K_cross K_block]
-    M_local = [sparse(reshape([dot(u_cur, M_u)], 1, 1)) M_cross'; M_cross M_block]
+    K_local =
+      [sparse(reshape([dot(u_cur, K_u)], 1, 1)) K_cross'; K_cross K_block]
+    M_local =
+      [sparse(reshape([dot(u_cur, M_u)], 1, 1)) M_cross'; M_cross M_block]
   else
     # Degenerate case: only current solution
     K_local = reshape([dot(u_cur, K * u_cur)], 1, 1)
@@ -257,20 +263,48 @@ function generalized_rayleigh_inf_step(
   K_local_sym = Symmetric(K_local)
   M_local_sym = Symmetric(M_local)
   F = cholesky(K_local_sym)  # ≈ A^{-1} preconditioner
-  res = lobpcg(
-    K_local_sym,
-    M_local_sym,
-    false,
-    1;
-    P=F,
-    tol=1e-8,
-    maxiter=500,
-    log=collect_info,
-  )
+  coefficients = nothing
+  iterations = 0
+  converged = false
+  local_residual = Inf
+  try
+    res = lobpcg(
+      K_local_sym,
+      M_local_sym,
+      false,
+      1;
+      P = F,
+      tol = 1e-8,
+      maxiter = 500,
+      log = collect_info,
+    )
+    coefficients = res.X[:, 1]
+    iterations = Int(res.iterations)
+    converged = Bool(res.converged)
+    local_residual = Float64(res.residual_norms[1])
+  catch error
+    error isa PosDefException || rethrow()
+    # Near convergence, the exterior column can become numerically dependent
+    # on the active coordinates. LOBPCG then sees a singular reduced mass
+    # matrix. Whiten its numerical range and solve the rank-revealed pencil.
+    mass_decomposition = eigen(Symmetric(Matrix(M_local)))
+    mass_scale = maximum(abs, mass_decomposition.values)
+    keep = findall(>(1e-12 * mass_scale), mass_decomposition.values)
+    isempty(keep) && rethrow()
+    mass_basis = mass_decomposition.vectors[:, keep] *
+      Diagonal(inv.(sqrt.(mass_decomposition.values[keep])))
+    reduced_K = Symmetric(mass_basis' * Matrix(K_local) * mass_basis)
+    reduced_decomposition = eigen(reduced_K, 1:1)
+    coefficients = mass_basis * reduced_decomposition.vectors[:, 1]
+    theta = reduced_decomposition.values[1]
+    local_residual = norm(K_local * coefficients - theta .* (M_local * coefficients))
+    iterations = 1
+    converged = true
+  end
 
   # Return the Ritz vector itself. Its normalization is immaterial to the
   # subsequent Rayleigh--Ritz combination and is performed there.
-  x_new = reconstruct_implicit!(res.X[:, 1], u_cur, idx_sub)
+  x_new = reconstruct_implicit!(coefficients, u_cur, idx_sub)
   factor_nnz = if !collect_info
     -1
   elseif issparse(K_local)
@@ -279,14 +313,14 @@ function generalized_rayleigh_inf_step(
     localdim * (localdim + 1) ÷ 2
   end
   info = (
-    dimension=localdim,
-    iterations=Int(res.iterations),
-    converged=Bool(res.converged),
-    residual=Float64(res.residual_norms[1]),
-    k_nnz=collect_info ? (issparse(K_local) ? nnz(K_local) : localdim^2) : -1,
-    factor_nnz=factor_nnz,
+    dimension = localdim,
+    iterations = iterations,
+    converged = converged,
+    residual = local_residual,
+    k_nnz = collect_info ? (issparse(K_local) ? nnz(K_local) : localdim^2) : -1,
+    factor_nnz = factor_nnz,
   )
-  return (u=x_new, info=info)
+  return (u = x_new, info = info)
 end
 
 function inf_step(
@@ -301,18 +335,18 @@ function inf_step_with_info(
   e::Energies.AbstractEnergy{Float64},
   u_cur::Vector{Float64},
   idx_sub::AbstractVector;
-  collect_info::Bool=false,
+  collect_info::Bool = false,
 )
   u = inf_step(e, u_cur, idx_sub)
   return (
-    u=u,
-    info=(
-      dimension=1 + length(idx_sub),
-      iterations=-1,
-      converged=true,
-      residual=NaN,
-      k_nnz=-1,
-      factor_nnz=-1,
+    u = u,
+    info = (
+      dimension = 1 + length(idx_sub),
+      iterations = -1,
+      converged = true,
+      residual = NaN,
+      k_nnz = -1,
+      factor_nnz = -1,
     ),
   )
 end
@@ -322,33 +356,28 @@ function inf_step_with_info(
   e::Energies.GeneralizedRayleighQuotient{Float64},
   u_cur::Vector{Float64},
   idx_sub::AbstractVector;
-  collect_info::Bool=false,
+  collect_info::Bool = false,
 )
-  return generalized_rayleigh_inf_step(
-    e,
-    u_cur,
-    idx_sub;
-    collect_info,
-  )
+  return generalized_rayleigh_inf_step(e, u_cur, idx_sub; collect_info)
 end
 
 function inf_step_with_info(
   e::Energies.NonlinearEnergy{Float64},
   u_cur::Vector{Float64},
   idx_sub::AbstractVector;
-  collect_info::Bool=false,
+  collect_info::Bool = false,
 )
   result = nonlinear_enriched_local_minimize(e, u_cur, idx_sub)
   info = (
-    dimension=1 + length(idx_sub),
-    iterations=result.iterations,
-    converged=result.converged,
-    residual=result.residual,
-    energy_evaluations=result.energy_evaluations,
-    k_nnz=-1,
-    factor_nnz=-1,
+    dimension = 1 + length(idx_sub),
+    iterations = result.iterations,
+    converged = result.converged,
+    residual = result.residual,
+    energy_evaluations = result.energy_evaluations,
+    k_nnz = -1,
+    factor_nnz = -1,
   )
-  return (u=result.u, info=info)
+  return (u = result.u, info = info)
 end
 
 """
@@ -388,7 +417,7 @@ function inf_step_with_info(
   e::Energies.GrossPitaevskiiRayleighQuotient{Float64},
   u_cur::Vector{Float64},
   idx_sub::AbstractVector;
-  collect_info::Bool=false,
+  collect_info::Bool = false,
 )
   if iszero(e.beta)
     return inf_step_with_info(
@@ -401,16 +430,16 @@ function inf_step_with_info(
 
   local_space = _gp_local_space(u_cur, idx_sub)
   stats = Ref{Any}(nothing)
-  u = _scf_subspace(e, local_space; initial=u_cur, info_ref=stats)
+  u = _scf_subspace(e, local_space; initial = u_cur, info_ref = stats)
   return (
-    u=u,
-    info=(
-      dimension=size(local_space, 2),
-      iterations=stats[].iterations,
-      converged=stats[].converged,
-      residual=stats[].residual_norm,
-      k_nnz=-1,
-      factor_nnz=-1,
+    u = u,
+    info = (
+      dimension = size(local_space, 2),
+      iterations = stats[].iterations,
+      converged = stats[].converged,
+      residual = stats[].residual_norm,
+      k_nnz = -1,
+      factor_nnz = -1,
     ),
   )
 end
@@ -427,7 +456,7 @@ function inf_step_with_info(
   model::Energies.GrossPitaevskiiTangentQuadraticModel{Float64},
   ::Vector{Float64},
   idx_sub::AbstractVector;
-  collect_info::Bool=false,
+  collect_info::Bool = false,
 )
   return tangent_quadratic_gp_step(model, idx_sub)
 end
@@ -443,14 +472,14 @@ function tangent_quadratic_gp_step(
 )
   active = collect(Int, idx_sub)
   isempty(active) && return (
-    u=copy(model.u),
-    info=(
-      dimension=0,
-      iterations=0,
-      converged=true,
-      residual=0.0,
-      k_nnz=0,
-      factor_nnz=0,
+    u = copy(model.u),
+    info = (
+      dimension = 0,
+      iterations = 0,
+      converged = true,
+      residual = 0.0,
+      k_nnz = 0,
+      factor_nnz = 0,
     ),
   )
 
@@ -475,9 +504,11 @@ function tangent_quadratic_gp_step(
   factor = lu(kkt)
   solution = factor \ rhs
   coefficients = view(solution, 1:local_dimension)
-  all(isfinite, coefficients) || throw(ErrorException(
-    "local tangent quadratic GP solve produced non-finite coefficients",
-  ))
+  all(isfinite, coefficients) || throw(
+    ErrorException(
+      "local tangent quadratic GP solve produced non-finite coefficients",
+    ),
+  )
 
   candidate = (1 + coefficients[1]) .* u
   candidate[active] .+= view(coefficients, 2:local_dimension)
@@ -485,14 +516,172 @@ function tangent_quadratic_gp_step(
   dot(candidate, model.M * u) < 0 && (candidate .*= -1)
   kkt_residual = norm(kkt * solution - rhs)
   return (
-    u=candidate,
-    info=(
-      dimension=local_dimension - 1,
-      iterations=1,
-      converged=kkt_residual <= 1e-9 * max(1.0, norm(rhs)),
-      residual=kkt_residual,
-      k_nnz=nnz(kkt),
-      factor_nnz=nnz(factor.L) + nnz(factor.U),
+    u = candidate,
+    info = (
+      dimension = local_dimension - 1,
+      iterations = 1,
+      converged = kkt_residual <= 1e-9 * max(1.0, norm(rhs)),
+      residual = kkt_residual,
+      k_nnz = nnz(kkt),
+      factor_nnz = nnz(factor.L) + nnz(factor.U),
+    ),
+  )
+end
+
+function inf_step(
+  model::Energies.GrossPitaevskiiProjectedNewtonModel{Float64},
+  ::Vector{Float64},
+  idx_sub::AbstractVector,
+)
+  return projected_newton_gp_step(model, idx_sub).u
+end
+
+function inf_step_with_info(
+  model::Energies.GrossPitaevskiiProjectedNewtonModel{Float64},
+  ::Vector{Float64},
+  idx_sub::AbstractVector;
+  collect_info::Bool = false,
+)
+  return projected_newton_gp_step(model, idx_sub)
+end
+
+"""
+Solve the local Riemannian Newton model in `P*V_i`, where
+`P = I - u*(M*u)'`. The projected matrix is a rank-two update of the local
+principal block of `H_lagrangian`. A Levenberg--Marquardt shift is increased
+until the complete projected matrix is positive definite; its inertia is
+checked through the two-by-two Woodbury Schur complement.
+
+The returned vector is `u + w_i`, with `w_i` supported on the subdomain. Since
+the combination space also contains `u`, this spans the same space as the
+actual tangent direction `P*w_i` without introducing a dense global vector.
+"""
+function projected_newton_gp_step(
+  model::Energies.GrossPitaevskiiProjectedNewtonModel{Float64},
+  idx_sub::AbstractVector,
+)
+  active = collect(Int, idx_sub)
+  isempty(active) && return (
+    u = copy(model.u),
+    info = (
+      dimension = 0,
+      iterations = 0,
+      converged = true,
+      residual = 0.0,
+      k_nnz = 0,
+      factor_nnz = 0,
+      shift = 0.0,
+      fallback = false,
+    ),
+  )
+
+  u = model.u
+  M = model.M
+  H_lagrangian = model.H_lagrangian
+  Mu = M * u
+  Hu = H_lagrangian * u
+  residual_local = model.residual[active]
+  if norm(residual_local) <= eps(Float64)
+    return (
+      u = copy(u),
+      info = (
+        dimension = length(active),
+        iterations = 0,
+        converged = true,
+        residual = norm(residual_local),
+        k_nnz = 0,
+        factor_nnz = 0,
+        shift = 0.0,
+        fallback = false,
+      ),
+    )
+  end
+
+  g = Mu[active]
+  h = Hu[active]
+  gamma = dot(u, Hu)
+  H_diagonal = abs.(diag(H_lagrangian)[active])
+  M_diagonal = abs.(diag(M)[active])
+  scale =
+    max(maximum(H_diagonal), eps(Float64)) /
+    max(maximum(M_diagonal), eps(Float64))
+  sigma = 0.0
+  accepted = false
+  coefficients = zeros(Float64, length(active))
+  factor_nnz = 0
+  projected_nnz = 0
+  attempts = 0
+
+  for attempt = 1:50
+    attempts = attempt
+    T = sparse(H_lagrangian[active, active] .+ sigma .* M[active, active])
+    h_sigma = h .+ sigma .* g
+    gamma_sigma = gamma + sigma
+    local factor
+    try
+      factor = cholesky(Symmetric(T); check = true)
+    catch error
+      if error isa PosDefException ||
+         error isa SingularException ||
+         error isa ZeroPivotException
+        sigma = iszero(sigma) ? 1e-8 * scale : 2sigma
+        continue
+      end
+      rethrow()
+    end
+
+    U = hcat(g, h_sigma)
+    solves = factor \ hcat(-residual_local, U)
+    base_step = view(solves, :, 1)
+    Tinv_U = view(solves, :, 2:3)
+    C_inverse = [0.0 -1.0; -1.0 -gamma_sigma]
+    S = Symmetric(C_inverse + U' * Tinv_U)
+    determinant = det(S)
+    determinant_scale = max(1.0, opnorm(S)^2)
+
+    # With T positive definite, the rank-two update is positive definite iff
+    # S has the same (one-positive, one-negative) inertia as C_inverse.
+    if determinant < -100eps(Float64) * determinant_scale
+      coefficients .= base_step .- Tinv_U * (S \ (U' * base_step))
+      if all(isfinite, coefficients) && dot(residual_local, coefficients) < 0
+        accepted = true
+        factor_nnz = nnz(factor)
+        projected_nnz = nnz(T) + 4length(active)
+        break
+      end
+    end
+    sigma = iszero(sigma) ? 1e-8 * scale : 2sigma
+  end
+
+  fallback = !accepted
+  if fallback
+    # The residual is a dual vector. Convert it to a primal direction with the
+    # positive GP linear-energy metric instead of treating its coefficients as
+    # a Euclidean vector.
+    metric_local = sparse(model.metric[active, active])
+    metric_factor = cholesky(Symmetric(metric_local); check = true)
+    coefficients .= metric_factor \ (-residual_local)
+    factor_nnz = nnz(metric_factor)
+    projected_nnz = nnz(metric_local)
+    sigma = Inf
+  end
+
+  candidate = copy(u)
+  candidate[active] .+= coefficients
+  linear_residual =
+    norm(residual_local) == 0 ? 0.0 :
+    abs(dot(residual_local, coefficients)) / norm(residual_local)
+  return (
+    u = candidate,
+    info = (
+      dimension = length(active),
+      iterations = attempts,
+      converged = dot(residual_local, coefficients) < 0,
+      residual = linear_residual,
+      k_nnz = projected_nnz,
+      factor_nnz = factor_nnz,
+      shift = sigma,
+      fallback = fallback,
     ),
   )
 end
@@ -518,17 +707,17 @@ function nonlinear_enriched_local_minimize(
   e::Energies.NonlinearEnergy{Float64},
   u_cur::Vector{Float64},
   idx_sub::AbstractVector;
-  relative_tolerance::Float64=1e-10,
-  absolute_tolerance::Float64=1e-12,
-  maxiter::Int=200,
+  relative_tolerance::Float64 = 1e-10,
+  absolute_tolerance::Float64 = 1e-12,
+  maxiter::Int = 200,
 )
   active = collect(Int, idx_sub)
   isempty(active) && return (
-    u=copy(u_cur),
-    iterations=0,
-    converged=true,
-    residual=0.0,
-    energy_evaluations=0,
+    u = copy(u_cur),
+    iterations = 0,
+    converged = true,
+    residual = 0.0,
+    energy_evaluations = 0,
   )
 
   exterior = copy(u_cur)
@@ -537,14 +726,14 @@ function nonlinear_enriched_local_minimize(
   has_global_direction = !iszero(exterior_norm)
   global_direction = has_global_direction ? exterior ./ exterior_norm : exterior
   first_local_coordinate = has_global_direction ? 2 : 1
-  initial_coordinates = has_global_direction ?
-                        vcat(exterior_norm, u_cur[active]) :
-                        copy(u_cur[active])
+  initial_coordinates =
+    has_global_direction ? vcat(exterior_norm, u_cur[active]) :
+    copy(u_cur[active])
 
   function reconstruct(coordinates)
-    u = has_global_direction ?
-        coordinates[1] .* global_direction :
-        zeros(Float64, length(u_cur))
+    u =
+      has_global_direction ? coordinates[1] .* global_direction :
+      zeros(Float64, length(u_cur))
     u[active] .= view(coordinates, first_local_coordinate:length(coordinates))
     return u
   end
@@ -574,25 +763,25 @@ function nonlinear_enriched_local_minimize(
     initial_coordinates,
     Optim.LBFGS(),
     Optim.Options(
-      iterations=maxiter,
-      g_abstol=target,
+      iterations = maxiter,
+      g_abstol = target,
       # A global FE energy can be unchanged to roundoff even though the
       # projected local gradient is not small. Let the line search globalize
       # the step, but do not mistake objective stagnation or a rounded increase
       # for convergence before the requested gradient tolerance is met.
-      allow_f_increases=true,
-      successive_f_tol=maxiter,
-      show_warnings=false,
+      allow_f_increases = true,
+      successive_f_tol = maxiter,
+      show_warnings = false,
     ),
   )
   u = reconstruct(Optim.minimizer(result))
   residual = norm(project_gradient(Energies.gradient(e, u)))
   return (
-    u=u,
-    iterations=Optim.iterations(result),
-    converged=residual <= target,
-    residual=residual,
-    energy_evaluations=energy_evaluations,
+    u = u,
+    iterations = Optim.iterations(result),
+    converged = residual <= target,
+    residual = residual,
+    energy_evaluations = energy_evaluations,
   )
 end
 
@@ -601,12 +790,13 @@ function nonlinear_local_minimize(
   e::Energies.NonlinearEnergy{Float64},
   u_cur::Vector{Float64},
   idx_sub::AbstractVector;
-  relative_tolerance::Float64=1e-10,
-  absolute_tolerance::Float64=1e-12,
-  maxiter::Int=50,
+  relative_tolerance::Float64 = 1e-10,
+  absolute_tolerance::Float64 = 1e-12,
+  maxiter::Int = 50,
 )
   active = collect(Int, idx_sub)
-  isempty(active) && return (u=copy(u_cur), iterations=0, energy_evaluations=0)
+  isempty(active) &&
+    return (u = copy(u_cur), iterations = 0, energy_evaluations = 0)
   u = copy(u_cur)
   initial_gradient = Energies.gradient(e, u)[active]
   target = max(absolute_tolerance, relative_tolerance * norm(initial_gradient))
@@ -634,17 +824,17 @@ function nonlinear_local_minimize(
       z0,
       Optim.LBFGS(),
       Optim.Options(
-        iterations=maxiter,
-        g_abstol=target,
-        allow_f_increases=false,
-        show_warnings=false,
+        iterations = maxiter,
+        g_abstol = target,
+        allow_f_increases = false,
+        show_warnings = false,
       ),
     )
     u[active] .= Optim.minimizer(result)
     return (
-      u=u,
-      iterations=Optim.iterations(result),
-      energy_evaluations=energy_evaluations,
+      u = u,
+      iterations = Optim.iterations(result),
+      energy_evaluations = energy_evaluations,
     )
   end
 
@@ -653,7 +843,9 @@ function nonlinear_local_minimize(
     full_gradient = Energies.gradient(e, u)
     gradient = full_gradient[active]
     norm(gradient) <= target && return (
-      u=u, iterations=iteration, energy_evaluations=energy_evaluations
+      u = u,
+      iterations = iteration,
+      energy_evaluations = energy_evaluations,
     )
     iteration == maxiter && break
     iterations_done = iteration + 1
@@ -703,9 +895,9 @@ function nonlinear_local_minimize(
     end
   end
   return (
-    u=u,
-    iterations=iterations_done,
-    energy_evaluations=energy_evaluations,
+    u = u,
+    iterations = iterations_done,
+    energy_evaluations = energy_evaluations,
   )
 end
 
@@ -780,6 +972,43 @@ function m_orthonormal_basis(X::AbstractMatrix, M::AbstractMatrix)
 end
 
 """
+    anchored_m_orthonormal_basis(anchor, increments, M; rtol=1e-12)
+
+Construct an M-orthonormal basis from a separately retained anchor and a set
+of increments. Rank truncation is relative to the increments' own scale, so
+small but independent corrections are not discarded merely because the anchor
+has unit norm.
+"""
+function anchored_m_orthonormal_basis(
+  anchor::AbstractVector,
+  increments::AbstractMatrix,
+  M::AbstractMatrix;
+  rtol::Real = 1e-12,
+)
+  rtol > 0 || throw(ArgumentError("rtol must be positive"))
+  q0 = copy(anchor)
+  Energies.normalize_M!(q0, M)
+  size(increments, 1) == length(q0) ||
+    throw(DimensionMismatch("increment rows must match the anchor length"))
+  isempty(increments) && return reshape(q0, :, 1)
+
+  W = Matrix(increments)
+  W .-= q0 * (q0' * (M * W))
+  gram = Symmetric(W' * (M * W))
+  decomposition = eigen(gram)
+  largest = maximum(decomposition.values)
+  largest <= 0 && return reshape(q0, :, 1)
+  keep = findall(>(rtol * largest), decomposition.values)
+  isempty(keep) && return reshape(q0, :, 1)
+  Q1 =
+    W * (
+      decomposition.vectors[:, keep] *
+      Diagonal(inv.(sqrt.(decomposition.values[keep])))
+    )
+  return hcat(q0, Q1)
+end
+
+"""
     _scf_subspace(e, X; initial=X[:, 1], maxiter=200, tol=1e-9)
 
 Solve the Gross--Pitaevskii nonlinear eigenproblem in `range(X)` by a damped
@@ -839,7 +1068,7 @@ function _scf_subspace(
   converged = false
   residual_norm = Inf
   iterations = 0
-  for iteration in 0:maxiter
+  for iteration = 0:maxiter
     H = Symmetric(K_reduced + e.beta .* reduced_density(alpha))
     Halpha = H * alpha
     residual = Halpha .- dot(alpha, Halpha) .* alpha
@@ -864,8 +1093,10 @@ function _scf_subspace(
       trial = alpha .+ step .* direction
       trial ./= norm(trial)
       trial_energy = state_energy(trial)
-      if trial_energy <= energy0 + 1e-4 * step * min(slope, 0.0) +
-                         10eps(Float64) * max(1.0, abs(energy0))
+      if trial_energy <=
+         energy0 +
+         1e-4 * step * min(slope, 0.0) +
+         10eps(Float64) * max(1.0, abs(energy0))
         alpha = trial
         accepted = true
         break
@@ -877,11 +1108,13 @@ function _scf_subspace(
   end
 
   u = Q * alpha
-  isnothing(info_ref) || (info_ref[] = (
-    iterations=iterations,
-    converged=converged,
-    residual_norm=residual_norm,
-  ))
+  isnothing(info_ref) || (
+    info_ref[] = (
+      iterations = iterations,
+      converged = converged,
+      residual_norm = residual_norm,
+    )
+  )
 
   # Fix the arbitrary sign for stable histories and post-processing.
   if dot(initial, e.M * u) < 0
@@ -961,10 +1194,7 @@ function combine_step(
   tol::Float64 = 1e-9,
 )
   if iszero(e.beta)
-    return combine_step(
-      Energies.GeneralizedRayleighQuotient(e.K, e.M),
-      sspace,
-    )
+    return combine_step(Energies.GeneralizedRayleighQuotient(e.K, e.M), sspace)
   end
   return _scf_subspace(
     e,
@@ -1010,7 +1240,7 @@ function combine_step(
   e::Energies.NonlinearEnergy{Float64},
   sspace::Matrix{Float64},
 )
-  return minimize_linear_subspace(e, sspace; initial=sspace[:, 1]).u
+  return minimize_linear_subspace(e, sspace; initial = sspace[:, 1]).u
 end
 
 """
@@ -1023,10 +1253,10 @@ interface used by quadratic energies and Rayleigh quotients.
 function minimize_linear_subspace(
   e::Energies.NonlinearEnergy{Float64},
   candidates::Matrix{Float64};
-  initial::AbstractVector{Float64}=view(candidates, :, 1),
-  relative_tolerance::Float64=1e-10,
-  absolute_tolerance::Float64=1e-12,
-  maxiter::Int=30,
+  initial::AbstractVector{Float64} = view(candidates, :, 1),
+  relative_tolerance::Float64 = 1e-10,
+  absolute_tolerance::Float64 = 1e-12,
+  maxiter::Int = 30,
 )
   B = orthonormal_basis(candidates)
   alpha = B' * initial
@@ -1049,16 +1279,16 @@ function minimize_linear_subspace(
       alpha,
       Optim.LBFGS(),
       Optim.Options(
-        iterations=maxiter,
-        g_abstol=target,
-        allow_f_increases=false,
-        show_warnings=false,
+        iterations = maxiter,
+        g_abstol = target,
+        allow_f_increases = false,
+        show_warnings = false,
       ),
     )
     return (
-      u=B * Optim.minimizer(result),
-      iterations=Optim.iterations(result),
-      energy_evaluations=energy_evaluations,
+      u = B * Optim.minimizer(result),
+      iterations = Optim.iterations(result),
+      energy_evaluations = energy_evaluations,
     )
   end
 
@@ -1067,7 +1297,9 @@ function minimize_linear_subspace(
     u = B * alpha
     gradient = B' * Energies.gradient(e, u)
     norm(gradient) <= target && return (
-      u=u, iterations=iteration, energy_evaluations=energy_evaluations
+      u = u,
+      iterations = iteration,
+      energy_evaluations = energy_evaluations,
     )
     iteration == maxiter && break
     iterations_done = iteration + 1
@@ -1092,9 +1324,10 @@ function minimize_linear_subspace(
       trial_u = B * trial_alpha
       trial_energy = Energies.energy(e, trial_u)
       energy_evaluations += 1
-      if trial_energy <= energy0 + 1e-4 * step_length * slope ||
-         (trial_energy <= energy0 + energy_resolution &&
-          norm(B' * Energies.gradient(e, trial_u)) < norm(gradient))
+      if trial_energy <= energy0 + 1e-4 * step_length * slope || (
+        trial_energy <= energy0 + energy_resolution &&
+        norm(B' * Energies.gradient(e, trial_u)) < norm(gradient)
+      )
         alpha = trial_alpha
         accepted = true
         break
@@ -1105,9 +1338,9 @@ function minimize_linear_subspace(
     step_length * norm(step) <= 1e-12 * (1 + norm(alpha)) && break
   end
   return (
-    u=B * alpha,
-    iterations=iterations_done,
-    energy_evaluations=energy_evaluations,
+    u = B * alpha,
+    iterations = iterations_done,
+    energy_evaluations = energy_evaluations,
   )
 end
 
@@ -1123,18 +1356,17 @@ function minimize_affine_corrections(
   e::Energies.NonlinearEnergy{Float64},
   anchor::Vector{Float64},
   directions::Matrix{Float64};
-  relative_tolerance::Float64=1e-10,
-  absolute_tolerance::Float64=1e-12,
-  maxiter::Int=30,
+  relative_tolerance::Float64 = 1e-10,
+  absolute_tolerance::Float64 = 1e-12,
+  maxiter::Int = 30,
 )
-  size(directions, 2) == 0 && return (
-    u=copy(anchor), iterations=0, energy_evaluations=0
-  )
+  size(directions, 2) == 0 &&
+    return (u = copy(anchor), iterations = 0, energy_evaluations = 0)
   B = try
     orthonormal_basis(directions)
   catch error
     error isa ArgumentError || rethrow()
-    return (u=copy(anchor), iterations=0, energy_evaluations=0)
+    return (u = copy(anchor), iterations = 0, energy_evaluations = 0)
   end
   alpha = zeros(size(B, 2))
   initial_gradient = B' * Energies.gradient(e, anchor)
@@ -1156,16 +1388,16 @@ function minimize_affine_corrections(
       alpha,
       Optim.LBFGS(),
       Optim.Options(
-        iterations=maxiter,
-        g_abstol=target,
-        allow_f_increases=false,
-        show_warnings=false,
+        iterations = maxiter,
+        g_abstol = target,
+        allow_f_increases = false,
+        show_warnings = false,
       ),
     )
     return (
-      u=anchor + B * Optim.minimizer(result),
-      iterations=Optim.iterations(result),
-      energy_evaluations=energy_evaluations,
+      u = anchor + B * Optim.minimizer(result),
+      iterations = Optim.iterations(result),
+      energy_evaluations = energy_evaluations,
     )
   end
 
@@ -1174,7 +1406,9 @@ function minimize_affine_corrections(
     u = anchor + B * alpha
     gradient = B' * Energies.gradient(e, u)
     norm(gradient) <= target && return (
-      u=u, iterations=iteration, energy_evaluations=energy_evaluations
+      u = u,
+      iterations = iteration,
+      energy_evaluations = energy_evaluations,
     )
     iteration == maxiter && break
     iterations_done = iteration + 1
@@ -1219,9 +1453,9 @@ function minimize_affine_corrections(
     end
   end
   return (
-    u=anchor + B * alpha,
-    iterations=iterations_done,
-    energy_evaluations=energy_evaluations,
+    u = anchor + B * alpha,
+    iterations = iterations_done,
+    energy_evaluations = energy_evaluations,
   )
 end
 
@@ -1412,14 +1646,14 @@ function partition_of_unity_weights(subdomain_dofs, ndofs::Integer)
   weights = zeros(Float64, ndofs, nsubdomains)
   for (subdomain, indices) in enumerate(subdomain_dofs)
     all(index -> 1 <= index <= ndofs, indices) || throw(
-      ArgumentError("subdomain $subdomain contains a DOF outside 1:$ndofs")
+      ArgumentError("subdomain $subdomain contains a DOF outside 1:$ndofs"),
     )
     length(unique(indices)) == length(indices) ||
       throw(ArgumentError("subdomain $subdomain contains duplicate DOFs"))
     weights[indices, subdomain] .= 1.0
   end
 
-  multiplicity = vec(sum(weights; dims=2))
+  multiplicity = vec(sum(weights; dims = 2))
   uncovered = findall(iszero, multiplicity)
   isempty(uncovered) || throw(
     ArgumentError(
@@ -1433,7 +1667,7 @@ end
 
 "Assign every degree of freedom to one of its nonoverlapping core candidates."
 function _balanced_disjoint_cores(core_dofs, ndofs::Integer)
-  memberships = [Int[] for _ in 1:ndofs]
+  memberships = [Int[] for _ = 1:ndofs]
   for (subdomain, indices) in enumerate(core_dofs)
     length(unique(indices)) == length(indices) ||
       throw(ArgumentError("core $subdomain contains duplicate DOFs"))
@@ -1485,7 +1719,10 @@ basis as `coarse_basis` in [`var_dd`](@ref). Multiplicity weights from
 REMDD local corrections and are not a low-energy coarse basis.
 """
 function nicolaides_coarse_basis(
-  A::AbstractMatrix, core_dofs, subdomain_dofs; normalize::Bool=true
+  A::AbstractMatrix,
+  core_dofs,
+  subdomain_dofs;
+  normalize::Bool = true,
 )
   ndofs = size(A, 1)
   size(A, 2) == ndofs || throw(DimensionMismatch("A must be square"))
@@ -1493,7 +1730,7 @@ function nicolaides_coarse_basis(
   nsubdomains > 0 || throw(ArgumentError("at least one subdomain is required"))
   length(core_dofs) == nsubdomains || throw(
     DimensionMismatch(
-      "there must be one core and one overlapping DOF set per subdomain"
+      "there must be one core and one overlapping DOF set per subdomain",
     ),
   )
   all(isfinite, A) || throw(ArgumentError("A must contain only finite values"))
@@ -1504,21 +1741,21 @@ function nicolaides_coarse_basis(
     length(unique(indices)) == length(indices) ||
       throw(ArgumentError("subdomain $subdomain contains duplicate DOFs"))
     all(index -> 1 <= index <= ndofs, indices) || throw(
-      ArgumentError("subdomain $subdomain contains a DOF outside 1:$ndofs")
+      ArgumentError("subdomain $subdomain contains a DOF outside 1:$ndofs"),
     )
     overlapping[subdomain] = collect(Int, indices)
   end
 
   owned_cores = _balanced_disjoint_cores(core_dofs, ndofs)
   basis = zeros(Float64, ndofs, nsubdomains)
-  for subdomain in 1:nsubdomains
+  for subdomain = 1:nsubdomains
     core = owned_cores[subdomain]
     isempty(core) && throw(ArgumentError("core $subdomain owns no DOFs"))
     overlap = overlapping[subdomain]
     overlap_membership = Set(overlap)
     all(index -> index in overlap_membership, core) || throw(
       ArgumentError(
-        "owned core $subdomain must be contained in its overlapping DOF set"
+        "owned core $subdomain must be contained in its overlapping DOF set",
       ),
     )
     transition = setdiff(overlap, core)
@@ -1530,10 +1767,10 @@ function nicolaides_coarse_basis(
   end
 
   all(isfinite, basis) || throw(
-    ArgumentError("the local harmonic extensions produced non-finite values")
+    ArgumentError("the local harmonic extensions produced non-finite values"),
   )
   if normalize
-    row_sums = vec(sum(basis; dims=2))
+    row_sums = vec(sum(basis; dims = 2))
     threshold = sqrt(eps(Float64)) * max(1.0, maximum(abs, row_sums))
     all(sum -> abs(sum) > threshold, row_sums) || throw(
       ArgumentError(
@@ -1556,11 +1793,11 @@ function restrict_local_candidates!(
   anchor::AbstractVector,
   weights::AbstractMatrix,
   subdomain_dofs,
-  exterior_dofs=nothing,
+  exterior_dofs = nothing,
 )
   size(candidates) == size(weights) || throw(
     DimensionMismatch(
-      "candidate and partition-of-unity matrices must have the same size"
+      "candidate and partition-of-unity matrices must have the same size",
     ),
   )
   size(candidates, 1) == length(anchor) ||
@@ -1668,6 +1905,7 @@ function var_dd(
   quadratic_model::Bool = false,
   frozen_gp_model::Bool = false,
   tangent_gp_model::Bool = false,
+  projected_gp_model::Bool = false,
   density_mixing_alpha::Float64 = 1.0,
   sweep::Symbol = :additive,
   restriction::Symbol = :none,
@@ -1678,54 +1916,76 @@ function var_dd(
 )
   # TODO: Make local updates and other returns more elgant with info struct?
 
-  history_depth >= 0 || throw(ArgumentError("history_depth must be nonnegative"))
+  history_depth >= 0 ||
+    throw(ArgumentError("history_depth must be nonnegative"))
   0.0 <= mixing_omega < 1.0 ||
     throw(ArgumentError("mixing_omega must satisfy 0 <= mixing_omega < 1"))
-  sweep in (:additive, :multiplicative) || throw(ArgumentError(
-    "sweep must be :additive or :multiplicative",
-  ))
-  restriction in (:none, :partition_of_unity) || throw(ArgumentError(
-    "restriction must be :none or :partition_of_unity",
-  ))
-  restriction == :partition_of_unity && sweep != :additive && throw(
-    ArgumentError("partition-of-unity restriction requires sweep=:additive"),
+  sweep in (:additive, :multiplicative) ||
+    throw(ArgumentError("sweep must be :additive or :multiplicative"))
+  restriction in (:none, :partition_of_unity) ||
+    throw(ArgumentError("restriction must be :none or :partition_of_unity"))
+  restriction == :partition_of_unity &&
+    sweep != :additive &&
+    throw(
+      ArgumentError("partition-of-unity restriction requires sweep=:additive"),
+    )
+  quadratic_model + frozen_gp_model + tangent_gp_model + projected_gp_model <=
+  1 || throw(
+    ArgumentError(
+      "quadratic_model, frozen_gp_model, tangent_gp_model, and projected_gp_model are mutually exclusive",
+    ),
   )
-  quadratic_model + frozen_gp_model + tangent_gp_model <= 1 || throw(ArgumentError(
-    "quadratic_model, frozen_gp_model, and tangent_gp_model are mutually exclusive",
-  ))
-  0.0 < density_mixing_alpha <= 1.0 || throw(ArgumentError(
-    "density_mixing_alpha must satisfy 0 < density_mixing_alpha <= 1",
-  ))
-  density_mixing_alpha != 1.0 && !frozen_gp_model && throw(ArgumentError(
-    "density_mixing_alpha requires frozen_gp_model=true",
-  ))
-  frozen_gp_model && !(e isa Energies.GrossPitaevskiiRayleighQuotient) &&
-    throw(ArgumentError(
-      "frozen_gp_model is only available for GrossPitaevskiiRayleighQuotient",
-    ))
-  tangent_gp_model && !(e isa Energies.GrossPitaevskiiRayleighQuotient) &&
-    throw(ArgumentError(
-      "tangent_gp_model is only available for GrossPitaevskiiRayleighQuotient",
-    ))
-  tangent_gp_model && sweep != :additive && throw(ArgumentError(
-    "tangent_gp_model currently requires sweep=:additive",
-  ))
+  0.0 < density_mixing_alpha <= 1.0 || throw(
+    ArgumentError(
+      "density_mixing_alpha must satisfy 0 < density_mixing_alpha <= 1",
+    ),
+  )
+  density_mixing_alpha != 1.0 &&
+    !frozen_gp_model &&
+    throw(ArgumentError("density_mixing_alpha requires frozen_gp_model=true"))
+  frozen_gp_model &&
+    !(e isa Energies.GrossPitaevskiiRayleighQuotient) &&
+    throw(
+      ArgumentError(
+        "frozen_gp_model is only available for GrossPitaevskiiRayleighQuotient",
+      ),
+    )
+  tangent_gp_model &&
+    !(e isa Energies.GrossPitaevskiiRayleighQuotient) &&
+    throw(
+      ArgumentError(
+        "tangent_gp_model is only available for GrossPitaevskiiRayleighQuotient",
+      ),
+    )
+  projected_gp_model &&
+    !(e isa Energies.GrossPitaevskiiRayleighQuotient) &&
+    throw(
+      ArgumentError(
+        "projected_gp_model is only available for GrossPitaevskiiRayleighQuotient",
+      ),
+    )
+  tangent_gp_model &&
+    sweep != :additive &&
+    throw(ArgumentError("tangent_gp_model currently requires sweep=:additive"))
+  projected_gp_model &&
+    sweep != :additive &&
+    throw(
+      ArgumentError("projected_gp_model currently requires sweep=:additive"),
+    )
 
   # Initial guess, no need to normalize apparently
   u_cur = isnothing(u0) ? ones(Energies.dimension(e)) : copy(u0)
+  projected_gp_model && Energies.normalize_M!(u_cur, e.M)
   if !isnothing(coarse_basis)
-    ndims(coarse_basis) == 2 || throw(ArgumentError(
-      "coarse_basis must be a matrix",
-    ))
-    size(coarse_basis, 1) == length(u_cur) || throw(DimensionMismatch(
-      "coarse_basis rows must match the energy dimension",
-    ))
-    size(coarse_basis, 2) > 0 || throw(ArgumentError(
-      "coarse_basis must contain at least one vector",
-    ))
-    all(isfinite, coarse_basis) || throw(ArgumentError(
-      "coarse_basis must contain only finite values",
-    ))
+    ndims(coarse_basis) == 2 ||
+      throw(ArgumentError("coarse_basis must be a matrix"))
+    size(coarse_basis, 1) == length(u_cur) || throw(
+      DimensionMismatch("coarse_basis rows must match the energy dimension"),
+    )
+    size(coarse_basis, 2) > 0 ||
+      throw(ArgumentError("coarse_basis must contain at least one vector"))
+    all(isfinite, coarse_basis) ||
+      throw(ArgumentError("coarse_basis must contain only finite values"))
   end
 
   e_hist = Float64[]
@@ -1740,11 +2000,12 @@ function var_dd(
   push!(sol_hist, copy(u_cur))
 
   m = length(subdomain_dofs)
-  restriction_weights = restriction == :partition_of_unity ?
+  restriction_weights =
+    restriction == :partition_of_unity ?
     partition_of_unity_weights(subdomain_dofs, length(u_cur)) : nothing
-  restriction_exteriors = restriction == :partition_of_unity ? [
-    setdiff(eachindex(u_cur), indices) for indices in subdomain_dofs
-  ] : nothing
+  restriction_exteriors =
+    restriction == :partition_of_unity ?
+    [setdiff(eachindex(u_cur), indices) for indices in subdomain_dofs] : nothing
 
   local_updates = zeros(size(u_cur, 1), m)  # preallocate for efficiency
   for n = 1:maxiter
@@ -1754,11 +2015,13 @@ function var_dd(
       Energies.frozen_density_model(
         e,
         u_cur;
-        previous=previous_density_iterate,
-        alpha=density_mixing_alpha,
+        previous = previous_density_iterate,
+        alpha = density_mixing_alpha,
       )
     elseif tangent_gp_model
       Energies.tangent_quadratic_model(e, u_cur)
+    elseif projected_gp_model
+      Energies.projected_newton_model(e, u_cur)
     else
       e
     end
@@ -1772,21 +2035,23 @@ function var_dd(
           sweep_energy,
           u_cur,
           subdomain_dofs[i];
-          collect_info=!isnothing(local_solve_callback),
+          collect_info = !isnothing(local_solve_callback),
         )
       else
         multiplicative_iterate = multiplicative_inf_step(
-          sweep_energy, multiplicative_iterate, subdomain_dofs[i]
+          sweep_energy,
+          multiplicative_iterate,
+          subdomain_dofs[i],
         )
         (
-          u=multiplicative_iterate,
-          info=(
-            dimension=1 + length(subdomain_dofs[i]),
-            iterations=-1,
-            converged=true,
-            residual=NaN,
-            k_nnz=-1,
-            factor_nnz=-1,
+          u = multiplicative_iterate,
+          info = (
+            dimension = 1 + length(subdomain_dofs[i]),
+            iterations = -1,
+            converged = true,
+            residual = NaN,
+            k_nnz = -1,
+            factor_nnz = -1,
           ),
         )
       end
@@ -1815,16 +2080,29 @@ function var_dd(
     end
 
     combination_anchor = sweep == :additive ? u_cur : multiplicative_iterate
-    combined_matrix = isnothing(coarse_basis) ?
-      hcat(combination_anchor, previous_iterates..., local_updates) :
-      hcat(
-        combination_anchor,
-        previous_iterates...,
-        local_updates,
-        coarse_basis,
-      )
+    combined_matrix = if projected_gp_model
+      history_increments =
+        [iterate .- combination_anchor for iterate in previous_iterates]
+      local_increments = local_updates .- combination_anchor
+      increments = if isnothing(coarse_basis)
+        hcat(history_increments..., local_increments)
+      else
+        hcat(history_increments..., local_increments, coarse_basis)
+      end
+      anchored_m_orthonormal_basis(combination_anchor, increments, e.M)
+    elseif isnothing(coarse_basis)
+      hcat(combination_anchor, previous_iterates..., local_updates)
+    else
+      hcat(combination_anchor, previous_iterates..., local_updates, coarse_basis)
+    end
     !isnothing(subspace_callback) && subspace_callback(n, combined_matrix)
     u_trial = combine_step(e, combined_matrix)
+    if projected_gp_model
+      energy_tolerance = 10eps(Float64) * max(1.0, abs(e_cur))
+      if e(u_trial) > e_cur + energy_tolerance
+        u_trial = copy(u_cur)
+      end
+    end
     u_new = mix_iterates(e, u_cur, u_trial, mixing_omega)
 
     resnorm = Energies.residual_norm(e, u_new)
