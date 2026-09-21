@@ -49,6 +49,16 @@ then retracted to unit mass. Only the local step is quadratic: the combination
 space is minimized with the full nonlinear GP quotient. The plotted variants
 use `q=1,2`.
 
+The **projected qEMDD** curves use the second-order model after retraction to
+the unit-mass sphere. Its local curvature is the Lagrangian Hessian
+`K + 3*kappa*D(u_k) - lambda_k*M`, projected onto `P_k*V_i` with
+`P_k = I - u_k*(M*u_k)'`. The projected local matrix is applied as a rank-two
+update and regularized only when its complete projected curvature is not
+positive definite. The level-two space is built from history and local
+increments anchored at `u_k`, with M-orthonormal rank truncation relative to
+the increments' own scale. As for the other EMDD variants, level two minimizes
+the full nonlinear GP quotient. The plotted variants use `q=1,2`.
+
 The **charge-mixed EMDD** variants use the same local linear EVPs but assemble
 their frozen operator from
 `rho_mix = alpha*rho_k + (1-alpha)*rho_(k-1)`, with

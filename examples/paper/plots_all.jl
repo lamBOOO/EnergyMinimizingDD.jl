@@ -76,10 +76,20 @@ function add_series!(
   linewidth = 2.5,
 )
   c = isnothing(color) ? PALETTE[1] : color
-  lines!(ax, x, y; label = label, color = c, linestyle = linestyle, linewidth = linewidth)
+  lines!(
+    ax,
+    x,
+    y;
+    label = label,
+    color = c,
+    linestyle = linestyle,
+    linewidth = linewidth,
+  )
   marker_stride >= 1 || throw(ArgumentError("marker_stride must be positive"))
   marker_indices = collect(1:marker_stride:length(x))
-  !isempty(x) && last(marker_indices) != length(x) && push!(marker_indices, length(x))
+  !isempty(x) &&
+    last(marker_indices) != length(x) &&
+    push!(marker_indices, length(x))
   scatter!(
     ax,
     x[marker_indices],
@@ -100,7 +110,12 @@ function color_for(i)
   PALETTE[mod1(i, length(PALETTE))]
 end
 
-function add_partition_boundaries!(ax, owner_grid; color = (:black, 0.55), linewidth = 0.45)
+function add_partition_boundaries!(
+  ax,
+  owner_grid;
+  color = (:black, 0.55),
+  linewidth = 0.45,
+)
   n = size(owner_grid, 1)
   xs = Float64[]
   ys = Float64[]
@@ -108,12 +123,12 @@ function add_partition_boundaries!(ax, owner_grid; color = (:black, 0.55), linew
     append!(xs, (x1, x2, NaN))
     append!(ys, (y1, y2, NaN))
   end
-  for i in 1:n-1, j in 1:n
+  for i = 1:(n-1), j = 1:n
     owner_grid[i, j] == owner_grid[i+1, j] && continue
     x = i / n
     add_segment!(x, (j - 1) / n, x, j / n)
   end
-  for i in 1:n, j in 1:n-1
+  for i = 1:n, j = 1:(n-1)
     owner_grid[i, j] == owner_grid[i, j+1] && continue
     y = j / n
     add_segment!((i - 1) / n, y, i / n, y)
@@ -199,8 +214,10 @@ function add_partition_inset!(
     pax,
     cell_centers,
     cell_centers,
-    [RGBAf(0, 0, 0, mult_grid[i, j] > 1 ? 0.1f0 * mult_grid[i, j] : 0.0f0)
-     for i in axes(mult_grid, 1), j in axes(mult_grid, 2)];
+    [
+      RGBAf(0, 0, 0, mult_grid[i, j] > 1 ? 0.1f0 * mult_grid[i, j] : 0.0f0) for
+      i in axes(mult_grid, 1), j in axes(mult_grid, 2)
+    ];
   )
   add_partition_boundaries!(pax, owner_grid)
   if !isempty(inset_title)
@@ -208,11 +225,11 @@ function add_partition_inset!(
       pax,
       0.5,
       0.96;
-      text=inset_title,
-      align=(:center, :top),
-      fontsize=9,
-      color=:white,
-      font=:bold,
+      text = inset_title,
+      align = (:center, :top),
+      fontsize = 9,
+      color = :white,
+      font = :bold,
     )
   end
   return pax
@@ -256,11 +273,11 @@ function add_gp_solution_inset!(
     sax,
     0.5,
     0.96;
-    text=inset_title,
-    align=(:center, :top),
-    fontsize=9,
-    color=:white,
-    font=:bold,
+    text = inset_title,
+    align = (:center, :top),
+    fontsize = 9,
+    color = :white,
+    font = :bold,
   )
   return sax
 end
@@ -272,23 +289,23 @@ const SEMILINEAR_INSET_MARGIN = 2
 function add_semilinear_solution_inset!(
   figpos,
   solutions;
-  halign=0.68,
-  valign=0.97,
-  inset_size=0.23,
-  inset_title="exact u★",
+  halign = 0.68,
+  valign = 0.97,
+  inset_size = 0.23,
+  inset_title = "exact u★",
 )
   N = solutions.N[1]
   values = solutions.value
   sax = Axis(
     figpos;
-    width=Relative(inset_size),
-    height=Relative(inset_size),
-    halign=halign,
-    valign=valign,
-    tellwidth=false,
-    tellheight=false,
-    aspect=DataAspect(),
-    limits=(0, 1, 0, 1),
+    width = Relative(inset_size),
+    height = Relative(inset_size),
+    halign = halign,
+    valign = valign,
+    tellwidth = false,
+    tellheight = false,
+    aspect = DataAspect(),
+    limits = (0, 1, 0, 1),
   )
   translate!(sax.blockscene, 0, 0, 150)
   hidedecorations!(sax)
@@ -303,7 +320,7 @@ function add_semilinear_solution_inset!(
   node(ix, iy) = iy * (N + 1) + ix + 1
   TriangleFace = CairoMakie.GeometryBasics.TriangleFace
   faces = TriangleFace{Int}[]
-  for iy = 0:N-1, ix = 0:N-1
+  for iy = 0:(N-1), ix = 0:(N-1)
     lower_left = node(ix, iy)
     lower_right = node(ix + 1, iy)
     upper_left = node(ix, iy + 1)
@@ -316,27 +333,27 @@ function add_semilinear_solution_inset!(
     sax,
     vertices,
     faces;
-    color=vertex_values,
-    colormap=:balance,
-    colorrange=(-color_limit, color_limit),
-    shading=NoShading,
+    color = vertex_values,
+    colormap = :balance,
+    colorrange = (-color_limit, color_limit),
+    shading = NoShading,
   )
   wireframe!(
     sax,
     CairoMakie.GeometryBasics.Mesh(vertices, faces);
-    color=(:black, 0.14),
-    linewidth=0.18,
+    color = (:black, 0.14),
+    linewidth = 0.18,
   )
   if !isnothing(inset_title)
     text!(
       sax,
       0.5,
       0.96;
-      text=inset_title,
-      align=(:center, :top),
-      fontsize=9,
-      color=:white,
-      font=:bold,
+      text = inset_title,
+      align = (:center, :top),
+      fontsize = 9,
+      color = :white,
+      font = :bold,
     )
   end
   return sax
@@ -345,28 +362,28 @@ end
 "Fixed-size, top-right layout shared by the two semilinear paper insets."
 function semilinear_inset_layout(
   figpos;
-  inset_size=SEMILINEAR_INSET_SIZE,
-  gap=SEMILINEAR_INSET_GAP,
-  margin=SEMILINEAR_INSET_MARGIN,
+  inset_size = SEMILINEAR_INSET_SIZE,
+  gap = SEMILINEAR_INSET_GAP,
+  margin = SEMILINEAR_INSET_MARGIN,
 )
   layout = GridLayout(
     figpos;
-    width=2 * inset_size + gap,
-    height=inset_size,
-    halign=:right,
-    valign=:top,
-    tellwidth=false,
-    tellheight=false,
-    alignmode=Outside(margin),
-    default_colgap=gap,
+    width = 2 * inset_size + gap,
+    height = inset_size,
+    halign = :right,
+    valign = :top,
+    tellwidth = false,
+    tellheight = false,
+    alignmode = Outside(margin),
+    default_colgap = gap,
   )
   return layout
 end
 
 function fix_semilinear_inset_sizes!(
   layout;
-  inset_size=SEMILINEAR_INSET_SIZE,
-  gap=SEMILINEAR_INSET_GAP,
+  inset_size = SEMILINEAR_INSET_SIZE,
+  gap = SEMILINEAR_INSET_GAP,
 )
   colsize!(layout, 1, Fixed(inset_size))
   colsize!(layout, 2, Fixed(inset_size))
@@ -378,23 +395,23 @@ end
 function add_evp_solution_inset!(
   figpos,
   solutions;
-  halign=0.68,
-  valign=0.97,
-  inset_size=0.23,
-  inset_title="ground state",
+  halign = 0.68,
+  valign = 0.97,
+  inset_size = 0.23,
+  inset_title = "ground state",
 )
   N = solutions.N[1]
   values = solutions.value
   sax = Axis(
     figpos;
-    width=Relative(inset_size),
-    height=Relative(inset_size),
+    width = Relative(inset_size),
+    height = Relative(inset_size),
     halign,
     valign,
-    tellwidth=false,
-    tellheight=false,
-    aspect=DataAspect(),
-    limits=(0, 1, 0, 1),
+    tellwidth = false,
+    tellheight = false,
+    aspect = DataAspect(),
+    limits = (0, 1, 0, 1),
   )
   translate!(sax.blockscene, 0, 0, 150)
   hidedecorations!(sax)
@@ -404,18 +421,18 @@ function add_evp_solution_inset!(
     collect(all_nodes(N)),
     collect(all_nodes(N)),
     field_matrix_with_bc(values, N);
-    colormap=:viridis,
-    colorrange=(0, maximum(values)),
+    colormap = :viridis,
+    colorrange = (0, maximum(values)),
   )
   text!(
     sax,
     0.5,
     0.96;
-    text=inset_title,
-    align=(:center, :top),
-    fontsize=9,
-    color=:white,
-    font=:bold,
+    text = inset_title,
+    align = (:center, :top),
+    fontsize = 9,
+    color = :white,
+    font = :bold,
   )
   return sax
 end
@@ -423,21 +440,21 @@ end
 function add_lshape_solution_inset!(
   figpos,
   solutions;
-  halign=0.68,
-  valign=0.97,
-  inset_size=0.23,
-  inset_title="exact u★",
+  halign = 0.68,
+  valign = 0.97,
+  inset_size = 0.23,
+  inset_title = "exact u★",
 )
   sax = Axis(
     figpos;
-    width=Relative(inset_size),
-    height=Relative(inset_size),
-    halign=halign,
-    valign=valign,
-    tellwidth=false,
-    tellheight=false,
-    aspect=DataAspect(),
-    limits=(-1, 1, -1, 1),
+    width = Relative(inset_size),
+    height = Relative(inset_size),
+    halign = halign,
+    valign = valign,
+    tellwidth = false,
+    tellheight = false,
+    aspect = DataAspect(),
+    limits = (-1, 1, -1, 1),
   )
   translate!(sax.blockscene, 0, 0, 150)
   hidedecorations!(sax)
@@ -471,27 +488,27 @@ function add_lshape_solution_inset!(
     sax,
     vertices,
     faces;
-    color=vertex_values,
-    colormap=:balance,
-    colorrange=(-color_limit, color_limit),
-    shading=NoShading,
+    color = vertex_values,
+    colormap = :balance,
+    colorrange = (-color_limit, color_limit),
+    shading = NoShading,
   )
   wireframe!(
     sax,
     CairoMakie.GeometryBasics.Mesh(vertices, faces);
-    color=(:black, 0.14),
-    linewidth=0.18,
+    color = (:black, 0.14),
+    linewidth = 0.18,
   )
   if !isnothing(inset_title)
     text!(
       sax,
       0.0,
       0.92;
-      text=inset_title,
-      align=(:center, :top),
-      fontsize=9,
-      color=:black,
-      font=:bold,
+      text = inset_title,
+      align = (:center, :top),
+      fontsize = 9,
+      color = :black,
+      font = :bold,
     )
   end
   return sax
@@ -512,14 +529,14 @@ function add_triangle_partition_inset!(
   pmask = parts.m .== m
   pax = Axis(
     figpos;
-    width=Relative(inset_size),
-    height=Relative(inset_size),
-    halign=halign,
-    valign=valign,
-    tellwidth=false,
-    tellheight=false,
-    aspect=DataAspect(),
-    limits=limits,
+    width = Relative(inset_size),
+    height = Relative(inset_size),
+    halign = halign,
+    valign = valign,
+    tellwidth = false,
+    tellheight = false,
+    aspect = DataAspect(),
+    limits = limits,
   )
   translate!(pax.blockscene, 0, 0, 150)
   hidedecorations!(pax)
@@ -537,31 +554,31 @@ function add_triangle_partition_inset!(
   poly!(
     pax,
     polygons;
-    color=owners,
-    colormap=:Spectral_9,
-    colorrange=(1, m),
-    strokecolor=(:black, 0.18),
-    strokewidth=0.2,
+    color = owners,
+    colormap = :Spectral_9,
+    colorrange = (1, m),
+    strokecolor = (:black, 0.18),
+    strokewidth = 0.2,
   )
   poly!(
     pax,
     polygons;
-    color=[
+    color = [
       RGBAf(0, 0, 0, value > 1 ? 0.1f0 * value : 0.0f0) for
       value in multiplicities
     ],
-    strokewidth=0,
+    strokewidth = 0,
   )
   if !isnothing(inset_title)
     text!(
       pax,
       title_position[1],
       title_position[2];
-      text=inset_title,
-      align=(:center, :top),
-      fontsize=9,
-      color=title_color,
-      font=:bold,
+      text = inset_title,
+      align = (:center, :top),
+      fontsize = 9,
+      color = title_color,
+      font = :bold,
     )
   end
   return pax
@@ -690,9 +707,16 @@ end
 function fig03_evp_baseline()
   tbl = loadtable("study2_baseline.csv")
   fig = Figure(size = (600, 400))
-  ax = Axis(fig[1, 1]; xlabel = "iteration", ylabel = "eigenvalue error", yscale = log10)
-  for (i, (method, label)) in
-      enumerate((("var_dd", "energy-minimizing DD"), ("inverse_iteration", "inverse iteration")))
+  ax = Axis(
+    fig[1, 1];
+    xlabel = "iteration",
+    ylabel = "eigenvalue error",
+    yscale = log10,
+  )
+  for (i, (method, label)) in enumerate((
+    ("var_dd", "energy-minimizing DD"),
+    ("inverse_iteration", "inverse iteration"),
+  ))
     mask = (tbl.method .== method) .& (tbl.err .> 1e-13)
     add_series!(
       ax,
@@ -724,7 +748,15 @@ function fig04_evp_haccuracy()
   add_series!(ax, hs, errs; label = "var_dd (converged)", color = color_for(1))
   href = [minimum(hs), maximum(hs)]
   eref = errs[argmin(hs)] .* (href ./ minimum(hs)) .^ 2
-  lines!(ax, href, eref; label = "quadratic reference", color = :black, linestyle = :dash, linewidth = 1.5)
+  lines!(
+    ax,
+    href,
+    eref;
+    label = "quadratic reference",
+    color = :black,
+    linestyle = :dash,
+    linewidth = 1.5,
+  )
   add_legend!(ax; position = :lt)
   savefigs(fig, "fig04_evp_haccuracy")
 end
@@ -814,16 +846,28 @@ function fig06_timing()
   )
   for (ci, m) in enumerate(ms), (problem, (ls, plabel)) in PROBLEM_STYLE
     mask =
-      (tbl.problem .== problem) .&
-      (tbl.m .== m) .&
-      (tbl.overlap .== 2) .&
+      (tbl.problem .== problem) .& (tbl.m .== m) .& (tbl.overlap .== 2) .&
       .!isnan.(tbl.time_s)
     any(mask) || continue
     Ns = pick(tbl, :N, mask)
     ts = pick(tbl, :time_s, mask)
     its = pick(tbl, :iters, mask)
-    add_series!(ax1, Ns, ts; label = "$plabel, m = $m", color = color_for(ci), linestyle = ls)
-    add_series!(ax2, Ns, ts ./ its; label = "$plabel, m = $m", color = color_for(ci), linestyle = ls)
+    add_series!(
+      ax1,
+      Ns,
+      ts;
+      label = "$plabel, m = $m",
+      color = color_for(ci),
+      linestyle = ls,
+    )
+    add_series!(
+      ax2,
+      Ns,
+      ts ./ its;
+      label = "$plabel, m = $m",
+      color = color_for(ci),
+      linestyle = ls,
+    )
   end
   add_legend!(ax1; position = :lt)
   add_legend!(ax2; position = :lt)
@@ -837,8 +881,14 @@ function fig07_poisson()
   tbl = loadtable("study4_poisson.csv")
   ms = sort(unique(tbl.m))
   fig = Figure(size = (900, 350))
-  ax1 = Axis(fig[1, 1]; xlabel = "iteration", ylabel = "energy gap", yscale = log10)
-  ax2 = Axis(fig[1, 2]; xlabel = "iteration", ylabel = "residual norm", yscale = log10)
+  ax1 =
+    Axis(fig[1, 1]; xlabel = "iteration", ylabel = "energy gap", yscale = log10)
+  ax2 = Axis(
+    fig[1, 2];
+    xlabel = "iteration",
+    ylabel = "residual norm",
+    yscale = log10,
+  )
   for (i, m) in enumerate(ms)
     mask_e =
       (tbl.m .== m) .& (tbl.quantity .== "energy_gap") .& (tbl.value .> 1e-14)
@@ -859,7 +909,14 @@ function fig07_poisson()
       color = color_for(i),
     )
   end
-  hlines!(ax2, [1e-12]; label = "tolerance", color = :black, linestyle = :dash, linewidth = 1.5)
+  hlines!(
+    ax2,
+    [1e-12];
+    label = "tolerance",
+    color = :black,
+    linestyle = :dash,
+    linewidth = 1.5,
+  )
   add_legend!(ax1; position = :rt)
   add_legend!(ax2; position = :rt)
   savefigs(fig, "fig07_poisson")
@@ -872,17 +929,30 @@ function fig09_heat_warmstart()
   ts = loadtable("study6_tau.csv")
 
   fig = Figure(size = (900, 350))
-  ax1 = Axis(fig[1, 1]; xlabel = "time step n", ylabel = "DD iterations per step")
-  for (i, (mode, label)) in enumerate((("cold", "cold start"), ("warm", "warm start")))
+  ax1 =
+    Axis(fig[1, 1]; xlabel = "time step n", ylabel = "DD iterations per step")
+  for (i, (mode, label)) in
+      enumerate((("cold", "cold start"), ("warm", "warm start")))
     mask = wc.mode .== mode
-    add_series!(ax1, pick(wc, :step, mask), pick(wc, :iters, mask); label = label, color = color_for(i))
+    add_series!(
+      ax1,
+      pick(wc, :step, mask),
+      pick(wc, :iters, mask);
+      label = label,
+      color = color_for(i),
+    )
   end
   ylims!(ax1, 0, maximum(wc.iters) + 2)
   add_legend!(ax1; position = :rc)
 
   taus = sort(unique(ts.tau))
   totals = [sum(pick(ts, :iters, ts.tau .== tau)) for tau in taus]
-  ax2 = Axis(fig[1, 2]; xlabel = "time step size tau", ylabel = "total DD iterations (T = 0.2)", xscale = log10)
+  ax2 = Axis(
+    fig[1, 2];
+    xlabel = "time step size tau",
+    ylabel = "total DD iterations (T = 0.2)",
+    xscale = log10,
+  )
   add_series!(ax2, taus, totals; color = color_for(1))
   savefigs(fig, "fig09_heat_warmstart")
 end
@@ -894,8 +964,18 @@ function fig10_heat_dissipation()
   ts = loadtable("study6_tau.csv")
   taus = sort(unique(ts.tau))
   fig = Figure(size = (900, 350))
-  ax1 = Axis(fig[1, 1]; xlabel = "t", ylabel = "energy gap to steady state", yscale = log10)
-  ax2 = Axis(fig[1, 2]; xlabel = "t", ylabel = "rel. error vs direct solve", yscale = log10)
+  ax1 = Axis(
+    fig[1, 1];
+    xlabel = "t",
+    ylabel = "energy gap to steady state",
+    yscale = log10,
+  )
+  ax2 = Axis(
+    fig[1, 2];
+    xlabel = "t",
+    ylabel = "rel. error vs direct solve",
+    yscale = log10,
+  )
   for (i, tau) in enumerate(taus)
     mask = ts.tau .== tau
     label = @sprintf("tau = %.1e", tau)
@@ -929,7 +1009,7 @@ function fig11_local3d()
   N = tbl.N[1]
   xs = collect(all_nodes(N))
   ks = sort(unique(tbl.iter))
-  subs = sort(unique(tbl.sub[tbl.kind.=="update"]))
+  subs = sort(unique(tbl.sub[tbl.kind .== "update"]))
   ncols = 1 + length(subs)
 
   fig = Figure(size = (330 * ncols, 300 * length(ks)))
@@ -943,7 +1023,13 @@ function fig11_local3d()
       xticksvisible = false,
       yticksvisible = false,
     )
-    surface!(ax, xs, xs, field_matrix_with_bc(pick(tbl, :value, mask_u), N); colormap = :viridis)
+    surface!(
+      ax,
+      xs,
+      xs,
+      field_matrix_with_bc(pick(tbl, :value, mask_u), N);
+      colormap = :viridis,
+    )
 
     mask_all = (tbl.iter .== k) .& (tbl.kind .== "update")
     zmax = maximum(abs.(tbl.value[mask_all])) + 1e-12
@@ -1023,7 +1109,8 @@ function fig12_poisson_cmp()
   colors = tab10_colors(length(methods))
   finite_res = tbl.resnorm[tbl.resnorm .> 0]
   ylims = (1e-10 * 0.5, maximum(finite_res) * 3)
-  ytick_exps = sort(collect(floor(Int, log10(ylims[2])):-2:ceil(Int, log10(ylims[1]))))
+  ytick_exps =
+    sort(collect(floor(Int, log10(ylims[2])):-2:ceil(Int, log10(ylims[1]))))
   yticks = LogTicks(ytick_exps)
   fig = Figure(size = (max(430 * length(ms), 1200), 350))
   for (j, m) in enumerate(ms)
@@ -1068,20 +1155,12 @@ end
 function fig12b_poisson_cmp_paper()
   problem_rows = (
     ("Poisson", loadtable("study8_linear_cmp_poisson.csv")),
-    (
-      "variable diffusion",
-      loadtable("study8_linear_cmp_sign_changing.csv"),
-    ),
+    ("variable diffusion", loadtable("study8_linear_cmp_sign_changing.csv")),
   )
   parts = loadtable("study8_partitions.csv")
   ms = sort(unique(problem_rows[end][2].m))
-  methods = (
-    "var_dd_additive",
-    "var_dd_additive_history",
-    "ras",
-    "pcg_as",
-    "gmres_ras",
-  )
+  methods =
+    ("var_dd_additive", "var_dd_additive_history", "ras", "pcg_as", "gmres_ras")
   labels = Dict(
     "var_dd_additive" => "EMDD (q = 1)",
     "var_dd_additive_history" => "EMDD (q = 2)",
@@ -1097,9 +1176,12 @@ function fig12b_poisson_cmp_paper()
     "gmres_ras" => :pentagon,
   )
   colors = tab10_colors(length(methods))
-  finite_residuals = vcat([
-    tbl.relative_residual[tbl.relative_residual .> 0] for (_, tbl) in problem_rows
-  ]...)
+  finite_residuals = vcat(
+    [
+      tbl.relative_residual[tbl.relative_residual .> 0] for
+      (_, tbl) in problem_rows
+    ]...,
+  )
   ylims = (1e-11, maximum(finite_residuals) * 3)
   yticks = LogTicks(collect(1:-2:-11))
   fig = Figure(size = (max(430 * length(ms), 1200), 350))
@@ -1107,28 +1189,30 @@ function fig12b_poisson_cmp_paper()
     for (column, m) in enumerate(ms)
       ax = Axis(
         fig[row, column];
-        xlabel=row == length(problem_rows) ? "iteration" : "",
-        ylabel=column == 1 ? "$problem_label\nrel. res.  ‖Axₖ-b‖₂/‖Ax₀-b‖₂" : "",
-        ylabelsize=13,
-        yscale=log10,
+        xlabel = row == length(problem_rows) ? "iteration" : "",
+        ylabel = column == 1 ?
+                 "$problem_label\nrel. res.  ‖Axₖ-b‖₂/‖Ax₀-b‖₂" : "",
+        ylabelsize = 13,
+        yscale = log10,
         yticks,
-        title=row == 1 ? "m = $m" : "",
-        limits=((0, 100), ylims),
+        title = row == 1 ? "m = $m" : "",
+        limits = ((0, 100), ylims),
       )
       for (index, method) in enumerate(methods)
-        mask = (tbl.m .== m) .& (tbl.method .== method) .&
+        mask =
+          (tbl.m .== m) .& (tbl.method .== method) .&
           (tbl.relative_residual .> 0)
         add_series!(
           ax,
           pick(tbl, :solves, mask) ./ m,
           pick(tbl, :relative_residual, mask);
-          label=labels[method],
-          color=colors[index],
-          marker=markers[method],
-          linewidth=2.8,
-          marker_stride=8,
-          markerstrokecolor=:black,
-          markerstrokewidth=0.7,
+          label = labels[method],
+          color = colors[index],
+          marker = markers[method],
+          linewidth = 2.8,
+          marker_stride = 8,
+          markerstrokecolor = :black,
+          markerstrokewidth = 0.7,
         )
       end
       add_partition_inset!(fig[row, column], parts, m)
@@ -1140,14 +1224,14 @@ function fig12b_poisson_cmp_paper()
       methods,
       markers;
       colors,
-      linewidths=fill(2.8, length(methods)),
-      markerstrokecolors=fill(:black, length(methods)),
-      markerstrokewidths=fill(0.7, length(methods)),
+      linewidths = fill(2.8, length(methods)),
+      markerstrokecolors = fill(:black, length(methods)),
+      markerstrokewidths = fill(0.7, length(methods)),
     ),
     [labels[method] for method in methods];
-    orientation=:horizontal,
-    nbanks=1,
-    framevisible=true,
+    orientation = :horizontal,
+    nbanks = 1,
+    framevisible = true,
   )
   rowgap!(fig.layout, 8)
   savefigs(fig, "fig12b_poisson_cmp_paper")
@@ -1193,16 +1277,16 @@ function fig12c_poisson_nicolaides()
   finite_res = tbl.resnorm[selected .& (tbl.resnorm .> 0)]
   ylims = (1e-10 * 0.5, maximum(finite_res) * 3)
   yticks = LogTicks(collect(1:-2:-9))
-  fig = Figure(; size=(max(430 * length(ms), 1200), 350))
+  fig = Figure(; size = (max(430 * length(ms), 1200), 350))
   for (column, m) in enumerate(ms)
     ax = Axis(
       fig[1, column];
-      xlabel="parallel local-solve batches",
-      ylabel=column == 1 ? "residual norm ‖Axₖ-b‖₂" : "",
-      yscale=log10,
-      yticks=yticks,
-      title="m = $m",
-      limits=((0, 60), ylims),
+      xlabel = "parallel local-solve batches",
+      ylabel = column == 1 ? "residual norm ‖Axₖ-b‖₂" : "",
+      yscale = log10,
+      yticks = yticks,
+      title = "m = $m",
+      limits = ((0, 60), ylims),
     )
     for (index, method) in enumerate(methods)
       mask = (tbl.m .== m) .& (tbl.method .== method) .& (tbl.resnorm .> 1e-14)
@@ -1210,9 +1294,9 @@ function fig12c_poisson_nicolaides()
         ax,
         pick(tbl, :solves, mask) ./ m,
         logfloor(pick(tbl, :resnorm, mask));
-        label=labels[method],
-        color=colors[index],
-        marker=markers[method],
+        label = labels[method],
+        color = colors[index],
+        marker = markers[method],
       )
     end
     add_partition_inset!(fig[1, column], parts, m)
@@ -1221,9 +1305,9 @@ function fig12c_poisson_nicolaides()
     fig[2, 1:length(ms)],
     legend_line_marker_elements(methods, markers; colors),
     [labels[method] for method in methods];
-    orientation=:horizontal,
-    nbanks=2,
-    framevisible=true,
+    orientation = :horizontal,
+    nbanks = 2,
+    framevisible = true,
   )
   rowgap!(fig.layout, 8)
   return savefigs(fig, "fig12c_poisson_nicolaides")
@@ -1269,15 +1353,15 @@ function fig12d_poisson_weak_scaling()
       :solid,
     ),
   )
-  fig = Figure(; size=(PAPER_FULL_WIDTH, 430))
+  fig = Figure(; size = (PAPER_FULL_WIDTH, 430))
   for (column, q) in enumerate((1, 2))
     ax = Axis(
       fig[1, column];
-      xlabel="number of subdomains, m",
-      ylabel=column == 1 ? "parallel local-solve batches" : "",
-      xscale=log2,
-      xticks=(ms, string.(ms)),
-      title="q = $q",
+      xlabel = "number of subdomains, m",
+      ylabel = column == 1 ? "parallel local-solve batches" : "",
+      xscale = log2,
+      xticks = (ms, string.(ms)),
+      title = "q = $q",
     )
     for (family, coarse_kind, label, color, marker, linestyle) in styles
       batches = Int[]
@@ -1294,15 +1378,19 @@ function fig12d_poisson_weak_scaling()
     fig[2, 1:2],
     [
       [
-        LineElement(; color=style[4], linestyle=style[6], linewidth=2.5),
-        MarkerElement(; color=style[4], marker=style[5], markersize=MARKERSIZE),
+        LineElement(; color = style[4], linestyle = style[6], linewidth = 2.5),
+        MarkerElement(;
+          color = style[4],
+          marker = style[5],
+          markersize = MARKERSIZE,
+        ),
       ] for style in styles
     ],
     [style[3] for style in styles];
-    orientation=:horizontal,
-    nbanks=2,
-    framevisible=true,
-    labelsize=14,
+    orientation = :horizontal,
+    nbanks = 2,
+    framevisible = true,
+    labelsize = 14,
   )
   rowgap!(fig.layout, 8)
   return savefigs(fig, "fig12d_poisson_weak_scaling")
@@ -1316,17 +1404,8 @@ function fig13_evp_cmp()
   solutions = loadtable("study9_evp_solution.csv")
   parts = loadtable("study9_partitions.csv")
   ms = sort(unique(tbl.m))
-  primary_methods = (
-    "var_dd",
-    "var_dd_history",
-    "lopsd_as",
-    "lobpcg_as",
-  )
-  jd_methods = (
-    "jd_gmres_as_1",
-    "jd_gmres_as_2",
-    "jd_gmres_as_4",
-  )
+  primary_methods = ("var_dd", "var_dd_history", "lopsd_as", "lobpcg_as")
+  jd_methods = ("jd_gmres_as_1", "jd_gmres_as_2", "jd_gmres_as_4")
   methods = (primary_methods..., jd_methods...)
   labels = Dict(
     "var_dd" => "EMDD (q = 1)",
@@ -1347,26 +1426,20 @@ function fig13_evp_cmp()
     "jd_gmres_as_4" => :diamond,
   )
   primary_colors = tab10_colors(length(primary_methods))
-  jd_colors = [
-    RGBf(level, level, level) for level in (0.55, 0.38, 0.20)
-  ]
+  jd_colors = [RGBf(level, level, level) for level in (0.55, 0.38, 0.20)]
   jd_linestyles = [(:dot, :dense), (:dash, :dense), (:dashdot, :dense)]
   colors = [primary_colors..., jd_colors...]
-  linestyles = [
-    fill(:solid, length(primary_methods))...,
-    jd_linestyles...,
-  ]
-  linewidths = [
-    fill(2.8, length(primary_methods))...,
-    fill(1.8, length(jd_methods))...,
-  ]
+  linestyles = [fill(:solid, length(primary_methods))..., jd_linestyles...]
+  linewidths =
+    [fill(2.8, length(primary_methods))..., fill(1.8, length(jd_methods))...]
   markersizes = [
     fill(MARKERSIZE, length(primary_methods))...,
     fill(MARKERSIZE, length(jd_methods))...,
   ]
   finite_res = tbl.relative_residual[tbl.relative_residual .> 0]
   ylims = (1e-6 * 0.5, maximum(finite_res) * 1.5)
-  ytick_exps = sort(collect(floor(Int, log10(ylims[2])):-2:ceil(Int, log10(ylims[1]))))
+  ytick_exps =
+    sort(collect(floor(Int, log10(ylims[2])):-2:ceil(Int, log10(ylims[1]))))
   yticks = LogTicks(ytick_exps)
   fig = Figure(size=(PAPER_FULL_WIDTH, 350))
   for (j, m) in enumerate(ms)
@@ -1381,9 +1454,7 @@ function fig13_evp_cmp()
     )
     for (i, method) in enumerate(methods)
       mask =
-        (tbl.m .== m) .&
-        (tbl.method .== method) .&
-        (tbl.relative_residual .> 0)
+        (tbl.m .== m) .& (tbl.method .== method) .& (tbl.relative_residual .> 0)
       add_series!(
         ax,
         pick(tbl, :iteration, mask),
@@ -1424,11 +1495,11 @@ function fig13_evp_cmp()
     legend_line_marker_elements(
       primary_methods,
       markers;
-      markersizes=fill(MARKERSIZE, length(primary_methods)),
-      colors=primary_colors,
-      linewidths=fill(2.8, length(primary_methods)),
-      markerstrokecolors=fill(:black, length(primary_methods)),
-      markerstrokewidths=fill(0.7, length(primary_methods)),
+      markersizes = fill(MARKERSIZE, length(primary_methods)),
+      colors = primary_colors,
+      linewidths = fill(2.8, length(primary_methods)),
+      markerstrokecolors = fill(:black, length(primary_methods)),
+      markerstrokewidths = fill(0.7, length(primary_methods)),
     ),
     [labels[method] for method in primary_methods];
     orientation = :horizontal,
@@ -1440,17 +1511,17 @@ function fig13_evp_cmp()
     legend_line_marker_elements(
       jd_methods,
       markers;
-      markersizes=fill(MARKERSIZE, length(jd_methods)),
-      colors=jd_colors,
-      linestyles=jd_linestyles,
-      linewidths=fill(1.8, length(jd_methods)),
-      markerstrokecolors=fill(:black, length(jd_methods)),
-      markerstrokewidths=fill(0.7, length(jd_methods)),
+      markersizes = fill(MARKERSIZE, length(jd_methods)),
+      colors = jd_colors,
+      linestyles = jd_linestyles,
+      linewidths = fill(1.8, length(jd_methods)),
+      markerstrokecolors = fill(:black, length(jd_methods)),
+      markerstrokewidths = fill(0.7, length(jd_methods)),
     ),
     [labels[method] for method in jd_methods];
-    orientation=:horizontal,
-    nbanks=1,
-    framevisible=true,
+    orientation = :horizontal,
+    nbanks = 1,
+    framevisible = true,
   )
   rowgap!(fig.layout, 8)
   savefigs(fig, "fig13_evp_cmp")
@@ -1472,6 +1543,10 @@ function fig14_gp_convergence()
     "gp_quadratic_history",
     "gp_quadratic_history_2",
     "gp_quadratic_history_3",
+    "gp_tangent_quadratic",
+    "gp_tangent_quadratic_history",
+    "gp_projected_qemdd",
+    "gp_projected_qemdd_history",
     "gfdn_pcg_as_1",
     "gfdn_pcg_as_2",
     "gfdn_pcg_as_4",
@@ -1486,6 +1561,10 @@ function fig14_gp_convergence()
     "gp_quadratic_history" => "quadratic GP-EMDD + history",
     "gp_quadratic_history_2" => "quadratic GP-EMDD + history (2)",
     "gp_quadratic_history_3" => "quadratic GP-EMDD + history (3)",
+    "gp_tangent_quadratic" => "tangent KKT (q = 1)",
+    "gp_tangent_quadratic_history" => "tangent KKT (q = 2)",
+    "gp_projected_qemdd" => "projected qEMDD (q = 1)",
+    "gp_projected_qemdd_history" => "projected qEMDD (q = 2)",
     "gfdn_pcg_as_1" => "GFDN-PCG(AS, 1)",
     "gfdn_pcg_as_2" => "GFDN-PCG(AS, 2)",
     "gfdn_pcg_as_4" => "GFDN-PCG(AS, 4)",
@@ -1500,6 +1579,10 @@ function fig14_gp_convergence()
     "gp_quadratic_history" => :star6,
     "gp_quadratic_history_2" => :rect,
     "gp_quadratic_history_3" => :dtriangle,
+    "gp_tangent_quadratic" => :pentagon,
+    "gp_tangent_quadratic_history" => :diamond,
+    "gp_projected_qemdd" => :utriangle,
+    "gp_projected_qemdd_history" => :cross,
     "gfdn_pcg_as_1" => :circle,
     "gfdn_pcg_as_2" => :rect,
     "gfdn_pcg_as_4" => :dtriangle,
@@ -1510,9 +1593,8 @@ function fig14_gp_convergence()
   colors = tab10_colors(length(methods))
   positive_residuals = tbl.resnorm[tbl.resnorm .> 0]
   ylimits = (1e-7, maximum(positive_residuals) * 2)
-  ytick_exps = sort(
-    collect(floor(Int, log10(ylimits[2])):-2:ceil(Int, log10(ylimits[1])))
-  )
+  ytick_exps =
+    sort(collect(floor(Int, log10(ylimits[2])):-2:ceil(Int, log10(ylimits[1]))))
   yticks = LogTicks(ytick_exps)
 
   fig = Figure(size = (330 * length(ms), 275 * length(betas) + 90))
@@ -1528,9 +1610,7 @@ function fig14_gp_convergence()
     )
     for (i, method) in enumerate(methods)
       mask =
-        (tbl.method .== method) .&
-        (tbl.beta .== beta) .&
-        (tbl.m .== m) .&
+        (tbl.method .== method) .& (tbl.beta .== beta) .& (tbl.m .== m) .&
         (tbl.resnorm .> 0)
       add_series!(
         ax,
@@ -1546,19 +1626,19 @@ function fig14_gp_convergence()
       inset_layout[1, 2],
       parts,
       m;
-      halign=:center,
-      valign=:center,
-      inset_size=1.0,
-      inset_title="",
+      halign = :center,
+      valign = :center,
+      inset_size = 1.0,
+      inset_title = "",
     )
     add_gp_solution_inset!(
       inset_layout[1, 1],
       solutions,
       beta;
-      halign=:center,
-      valign=:center,
-      inset_size=1.0,
-      inset_title="",
+      halign = :center,
+      valign = :center,
+      inset_size = 1.0,
+      inset_title = "",
     )
     fix_semilinear_inset_sizes!(inset_layout)
   end
@@ -1588,19 +1668,15 @@ function fig14b_gp_convergence_paper()
   primary_methods = (
     "gp_additive",
     "gp_additive_history",
-    "gp_quadratic",
-    "gp_quadratic_history",
+    # "gp_quadratic",
+    # "gp_quadratic_history",
+    # "gp_tangent_quadratic",
+    # "gp_tangent_quadratic_history",
+    "gp_projected_qemdd",
+    "gp_projected_qemdd_history",
   )
-  gfdn_methods = (
-    "gfdn_pcg_as_1",
-    "gfdn_pcg_as_2",
-    "gfdn_pcg_as_4",
-  )
-  cg_gfdn_methods = (
-    "cg_gfdn_pcg_as_1",
-    "cg_gfdn_pcg_as_2",
-    "cg_gfdn_pcg_as_4",
-  )
+  gfdn_methods = ("gfdn_pcg_as_1", "gfdn_pcg_as_2", "gfdn_pcg_as_4")
+  cg_gfdn_methods = ("cg_gfdn_pcg_as_1", "cg_gfdn_pcg_as_2", "cg_gfdn_pcg_as_4")
   metric_methods = (gfdn_methods..., cg_gfdn_methods...)
   metric_legend_methods = (
     gfdn_methods[1],
@@ -1614,8 +1690,12 @@ function fig14b_gp_convergence_paper()
   labels = Dict(
     "gp_additive" => "EMDD (q = 1)",
     "gp_additive_history" => "EMDD (q = 2)",
-    "gp_quadratic" => "quadratic EMDD (q = 1)",
-    "gp_quadratic_history" => "quadratic EMDD (q = 2)",
+    # "gp_quadratic" => "quadratic EMDD (q = 1)",
+    # "gp_quadratic_history" => "quadratic EMDD (q = 2)",
+    # "gp_tangent_quadratic" => "tangent KKT (q = 1)",
+    # "gp_tangent_quadratic_history" => "tangent KKT (q = 2)",
+    "gp_projected_qemdd" => "projected qEMDD (q = 1)",
+    "gp_projected_qemdd_history" => "projected qEMDD (q = 2)",
     "gfdn_pcg_as_1" => "GFDN-PCG(AS, 1)",
     "gfdn_pcg_as_2" => "GFDN-PCG(AS, 2)",
     "gfdn_pcg_as_4" => "GFDN-PCG(AS, 4)",
@@ -1626,8 +1706,12 @@ function fig14b_gp_convergence_paper()
   markers = Dict(
     "gp_additive" => :circle,
     "gp_additive_history" => :hexagon,
-    "gp_quadratic" => :star4,
-    "gp_quadratic_history" => :star6,
+    # "gp_quadratic" => :star4,
+    # "gp_quadratic_history" => :star6,
+    # "gp_tangent_quadratic" => :pentagon,
+    # "gp_tangent_quadratic_history" => :diamond,
+    "gp_projected_qemdd" => :utriangle,
+    "gp_projected_qemdd_history" => :cross,
     "gfdn_pcg_as_1" => :circle,
     "gfdn_pcg_as_2" => :rect,
     "gfdn_pcg_as_4" => :dtriangle,
@@ -1636,11 +1720,8 @@ function fig14b_gp_convergence_paper()
     "cg_gfdn_pcg_as_4" => :dtriangle,
   )
   primary_colors = tab10_colors(length(primary_methods))
-  gfdn_colors = [
-    RGBf(0.25, 0.25, 0.25),
-    RGBf(0.45, 0.45, 0.45),
-    RGBf(0.62, 0.62, 0.62),
-  ]
+  gfdn_colors =
+    [RGBf(0.25, 0.25, 0.25), RGBf(0.45, 0.45, 0.45), RGBf(0.62, 0.62, 0.62)]
   cg_gfdn_colors = copy(gfdn_colors)
   metric_linestyles = [
     fill((:dash, :dense), length(gfdn_methods))...,
@@ -1664,10 +1745,7 @@ function fig14b_gp_convergence_paper()
     (:dot, :dense),
   ]
   colors = [primary_colors..., metric_colors...]
-  linestyles = [
-    fill(:solid, length(primary_methods))...,
-    metric_linestyles...,
-  ]
+  linestyles = [fill(:solid, length(primary_methods))..., metric_linestyles...]
   linewidths = [
     fill(2.8, length(primary_methods))...,
     fill(1.8, length(metric_methods))...,
@@ -1679,37 +1757,37 @@ function fig14b_gp_convergence_paper()
   mask_beta = tbl.beta .== beta
   positive_residuals = tbl.resnorm[mask_beta .& (tbl.resnorm .> 0)]
   ylimits = (1e-7, maximum(positive_residuals) * 2)
-  ytick_exps = sort(
-    collect(floor(Int, log10(ylimits[2])):-2:ceil(Int, log10(ylimits[1])))
-  )
+  ytick_exps =
+    sort(collect(floor(Int, log10(ylimits[2])):-2:ceil(Int, log10(ylimits[1]))))
 
-  fig = Figure(size=(PAPER_FULL_WIDTH, 450))
+  fig = Figure(size = (PAPER_FULL_WIDTH, 390))
   for (column, m) in enumerate(ms)
     ax = Axis(
       fig[1, column];
-      xlabel="outer iteration",
-      ylabel=column == 1 ? "residual norm ‖rₖ‖₂" : "",
-      title="m = $m",
-      yscale=log10,
-      yticks=LogTicks(ytick_exps),
-      limits=((0, 30), ylimits),
+      xlabel = "outer iteration",
+      ylabel = column == 1 ? "relative residual" : "",
+      title = "m = $m",
+      yscale = log10,
+      yticks = LogTicks(ytick_exps),
+      limits = ((0, 30), ylimits),
     )
     for (index, method) in enumerate(methods)
-      mask = mask_beta .& (tbl.m .== m) .& (tbl.method .== method) .&
-             (tbl.resnorm .> 0)
+      mask =
+        mask_beta .& (tbl.m .== m) .& (tbl.method .== method) .&
+        (tbl.resnorm .> 0)
       add_series!(
         ax,
         pick(tbl, :iteration, mask),
         logfloor(pick(tbl, :resnorm, mask));
-        label=labels[method],
-        color=colors[index],
-        linestyle=linestyles[index],
-        marker=markers[method],
-        linewidth=linewidths[index],
-        markersize=markersizes[index],
-        marker_stride=8,
-        markerstrokecolor=:black,
-        markerstrokewidth=0.7,
+        label = labels[method],
+        color = colors[index],
+        linestyle = linestyles[index],
+        marker = markers[method],
+        linewidth = linewidths[index],
+        markersize = markersizes[index],
+        marker_stride = 8,
+        markerstrokecolor = :black,
+        markerstrokewidth = 0.7,
       )
     end
     inset_layout = semilinear_inset_layout(fig[1, column])
@@ -1717,19 +1795,19 @@ function fig14b_gp_convergence_paper()
       inset_layout[1, 2],
       parts,
       m;
-      halign=:center,
-      valign=:center,
-      inset_size=1.0,
-      inset_title="",
+      halign = :center,
+      valign = :center,
+      inset_size = 1.0,
+      inset_title = "",
     )
     add_gp_solution_inset!(
       inset_layout[1, 1],
       solutions,
       beta;
-      halign=:center,
-      valign=:center,
-      inset_size=1.0,
-      inset_title="",
+      halign = :center,
+      valign = :center,
+      inset_size = 1.0,
+      inset_title = "",
     )
     fix_semilinear_inset_sizes!(inset_layout)
   end
@@ -1738,33 +1816,33 @@ function fig14b_gp_convergence_paper()
     legend_line_marker_elements(
       primary_methods,
       markers;
-      markersizes=fill(MARKERSIZE, length(primary_methods)),
-      colors=primary_colors,
-      linewidths=fill(2.8, length(primary_methods)),
-      markerstrokecolors=fill(:black, length(primary_methods)),
-      markerstrokewidths=fill(0.7, length(primary_methods)),
+      markersizes = fill(MARKERSIZE, length(primary_methods)),
+      colors = primary_colors,
+      linewidths = fill(2.8, length(primary_methods)),
+      markerstrokecolors = fill(:black, length(primary_methods)),
+      markerstrokewidths = fill(0.7, length(primary_methods)),
     ),
     [labels[method] for method in primary_methods];
-    orientation=:horizontal,
-    nbanks=1,
-    framevisible=true,
+    orientation = :horizontal,
+    nbanks = 1,
+    framevisible = true,
   )
   Legend(
     fig[3, 1:length(ms)],
     legend_line_marker_elements(
       metric_legend_methods,
       markers;
-      markersizes=fill(7, length(metric_methods)),
-      colors=metric_legend_colors,
-      linestyles=metric_legend_linestyles,
-      linewidths=fill(1.8, length(metric_methods)),
-      markerstrokecolors=fill(:black, length(metric_methods)),
-      markerstrokewidths=fill(0.7, length(metric_methods)),
+      markersizes = fill(7, length(metric_methods)),
+      colors = metric_legend_colors,
+      linestyles = metric_legend_linestyles,
+      linewidths = fill(1.8, length(metric_methods)),
+      markerstrokecolors = fill(:black, length(metric_methods)),
+      markerstrokewidths = fill(0.7, length(metric_methods)),
     ),
     [labels[method] for method in metric_legend_methods];
-    orientation=:horizontal,
-    nbanks=2,
-    framevisible=true,
+    orientation = :horizontal,
+    nbanks = 2,
+    framevisible = true,
   )
   rowgap!(fig.layout, 8)
   savefigs(fig, "fig14b_gp_convergence_paper")
@@ -1783,6 +1861,10 @@ function fig16_gp_energy_gap()
     "gp_quadratic_history",
     "gp_quadratic_history_2",
     "gp_quadratic_history_3",
+    "gp_tangent_quadratic",
+    "gp_tangent_quadratic_history",
+    "gp_projected_qemdd",
+    "gp_projected_qemdd_history",
     "gfdn_pcg_as_1",
     "gfdn_pcg_as_2",
     "gfdn_pcg_as_4",
@@ -1797,6 +1879,10 @@ function fig16_gp_energy_gap()
     "gp_quadratic_history" => "quadratic GP-EMDD + history",
     "gp_quadratic_history_2" => "quadratic GP-EMDD + history (2)",
     "gp_quadratic_history_3" => "quadratic GP-EMDD + history (3)",
+    "gp_tangent_quadratic" => "tangent KKT (q = 1)",
+    "gp_tangent_quadratic_history" => "tangent KKT (q = 2)",
+    "gp_projected_qemdd" => "projected qEMDD (q = 1)",
+    "gp_projected_qemdd_history" => "projected qEMDD (q = 2)",
     "gfdn_pcg_as_1" => "GFDN-PCG(AS, 1)",
     "gfdn_pcg_as_2" => "GFDN-PCG(AS, 2)",
     "gfdn_pcg_as_4" => "GFDN-PCG(AS, 4)",
@@ -1811,6 +1897,10 @@ function fig16_gp_energy_gap()
     "gp_quadratic_history" => :star6,
     "gp_quadratic_history_2" => :rect,
     "gp_quadratic_history_3" => :dtriangle,
+    "gp_tangent_quadratic" => :pentagon,
+    "gp_tangent_quadratic_history" => :diamond,
+    "gp_projected_qemdd" => :utriangle,
+    "gp_projected_qemdd_history" => :cross,
     "gfdn_pcg_as_1" => :circle,
     "gfdn_pcg_as_2" => :rect,
     "gfdn_pcg_as_4" => :dtriangle,
@@ -1821,9 +1911,8 @@ function fig16_gp_energy_gap()
   colors = tab10_colors(length(methods))
   positive_gaps = tbl.energy_gap[tbl.energy_gap .> 0]
   ylimits = (max(minimum(positive_gaps) / 2, 1e-14), maximum(positive_gaps) * 2)
-  ytick_exps = sort(
-    collect(floor(Int, log10(ylimits[2])):-2:ceil(Int, log10(ylimits[1])))
-  )
+  ytick_exps =
+    sort(collect(floor(Int, log10(ylimits[2])):-2:ceil(Int, log10(ylimits[1]))))
   yticks = LogTicks(ytick_exps)
 
   fig = Figure(size = (330 * length(ms), 275 * length(betas) + 90))
@@ -1839,9 +1928,7 @@ function fig16_gp_energy_gap()
     )
     for (i, method) in enumerate(methods)
       mask =
-        (tbl.method .== method) .&
-        (tbl.beta .== beta) .&
-        (tbl.m .== m) .&
+        (tbl.method .== method) .& (tbl.beta .== beta) .& (tbl.m .== m) .&
         (tbl.energy_gap .> 0)
       add_series!(
         ax,
@@ -1857,19 +1944,19 @@ function fig16_gp_energy_gap()
       inset_layout[1, 2],
       parts,
       m;
-      halign=:center,
-      valign=:center,
-      inset_size=1.0,
-      inset_title="",
+      halign = :center,
+      valign = :center,
+      inset_size = 1.0,
+      inset_title = "",
     )
     add_gp_solution_inset!(
       inset_layout[1, 1],
       solutions,
       beta;
-      halign=:center,
-      valign=:center,
-      inset_size=1.0,
-      inset_title="",
+      halign = :center,
+      valign = :center,
+      inset_size = 1.0,
+      inset_title = "",
     )
     fix_semilinear_inset_sizes!(inset_layout)
   end
@@ -1889,7 +1976,7 @@ function fig15_gp_ground_states()
   tbl = loadtable("study10_gp_solutions.csv")
   betas = sort(unique(tbl.beta))
   N = tbl.N[1]
-  xs = collect(range(-8 + 16 / N, 8 - 16 / N; length=N - 1))
+  xs = collect(range(-8 + 16 / N, 8 - 16 / N; length = N - 1))
   fig = Figure(size = (330 * length(betas), 410))
   for (column, beta) in enumerate(betas)
     mask = tbl.beta .== beta
@@ -1912,9 +1999,9 @@ function fig15_gp_ground_states()
     Colorbar(
       fig[2, column],
       hm;
-      vertical=false,
-      label="density |u|²",
-      width=Relative(0.85),
+      vertical = false,
+      label = "density |u|²",
+      width = Relative(0.85),
     )
   end
   rowgap!(fig.layout, 5)
@@ -1978,66 +2065,66 @@ function fig17_semilinear_poisson()
     "newton_pcg_as_2" => :rect,
   )
   colors = tab10_colors(length(methods))
-  initial_residuals = conv.relative_residual[
-    (conv.outer .== 0) .& isfinite.(conv.relative_residual)
-  ]
+  initial_residuals = conv.relative_residual[(conv.outer .== 0) .& isfinite.(
+    conv.relative_residual,
+  )]
   ylimits = (1e-8, max(maximum(initial_residuals), 1.0) * 2)
-  ytick_exps = sort(
-    collect(floor(Int, log10(ylimits[2])):-2:ceil(Int, log10(ylimits[1])))
-  )
+  ytick_exps =
+    sort(collect(floor(Int, log10(ylimits[2])):-2:ceil(Int, log10(ylimits[1]))))
 
-  fig = Figure(size=(max(990, 330 * length(ms)), 550))
+  fig = Figure(size = (max(990, 330 * length(ms)), 550))
   Label(
     fig[0, 1:length(ms)],
     "−Δu + βu³ = f  in Ω,    β = 1,    u = 0  on ∂Ω";
-    fontsize=22,
-    font=:bold,
+    fontsize = 22,
+    font = :bold,
   )
   for (column, m) in enumerate(ms)
     ax = Axis(
       fig[1, column];
-      xlabel="outer iteration",
-      ylabel=column == 1 ? "relative residual" : "",
-      title="m = $m",
-      yscale=log10,
-      yticks=LogTicks(ytick_exps),
-      limits=(nothing, ylimits),
+      xlabel = "outer iteration",
+      ylabel = column == 1 ? "relative residual" : "",
+      title = "m = $m",
+      yscale = log10,
+      yticks = LogTicks(ytick_exps),
+      limits = (nothing, ylimits),
     )
     for (index, method) in enumerate(methods)
       mask =
-        (conv.beta .== 1.0) .&
-        (conv.m .== m) .&
-        (conv.method .== method) .&
+        (conv.beta .== 1.0) .& (conv.m .== m) .& (conv.method .== method) .&
         (conv.relative_residual .> 0)
       add_series!(
         ax,
         pick(conv, :outer, mask),
-        logfloor(pick(conv, :relative_residual, mask); floor=1e-16);
-        label=labels[method],
-        color=colors[index],
-        marker=markers[method],
+        logfloor(pick(conv, :relative_residual, mask); floor = 1e-16);
+        label = labels[method],
+        color = colors[index],
+        marker = markers[method],
       )
     end
-    hlines!(ax, [1e-7]; color=:black, linestyle=:dot, linewidth=1.2)
+    hlines!(ax, [1e-7]; color = :black, linestyle = :dot, linewidth = 1.2)
     add_semilinear_solution_inset!(
-      fig[1, column], solutions; halign=0.68, inset_size=0.23
+      fig[1, column],
+      solutions;
+      halign = 0.68,
+      inset_size = 0.23,
     )
     add_triangle_partition_inset!(
       fig[1, column],
       parts,
       m;
-      halign=0.99,
-      inset_size=0.23,
-      inset_title="partition",
+      halign = 0.99,
+      inset_size = 0.23,
+      inset_title = "partition",
     )
   end
   Legend(
     fig[2, 1:length(ms)],
     legend_line_marker_elements(methods, markers; colors),
     [labels[method] for method in methods];
-    orientation=:horizontal,
-    nbanks=6,
-    framevisible=true,
+    orientation = :horizontal,
+    nbanks = 6,
+    framevisible = true,
   )
   rowgap!(fig.layout, 8)
   savefigs(fig, "fig17_semilinear_poisson")
@@ -2059,12 +2146,8 @@ function fig17b_semilinear_poisson_paper()
     "var_dd_quadratic_history",
     "nonlinear_cg_optim_as",
   )
-  reference_methods = (
-    "anderson_ras",
-    "newton_pcg_as_1",
-    "newton_pcg_as_2",
-    "newton_pcg_as_4",
-  )
+  reference_methods =
+    ("anderson_ras", "newton_pcg_as_1", "newton_pcg_as_2", "newton_pcg_as_4")
   methods = (primary_methods..., reference_methods...)
   labels = Dict(
     "var_dd" => "EMDD (q = 1)",
@@ -2099,10 +2182,8 @@ function fig17b_semilinear_poisson_paper()
   ]
   reference_linestyles = fill((:dash, :dense), length(reference_methods))
   colors = [primary_colors..., reference_colors...]
-  linestyles = [
-    fill(:solid, length(primary_methods))...,
-    reference_linestyles...,
-  ]
+  linestyles =
+    [fill(:solid, length(primary_methods))..., reference_linestyles...]
   linewidths = [
     fill(2.8, length(primary_methods))...,
     fill(1.8, length(reference_methods))...,
@@ -2111,63 +2192,60 @@ function fig17b_semilinear_poisson_paper()
     fill(MARKERSIZE, length(primary_methods))...,
     fill(MARKERSIZE, length(reference_methods))...,
   ]
-  initial_residuals = conv.relative_residual[
-    (conv.outer .== 0) .& isfinite.(conv.relative_residual)
-  ]
+  initial_residuals = conv.relative_residual[(conv.outer .== 0) .& isfinite.(
+    conv.relative_residual,
+  )]
   ylimits = (1e-8, max(maximum(initial_residuals), 1.0) * 2)
-  ytick_exps = sort(
-    collect(floor(Int, log10(ylimits[2])):-2:ceil(Int, log10(ylimits[1])))
-  )
-  fig = Figure(size=(PAPER_FULL_WIDTH, 600))
+  ytick_exps =
+    sort(collect(floor(Int, log10(ylimits[2])):-2:ceil(Int, log10(ylimits[1]))))
+  fig = Figure(size = (PAPER_FULL_WIDTH, 600))
   for (row, beta) in enumerate(betas), (column, m) in enumerate(ms)
     ax = Axis(
       fig[row, column];
-      xlabel=row == length(betas) ? "outer iteration" : "",
-      ylabel=column == 1 ? "β = $(Int(beta))\nrelative residual" : "",
-      title=row == 1 ? "m = $m" : "",
-      yscale=log10,
-      yticks=LogTicks(ytick_exps),
-      limits=(nothing, ylimits),
+      xlabel = row == length(betas) ? "outer iteration" : "",
+      ylabel = column == 1 ? "β = $(Int(beta))\nrelative residual" : "",
+      title = row == 1 ? "m = $m" : "",
+      yscale = log10,
+      yticks = LogTicks(ytick_exps),
+      limits = (nothing, ylimits),
     )
     for (index, method) in enumerate(methods)
       mask =
-        (conv.beta .== beta) .&
-        (conv.m .== m) .&
-        (conv.method .== method) .&
+        (conv.beta .== beta) .& (conv.m .== m) .& (conv.method .== method) .&
         (conv.relative_residual .> 0)
       add_series!(
         ax,
         pick(conv, :outer, mask),
         pick(conv, :relative_residual, mask);
-        label=labels[method],
-        color=colors[index],
-        linestyle=linestyles[index],
-        marker=markers[method],
-        linewidth=linewidths[index],
-        markersize=markersizes[index],
-        marker_stride=8,
-        markerstrokecolor=:black,
-        markerstrokewidth=0.7,
+        label = labels[method],
+        color = colors[index],
+        linestyle = linestyles[index],
+        marker = markers[method],
+        linewidth = linewidths[index],
+        markersize = markersizes[index],
+        marker_stride = 8,
+        markerstrokecolor = :black,
+        markerstrokewidth = 0.7,
       )
     end
-    hlines!(ax, [1e-7]; color=:black, linestyle=:dot, linewidth=1.2)
+    hlines!(ax, [1e-7]; color = :black, linestyle = :dot, linewidth = 1.2)
     inset_layout = semilinear_inset_layout(fig[row, column])
     add_triangle_partition_inset!(
       inset_layout[1, 2],
       parts,
       m;
-      halign=:center,
-      valign=:center,
-      inset_size=1.0,
-      inset_title=nothing,
+      halign = :center,
+      valign = :center,
+      inset_size = 1.0,
+      inset_title = nothing,
     )
     add_semilinear_solution_inset!(
       inset_layout[1, 1],
       solutions;
-      halign=:center,
-      valign=:center,
-      inset_size=1.0,
-      inset_title=nothing,
+      halign = :center,
+      valign = :center,
+      inset_size = 1.0,
+      inset_title = nothing,
     )
     fix_semilinear_inset_sizes!(inset_layout)
   end
@@ -2177,33 +2255,33 @@ function fig17b_semilinear_poisson_paper()
     legend_line_marker_elements(
       primary_methods,
       markers;
-      markersizes=fill(MARKERSIZE, length(primary_methods)),
-      colors=primary_colors,
-      linewidths=fill(2.8, length(primary_methods)),
-      markerstrokecolors=fill(:black, length(primary_methods)),
-      markerstrokewidths=fill(0.7, length(primary_methods)),
+      markersizes = fill(MARKERSIZE, length(primary_methods)),
+      colors = primary_colors,
+      linewidths = fill(2.8, length(primary_methods)),
+      markerstrokecolors = fill(:black, length(primary_methods)),
+      markerstrokewidths = fill(0.7, length(primary_methods)),
     ),
     [labels[method] for method in primary_methods];
-    orientation=:horizontal,
-    nbanks=1,
-    framevisible=true,
+    orientation = :horizontal,
+    nbanks = 1,
+    framevisible = true,
   )
   Legend(
     fig[legend_row+1, 1:length(ms)],
     legend_line_marker_elements(
       reference_methods,
       markers;
-      markersizes=fill(MARKERSIZE, length(reference_methods)),
-      colors=reference_colors,
-      linestyles=reference_linestyles,
-      linewidths=fill(1.8, length(reference_methods)),
-      markerstrokecolors=fill(:black, length(reference_methods)),
-      markerstrokewidths=fill(0.7, length(reference_methods)),
+      markersizes = fill(MARKERSIZE, length(reference_methods)),
+      colors = reference_colors,
+      linestyles = reference_linestyles,
+      linewidths = fill(1.8, length(reference_methods)),
+      markerstrokecolors = fill(:black, length(reference_methods)),
+      markerstrokewidths = fill(0.7, length(reference_methods)),
     ),
     [labels[method] for method in reference_methods];
-    orientation=:horizontal,
-    nbanks=1,
-    framevisible=true,
+    orientation = :horizontal,
+    nbanks = 1,
+    framevisible = true,
   )
   rowgap!(fig.layout, 8)
   savefigs(fig, "fig17b_semilinear_poisson_paper")
@@ -2224,12 +2302,8 @@ function fig17b_semilinear_l_shape_section61()
     "var_dd_quadratic_history",
     "nonlinear_cg_optim_as",
   )
-  reference_methods = (
-    "anderson_ras",
-    "newton_pcg_as_1",
-    "newton_pcg_as_2",
-    "newton_pcg_as_4",
-  )
+  reference_methods =
+    ("anderson_ras", "newton_pcg_as_1", "newton_pcg_as_2", "newton_pcg_as_4")
   methods = (primary_methods..., reference_methods...)
   labels = Dict(
     "var_dd" => "EMDD (q = 1)",
@@ -2262,10 +2336,8 @@ function fig17b_semilinear_l_shape_section61()
   ]
   reference_linestyles = fill((:dash, :dense), length(reference_methods))
   colors = [primary_colors..., reference_colors...]
-  linestyles = [
-    fill(:solid, length(primary_methods))...,
-    reference_linestyles...,
-  ]
+  linestyles =
+    [fill(:solid, length(primary_methods))..., reference_linestyles...]
   linewidths = [
     fill(2.8, length(primary_methods))...,
     fill(1.8, length(reference_methods))...,
@@ -2274,67 +2346,63 @@ function fig17b_semilinear_l_shape_section61()
     fill(MARKERSIZE, length(primary_methods))...,
     fill(MARKERSIZE, length(reference_methods))...,
   ]
-  initial_residuals = conv.relative_residual[
-    (conv.outer .== 0) .& isfinite.(conv.relative_residual)
-  ]
+  initial_residuals = conv.relative_residual[(conv.outer .== 0) .& isfinite.(
+    conv.relative_residual,
+  )]
   ylimits = (1e-8, max(maximum(initial_residuals), 1.0) * 2)
-  ytick_exps = sort(
-    collect(floor(Int, log10(ylimits[2])):-2:ceil(Int, log10(ylimits[1])))
-  )
-  fig = Figure(size=(PAPER_FULL_WIDTH, 390))
-  for (row, case) in enumerate(cases),
-      (column, m) in enumerate(ms)
+  ytick_exps =
+    sort(collect(floor(Int, log10(ylimits[2])):-2:ceil(Int, log10(ylimits[1]))))
+  fig = Figure(size = (PAPER_FULL_WIDTH, 390))
+  for (row, case) in enumerate(cases), (column, m) in enumerate(ms)
     ax = Axis(
       fig[row, column];
-      xlabel=row == length(cases) ? "outer iteration" : "",
-      ylabel=column == 1 ? "relative residual" : "",
-      title="m = $m",
-      yscale=log10,
-      yticks=LogTicks(ytick_exps),
-      limits=(nothing, ylimits),
+      xlabel = row == length(cases) ? "outer iteration" : "",
+      ylabel = column == 1 ? "relative residual" : "",
+      title = "m = $m",
+      yscale = log10,
+      yticks = LogTicks(ytick_exps),
+      limits = (nothing, ylimits),
     )
     for (index, method) in enumerate(methods)
       mask =
-        (conv.case .== case) .&
-        (conv.m .== m) .&
-        (conv.method .== method) .&
+        (conv.case .== case) .& (conv.m .== m) .& (conv.method .== method) .&
         (conv.relative_residual .> 0)
       add_series!(
         ax,
         pick(conv, :outer, mask),
         pick(conv, :relative_residual, mask);
-        label=labels[method],
-        color=colors[index],
-        linestyle=linestyles[index],
-        marker=markers[method],
-        linewidth=linewidths[index],
-        markersize=markersizes[index],
-        marker_stride=8,
-        markerstrokecolor=:black,
-        markerstrokewidth=0.7,
+        label = labels[method],
+        color = colors[index],
+        linestyle = linestyles[index],
+        marker = markers[method],
+        linewidth = linewidths[index],
+        markersize = markersizes[index],
+        marker_stride = 8,
+        markerstrokecolor = :black,
+        markerstrokewidth = 0.7,
       )
     end
-    hlines!(ax, [1e-7]; color=:black, linestyle=:dot, linewidth=1.2)
+    hlines!(ax, [1e-7]; color = :black, linestyle = :dot, linewidth = 1.2)
     inset_layout = semilinear_inset_layout(fig[row, column])
     add_triangle_partition_inset!(
       inset_layout[1, 2],
       parts,
       m;
-      halign=:center,
-      valign=:center,
-      inset_size=1.0,
-      inset_title=nothing,
-      limits=(-1, 1, -1, 1),
-      title_color=:black,
-      title_position=(0.0, 0.92),
+      halign = :center,
+      valign = :center,
+      inset_size = 1.0,
+      inset_title = nothing,
+      limits = (-1, 1, -1, 1),
+      title_color = :black,
+      title_position = (0.0, 0.92),
     )
     add_lshape_solution_inset!(
       inset_layout[1, 1],
       solutions;
-      halign=:center,
-      valign=:center,
-      inset_size=1.0,
-      inset_title=nothing,
+      halign = :center,
+      valign = :center,
+      inset_size = 1.0,
+      inset_title = nothing,
     )
     fix_semilinear_inset_sizes!(inset_layout)
   end
@@ -2344,33 +2412,33 @@ function fig17b_semilinear_l_shape_section61()
     legend_line_marker_elements(
       primary_methods,
       markers;
-      markersizes=fill(MARKERSIZE, length(primary_methods)),
-      colors=primary_colors,
-      linewidths=fill(2.8, length(primary_methods)),
-      markerstrokecolors=fill(:black, length(primary_methods)),
-      markerstrokewidths=fill(0.7, length(primary_methods)),
+      markersizes = fill(MARKERSIZE, length(primary_methods)),
+      colors = primary_colors,
+      linewidths = fill(2.8, length(primary_methods)),
+      markerstrokecolors = fill(:black, length(primary_methods)),
+      markerstrokewidths = fill(0.7, length(primary_methods)),
     ),
     [labels[method] for method in primary_methods];
-    orientation=:horizontal,
-    nbanks=1,
-    framevisible=true,
+    orientation = :horizontal,
+    nbanks = 1,
+    framevisible = true,
   )
   Legend(
     fig[legend_row+1, 1:length(ms)],
     legend_line_marker_elements(
       reference_methods,
       markers;
-      markersizes=fill(MARKERSIZE, length(reference_methods)),
-      colors=reference_colors,
-      linestyles=reference_linestyles,
-      linewidths=fill(1.8, length(reference_methods)),
-      markerstrokecolors=fill(:black, length(reference_methods)),
-      markerstrokewidths=fill(0.7, length(reference_methods)),
+      markersizes = fill(MARKERSIZE, length(reference_methods)),
+      colors = reference_colors,
+      linestyles = reference_linestyles,
+      linewidths = fill(1.8, length(reference_methods)),
+      markerstrokecolors = fill(:black, length(reference_methods)),
+      markerstrokewidths = fill(0.7, length(reference_methods)),
     ),
     [labels[method] for method in reference_methods];
-    orientation=:horizontal,
-    nbanks=1,
-    framevisible=true,
+    orientation = :horizontal,
+    nbanks = 1,
+    framevisible = true,
   )
   rowgap!(fig.layout, 8)
   savefigs(fig, "fig17b_semilinear_l_shape_section61")
@@ -2393,12 +2461,8 @@ end
 
 function fig18_poisson_scaling()
   tbl = loadtable("study8_sensitivity.csv")
-  methods = [
-    "var_dd_additive",
-    "var_dd_additive_history",
-    "pcg_as",
-    "gmres_ras",
-  ]
+  methods =
+    ["var_dd_additive", "var_dd_additive_history", "pcg_as", "gmres_ras"]
   labels = Dict(
     "var_dd_additive" => "additive varDD",
     "var_dd_additive_history" => "additive varDD + history",
@@ -2422,23 +2486,27 @@ function fig18_poisson_scaling()
     ),
     ("overlap", "layer_sweep", :overlap, "overlap sweep, N = 64"),
   )
-  fig = Figure(size=(430 * length(panels), 390))
+  fig = Figure(size = (430 * length(panels), 390))
   for (column, (experiment, regime, parameter, title)) in enumerate(panels)
     ax = Axis(
       fig[1, column];
-      xlabel=parameter == :N ? "elements per direction, 1/h" : "overlap layers ℓ",
-      ylabel=column == 1 ? "parallel local-solve batches" : "",
+      xlabel = parameter == :N ? "elements per direction, 1/h" :
+               "overlap layers ℓ",
+      ylabel = column == 1 ? "parallel local-solve batches" : "",
       title,
     )
     for (index, method) in enumerate(methods)
       mask =
-        (tbl.experiment .== experiment) .&
-        (tbl.regime .== regime) .&
+        (tbl.experiment .== experiment) .& (tbl.regime .== regime) .&
         (tbl.method .== method)
       xs, ys = study8_terminal_series(tbl, mask, parameter)
       add_series!(
-        ax, xs, ys;
-        label=labels[method], color=colors[index], marker=markers[method],
+        ax,
+        xs,
+        ys;
+        label = labels[method],
+        color = colors[index],
+        marker = markers[method],
       )
     end
   end
@@ -2446,8 +2514,8 @@ function fig18_poisson_scaling()
     fig[2, 1:length(panels)],
     legend_line_marker_elements(methods, markers; colors),
     [labels[method] for method in methods];
-    orientation=:horizontal,
-    nbanks=1,
+    orientation = :horizontal,
+    nbanks = 1,
   )
   rowgap!(fig.layout, 8)
   savefigs(fig, "fig18_poisson_scaling")
@@ -2456,12 +2524,8 @@ end
 function fig19_poisson_contrast()
   tbl = loadtable("study8_sensitivity.csv")
   inner = loadtable("study8_inner_systems.csv")
-  methods = [
-    "var_dd_additive",
-    "var_dd_additive_history",
-    "pcg_as",
-    "gmres_ras",
-  ]
+  methods =
+    ["var_dd_additive", "var_dd_additive_history", "pcg_as", "gmres_ras"]
   labels = Dict(
     "var_dd_additive" => "additive varDD",
     "var_dd_additive_history" => "additive varDD + history",
@@ -2475,30 +2539,34 @@ function fig19_poisson_contrast()
     "gmres_ras" => :pentagon,
   )
   colors = tab10_colors(length(methods))
-  fig = Figure(size=(1420, 410))
+  fig = Figure(size = (1420, 410))
   ax_iterations = Axis(
     fig[1, 1];
-    xlabel="diffusion contrast κ",
-    ylabel="parallel local-solve batches to tolerance",
-    xscale=log10,
-    title="outer convergence",
+    xlabel = "diffusion contrast κ",
+    ylabel = "parallel local-solve batches to tolerance",
+    xscale = log10,
+    title = "outer convergence",
   )
   for (index, method) in enumerate(methods)
     mask = (tbl.experiment .== "contrast") .& (tbl.method .== method)
     xs, ys = study8_terminal_series(tbl, mask, :contrast)
     add_series!(
-      ax_iterations, xs, ys;
-      label=labels[method], color=colors[index], marker=markers[method],
+      ax_iterations,
+      xs,
+      ys;
+      label = labels[method],
+      color = colors[index],
+      marker = markers[method],
     )
   end
 
   ax_condition = Axis(
     fig[1, 2];
-    xlabel="diffusion contrast κ",
-    ylabel="estimated κ₂",
-    xscale=log10,
-    yscale=log10,
-    title="first-sweep condition estimates",
+    xlabel = "diffusion contrast κ",
+    ylabel = "estimated κ₂",
+    xscale = log10,
+    yscale = log10,
+    title = "first-sweep condition estimates",
   )
   system_specs = (
     ("schwarz_local", "Kᵢ = Rᵢ K Rᵢᵀ", PALETTE[7], :rect, :solid),
@@ -2518,36 +2586,34 @@ function fig19_poisson_contrast()
     ),
   )
   for (system, label, color, marker, linestyle) in system_specs
-    system_mask =
-      (inner.experiment .== "contrast") .&
-      (inner.system .== system)
+    system_mask = (inner.experiment .== "contrast") .& (inner.system .== system)
     contrasts = sort(unique(inner.contrast[system_mask]))
     maxima = [
-      maximum(inner.condition_estimate[
-        system_mask .& (inner.contrast .== contrast)
-      ]) for contrast in contrasts
+      maximum(
+        inner.condition_estimate[system_mask .& (inner.contrast .== contrast)],
+      ) for contrast in contrasts
     ]
     add_series!(
-      ax_condition, contrasts, maxima;
+      ax_condition,
+      contrasts,
+      maxima;
       label,
       color,
       marker,
       linestyle,
     )
   end
-  axislegend(ax_condition; position=:lt)
+  axislegend(ax_condition; position = :lt)
 
   ax_inner = Axis(
     fig[1, 3];
-    xlabel="diffusion contrast κ",
-    ylabel="local CG iterations",
-    xscale=log10,
-    title="iterative local-solve work (censored)",
-    limits=(nothing, (0, 2200)),
+    xlabel = "diffusion contrast κ",
+    ylabel = "local CG iterations",
+    xscale = log10,
+    title = "iterative local-solve work (censored)",
+    limits = (nothing, (0, 2200)),
   )
-  mask =
-    (inner.experiment .== "contrast") .&
-    (inner.system .== "schwarz_local")
+  mask = (inner.experiment .== "contrast") .& (inner.system .== "schwarz_local")
   contrasts = sort(unique(inner.contrast[mask]))
   medians = Float64[]
   maxima = Float64[]
@@ -2557,41 +2623,51 @@ function fig19_poisson_contrast()
     push!(maxima, maximum(values))
   end
   add_series!(
-    ax_inner, contrasts, medians;
-    label="median subdomain", color=PALETTE[5], marker=:rect,
+    ax_inner,
+    contrasts,
+    medians;
+    label = "median subdomain",
+    color = PALETTE[5],
+    marker = :rect,
   )
   add_series!(
-    ax_inner, contrasts, maxima;
-    label="most difficult subdomain", color=PALETTE[6], marker=:diamond,
+    ax_inner,
+    contrasts,
+    maxima;
+    label = "most difficult subdomain",
+    color = PALETTE[6],
+    marker = :diamond,
   )
   iteration_cap = 2000
-  censored = unique(vcat(
-    contrasts[medians .>= iteration_cap],
-    contrasts[maxima .>= iteration_cap],
-  ))
+  censored = unique(
+    vcat(
+      contrasts[medians .>= iteration_cap],
+      contrasts[maxima .>= iteration_cap],
+    ),
+  )
   hlines!(
     ax_inner,
     [iteration_cap];
-    color=(:black, 0.55),
-    linestyle=:dot,
-    linewidth=1.4,
+    color = (:black, 0.55),
+    linestyle = :dot,
+    linewidth = 1.4,
   )
   scatter!(
     ax_inner,
     censored,
     fill(iteration_cap, length(censored));
-    label="censored (≥ 2000)",
-    color=:black,
-    marker=:utriangle,
-    markersize=14,
+    label = "censored (≥ 2000)",
+    color = :black,
+    marker = :utriangle,
+    markersize = 14,
   )
-  axislegend(ax_inner; position=:lt)
+  axislegend(ax_inner; position = :lt)
   Legend(
     fig[2, 1:3],
     legend_line_marker_elements(methods, markers; colors),
     [labels[method] for method in methods];
-    orientation=:horizontal,
-    nbanks=1,
+    orientation = :horizontal,
+    nbanks = 1,
   )
   rowgap!(fig.layout, 8)
   savefigs(fig, "fig19_poisson_contrast")
@@ -2604,29 +2680,30 @@ function fig20_poisson_history()
     "homogeneous" => "homogeneous diffusion",
     "contrast_1e4" => "inclusion contrast κ = 10⁴",
   )
-  fig = Figure(size=(850, 370))
+  fig = Figure(size = (850, 370))
   Label(
     fig[0, 1:2],
     "One previous iterate provides nearly all of the history benefit";
-    fontsize=22,
-    font=:bold,
+    fontsize = 22,
+    font = :bold,
   )
   for (column, regime) in enumerate(regimes)
-    mask =
-      (tbl.experiment .== "history") .&
-      (tbl.regime .== regime)
+    mask = (tbl.experiment .== "history") .& (tbl.regime .== regime)
     depths, batches = study8_terminal_series(tbl, mask, :history_depth)
     ax_batches = Axis(
       fig[1, column];
-      xlabel="history depth q",
-      ylabel=column == 1 ? "parallel local-solve batches to tolerance" : "",
-      title=titles[regime],
+      xlabel = "history depth q",
+      ylabel = column == 1 ? "parallel local-solve batches to tolerance" : "",
+      title = titles[regime],
     )
     add_series!(
-      ax_batches, depths, batches;
-      color=PALETTE[2], marker=:hexagon,
+      ax_batches,
+      depths,
+      batches;
+      color = PALETTE[2],
+      marker = :hexagon,
     )
-    vlines!(ax_batches, [1]; color=(:black, 0.45), linestyle=:dash)
+    vlines!(ax_batches, [1]; color = (:black, 0.45), linestyle = :dash)
   end
   savefigs(fig, "fig20_poisson_history")
 end
@@ -2671,12 +2748,12 @@ function fig21_semilinear_mesh_scaling()
   mask_mesh = tbl.experiment .== "mesh"
   Ns = sort(unique(tbl.N[mask_mesh]))
   colors = tab10_colors(length(methods))
-  fig = Figure(size=(1120, 500))
+  fig = Figure(size = (1120, 500))
   Label(
     fig[0, 1:3],
     "Mesh refinement h, h/2, h/4 with fixed physical overlap";
-    fontsize=22,
-    font=:bold,
+    fontsize = 22,
+    font = :bold,
   )
   specifications = (
     (:outer_iterations, "outer iterations"),
@@ -2684,7 +2761,8 @@ function fig21_semilinear_mesh_scaling()
     (:linear_as_batches, "linear AS batches"),
   )
   for (column, (quantity, ylabel)) in enumerate(specifications)
-    ax = Axis(fig[1, column]; xlabel="cells per coordinate direction N", ylabel)
+    ax =
+      Axis(fig[1, column]; xlabel = "cells per coordinate direction N", ylabel)
     for (index, method) in enumerate(methods)
       mask = mask_mesh .& (tbl.method .== method)
       any(mask) || continue
@@ -2694,8 +2772,8 @@ function fig21_semilinear_mesh_scaling()
         ax,
         pick(tbl, :N, mask),
         values;
-        color=colors[index],
-        marker=SEMILINEAR_BENCHMARK_MARKERS[method],
+        color = colors[index],
+        marker = SEMILINEAR_BENCHMARK_MARKERS[method],
       )
     end
     ax.xticks = Ns
@@ -2704,8 +2782,8 @@ function fig21_semilinear_mesh_scaling()
     fig[2, 1:3],
     legend_line_marker_elements(methods, SEMILINEAR_BENCHMARK_MARKERS; colors),
     [SEMILINEAR_BENCHMARK_LABELS[method] for method in methods];
-    orientation=:horizontal,
-    nbanks=2,
+    orientation = :horizontal,
+    nbanks = 2,
   )
   rowgap!(fig.layout, 8)
   savefigs(fig, "fig21_semilinear_mesh_scaling")
@@ -2717,15 +2795,23 @@ function fig22_semilinear_newton_inner()
   parameters = [1, 2, 4, 8, 0]
   labels = ["1", "2", "4", "8", "accurate"]
   positions = collect(eachindex(parameters))
-  outer = [only(tbl.outer_iterations[mask .& (tbl.parameter .== p)]) for p in parameters]
-  batches = [only(tbl.linear_as_batches[mask .& (tbl.parameter .== p)]) for p in parameters]
-  converged = [only(tbl.converged[mask .& (tbl.parameter .== p)]) == 1 for p in parameters]
-  fig = Figure(size=(780, 350))
+  outer = [
+    only(tbl.outer_iterations[mask .& (tbl.parameter .== p)]) for
+    p in parameters
+  ]
+  batches = [
+    only(tbl.linear_as_batches[mask .& (tbl.parameter .== p)]) for
+    p in parameters
+  ]
+  converged = [
+    only(tbl.converged[mask .& (tbl.parameter .== p)]) == 1 for p in parameters
+  ]
+  fig = Figure(size = (780, 350))
   Label(
     fig[0, 1:2],
     "Inexact Newton trades outer steps for inner PCG(AS) work";
-    fontsize=22,
-    font=:bold,
+    fontsize = 22,
+    font = :bold,
   )
   for (column, (values, ylabel)) in enumerate((
     (outer, "outer Newton iterations"),
@@ -2733,23 +2819,23 @@ function fig22_semilinear_newton_inner()
   ))
     ax = Axis(
       fig[1, column];
-      xlabel="PCG(AS) steps per Newton update",
+      xlabel = "PCG(AS) steps per Newton update",
       ylabel,
-      xticks=(positions, labels),
+      xticks = (positions, labels),
     )
-    add_series!(ax, positions, values; color=PALETTE[3], marker=:dtriangle)
+    add_series!(ax, positions, values; color = PALETTE[3], marker = :dtriangle)
     failed = positions[.!converged]
     if !isempty(failed)
       scatter!(
         ax,
         failed,
         values[.!converged];
-        color=:black,
-        marker=:utriangle,
-        markersize=14,
-        label="iteration budget reached",
+        color = :black,
+        marker = :utriangle,
+        markersize = 14,
+        label = "iteration budget reached",
       )
-      column == 1 && axislegend(ax; position=:rt)
+      column == 1 && axislegend(ax; position = :rt)
     end
   end
   savefigs(fig, "fig22_semilinear_newton_inner")
@@ -2759,12 +2845,12 @@ function fig23_semilinear_history()
   tbl = loadtable("study11_semilinear_sensitivity.csv")
   algorithms = ("anderson_ras", "var_dd_history")
   titles = ("Anderson-RAS", "varDD")
-  fig = Figure(size=(780, 350))
+  fig = Figure(size = (780, 350))
   Label(
     fig[0, 1:2],
     "Effect of multisecant and iterate history depth";
-    fontsize=22,
-    font=:bold,
+    fontsize = 22,
+    font = :bold,
   )
   for (column, (method, title)) in enumerate(zip(algorithms, titles))
     mask = (tbl.experiment .== "history") .& (tbl.method .== method)
@@ -2773,12 +2859,19 @@ function fig23_semilinear_history()
     iterations = tbl.outer_iterations[mask][order]
     ax = Axis(
       fig[1, column];
-      xlabel=method == "anderson_ras" ? "Anderson memory m" : "history depth q",
-      ylabel=column == 1 ? "outer iterations to tolerance" : "",
+      xlabel = method == "anderson_ras" ? "Anderson memory m" :
+               "history depth q",
+      ylabel = column == 1 ? "outer iterations to tolerance" : "",
       title,
-      xticks=depths,
+      xticks = depths,
     )
-    add_series!(ax, depths, iterations; color=PALETTE[column+1], marker=:hexagon)
+    add_series!(
+      ax,
+      depths,
+      iterations;
+      color = PALETTE[column+1],
+      marker = :hexagon,
+    )
   end
   savefigs(fig, "fig23_semilinear_history")
 end
@@ -2795,13 +2888,8 @@ const EVP_SENSITIVITY_LABELS = Dict(
   "si_lanczos_pcg_as" => "SI-Lanczos-PCG(AS)",
 )
 
-const EVP_SENSITIVITY_METHODS = (
-  "var_dd",
-  "var_dd_history",
-  "lobpcg_as",
-  "jd_gmres_as",
-  "si_lanczos_pcg_as",
-)
+const EVP_SENSITIVITY_METHODS =
+  ("var_dd", "var_dd_history", "lobpcg_as", "jd_gmres_as", "si_lanczos_pcg_as")
 
 const EVP_SENSITIVITY_MARKERS = Dict(
   "var_dd" => :circle,
@@ -2836,23 +2924,25 @@ function fig24_evp_scaling()
       "oscillatory diffusion, contrast κ = 10³",
     ),
   )
-  fig = Figure(size=(1320, 420))
+  fig = Figure(size = (1320, 420))
   for (column, (experiment, regime, parameter, title)) in enumerate(panels)
     ax = Axis(
       fig[1, column];
-      xlabel=parameter == :N ? "elements per direction, 1/h" : "frequency ν",
-      ylabel=column == 1 ? "outer iterations to tolerance" : "",
+      xlabel = parameter == :N ? "elements per direction, 1/h" : "frequency ν",
+      ylabel = column == 1 ? "outer iterations to tolerance" : "",
       title,
     )
     for (index, method) in enumerate(methods)
       mask =
-        (tbl.experiment .== experiment) .&
-        (tbl.regime .== regime) .&
+        (tbl.experiment .== experiment) .& (tbl.regime .== regime) .&
         (tbl.method .== method)
       xs, ys = evp_terminal_series(tbl, mask, parameter, :iteration)
       add_series!(
-        ax, xs, ys;
-        color=colors[index], marker=EVP_SENSITIVITY_MARKERS[method],
+        ax,
+        xs,
+        ys;
+        color = colors[index],
+        marker = EVP_SENSITIVITY_MARKERS[method],
       )
     end
   end
@@ -2860,8 +2950,8 @@ function fig24_evp_scaling()
     fig[2, 1:3],
     legend_line_marker_elements(methods, EVP_SENSITIVITY_MARKERS; colors),
     [EVP_SENSITIVITY_LABELS[method] for method in methods];
-    orientation=:horizontal,
-    nbanks=1,
+    orientation = :horizontal,
+    nbanks = 1,
   )
   rowgap!(fig.layout, 8)
   savefigs(fig, "fig24_evp_scaling")
@@ -2871,12 +2961,12 @@ function fig25_evp_linear_work()
   tbl = loadtable("study9_evp_sensitivity.csv")
   methods = ["lobpcg_as", "jd_gmres_as", "si_lanczos_pcg_as"]
   colors = tab10_colors(length(methods))
-  fig = Figure(size=(900, 390))
+  fig = Figure(size = (900, 390))
   Label(
     fig[0, 1:2],
     "Linear-preconditioner work is separate from varDD local eigenproblems";
-    fontsize=22,
-    font=:bold,
+    fontsize = 22,
+    font = :bold,
   )
   for (column, (quantity, ylabel)) in enumerate((
     (:linear_as_batches, "parallel linear AS batches"),
@@ -2884,14 +2974,13 @@ function fig25_evp_linear_work()
   ))
     ax = Axis(
       fig[1, column];
-      xlabel="elements per direction, 1/h",
+      xlabel = "elements per direction, 1/h",
       ylabel,
-      title=column == 1 ? "local linear solves" : "global operator work",
+      title = column == 1 ? "local linear solves" : "global operator work",
     )
     for (index, method) in enumerate(methods)
       mask =
-        (tbl.experiment .== "mesh") .&
-        (tbl.regime .== "fixed_delta_over_H") .&
+        (tbl.experiment .== "mesh") .& (tbl.regime .== "fixed_delta_over_H") .&
         (tbl.method .== method)
       if quantity == :global_operator_products
         xs = sort(unique(tbl.N[mask]))
@@ -2908,8 +2997,11 @@ function fig25_evp_linear_work()
         xs, ys = evp_terminal_series(tbl, mask, :N, quantity)
       end
       add_series!(
-        ax, xs, ys;
-        color=colors[index], marker=EVP_SENSITIVITY_MARKERS[method],
+        ax,
+        xs,
+        ys;
+        color = colors[index],
+        marker = EVP_SENSITIVITY_MARKERS[method],
       )
     end
   end
@@ -2917,8 +3009,8 @@ function fig25_evp_linear_work()
     fig[2, 1:2],
     legend_line_marker_elements(methods, EVP_SENSITIVITY_MARKERS; colors),
     [EVP_SENSITIVITY_LABELS[method] for method in methods];
-    orientation=:horizontal,
-    nbanks=1,
+    orientation = :horizontal,
+    nbanks = 1,
   )
   rowgap!(fig.layout, 8)
   savefigs(fig, "fig25_evp_linear_work")
@@ -2927,12 +3019,9 @@ end
 function fig26_evp_history()
   tbl = loadtable("study9_evp_sensitivity.csv")
   combination = loadtable("study9_evp_sensitivity_combination.csv")
-  mask =
-    (tbl.experiment .== "history") .&
-    (tbl.method .== "var_dd_history")
-  depths, iterations = evp_terminal_series(
-    tbl, mask, :history_depth, :iteration
-  )
+  mask = (tbl.experiment .== "history") .& (tbl.method .== "var_dd_history")
+  depths, iterations =
+    evp_terminal_series(tbl, mask, :history_depth, :iteration)
   conditions = Float64[]
   for depth in depths
     condition_mask =
@@ -2941,45 +3030,63 @@ function fig26_evp_history()
       (combination.history_depth .== depth)
     push!(conditions, maximum(combination.mass_condition[condition_mask]))
   end
-  fig = Figure(size=(820, 360))
+  fig = Figure(size = (820, 360))
   Label(
     fig[0, 1:2],
     "One previous iterate supplies the useful EVP history enrichment";
-    fontsize=22,
-    font=:bold,
+    fontsize = 22,
+    font = :bold,
   )
   ax_iterations = Axis(
-    fig[1, 1]; xlabel="history depth q", ylabel="outer iterations to tolerance"
+    fig[1, 1];
+    xlabel = "history depth q",
+    ylabel = "outer iterations to tolerance",
   )
-  add_series!(ax_iterations, depths, iterations; color=PALETTE[2], marker=:hexagon)
-  vlines!(ax_iterations, [1]; color=(:black, 0.45), linestyle=:dash)
+  add_series!(
+    ax_iterations,
+    depths,
+    iterations;
+    color = PALETTE[2],
+    marker = :hexagon,
+  )
+  vlines!(ax_iterations, [1]; color = (:black, 0.45), linestyle = :dash)
   ax_condition = Axis(
     fig[1, 2];
-    xlabel="history depth q",
-    ylabel="max κ₂(QᵀMQ)",
-    yscale=log10,
+    xlabel = "history depth q",
+    ylabel = "max κ₂(QᵀMQ)",
+    yscale = log10,
   )
-  add_series!(ax_condition, depths, conditions; color=PALETTE[5], marker=:diamond)
-  vlines!(ax_condition, [1]; color=(:black, 0.45), linestyle=:dash)
+  add_series!(
+    ax_condition,
+    depths,
+    conditions;
+    color = PALETTE[5],
+    marker = :diamond,
+  )
+  vlines!(ax_condition, [1]; color = (:black, 0.45), linestyle = :dash)
   savefigs(fig, "fig26_evp_history")
 end
 
 function fig27_evp_local_work()
   tbl = loadtable("study9_evp_sensitivity.csv")
   local_stats = loadtable("study9_evp_sensitivity_local.csv")
-  Ns = sort(unique(tbl.N[
-    (tbl.experiment .== "mesh") .& (tbl.regime .== "fixed_delta_over_H")
-  ]))
-  fig = Figure(size=(1260, 390))
+  Ns = sort(
+    unique(
+      tbl.N[(tbl.experiment .== "mesh") .& (tbl.regime .== "fixed_delta_over_H")],
+    ),
+  )
+  fig = Figure(size = (1260, 390))
   Label(
     fig[0, 1:3],
     "Local-system size, critical path, and factor storage";
-    fontsize=22,
-    font=:bold,
+    fontsize = 22,
+    font = :bold,
   )
 
   ax_dimension = Axis(
-    fig[1, 1]; xlabel="elements per direction, 1/h", ylabel="maximum local dimension"
+    fig[1, 1];
+    xlabel = "elements per direction, 1/h",
+    ylabel = "maximum local dimension",
   )
   for (system, label, color, marker) in (
     ("schwarz_block", "AS block", PALETTE[4], :rect),
@@ -2989,45 +3096,46 @@ function fig27_evp_local_work()
     for N in Ns
       mask =
         (local_stats.experiment .== "mesh") .&
-        (local_stats.regime .== "fixed_delta_over_H") .&
-        (local_stats.N .== N) .&
-        (local_stats.system .== system) .&
-        (system == "schwarz_block" ? trues(length(local_stats.N)) :
-         local_stats.method .== "var_dd")
+        (local_stats.regime .== "fixed_delta_over_H") .& (local_stats.N .== N) .&
+        (local_stats.system .== system) .& (
+          system == "schwarz_block" ? trues(length(local_stats.N)) :
+          local_stats.method .== "var_dd"
+        )
       push!(values, maximum(local_stats.dimension[mask]))
     end
     add_series!(ax_dimension, Ns, values; label, color, marker)
   end
-  axislegend(ax_dimension; position=:lt)
+  axislegend(ax_dimension; position = :lt)
 
   ax_critical = Axis(
     fig[1, 2];
-    xlabel="elements per direction, 1/h",
-    ylabel="critical-path local LOBPCG iterations",
+    xlabel = "elements per direction, 1/h",
+    ylabel = "critical-path local LOBPCG iterations",
   )
   for (method, color, marker) in (
     ("var_dd", PALETTE[1], :circle),
     ("var_dd_history", PALETTE[2], :hexagon),
   )
     mask =
-      (tbl.experiment .== "mesh") .&
-      (tbl.regime .== "fixed_delta_over_H") .&
+      (tbl.experiment .== "mesh") .& (tbl.regime .== "fixed_delta_over_H") .&
       (tbl.method .== method)
-    xs, ys = evp_terminal_series(
-      tbl, mask, :N, :local_iterations_critical
-    )
+    xs, ys = evp_terminal_series(tbl, mask, :N, :local_iterations_critical)
     add_series!(
-      ax_critical, xs, ys;
-      label=EVP_SENSITIVITY_LABELS[method], color, marker,
+      ax_critical,
+      xs,
+      ys;
+      label = EVP_SENSITIVITY_LABELS[method],
+      color,
+      marker,
     )
   end
-  axislegend(ax_critical; position=:lt)
+  axislegend(ax_critical; position = :lt)
 
   ax_factor = Axis(
     fig[1, 3];
-    xlabel="elements per direction, 1/h",
-    ylabel="maximum local factor nnz",
-    yscale=log10,
+    xlabel = "elements per direction, 1/h",
+    ylabel = "maximum local factor nnz",
+    yscale = log10,
   )
   for (system, label, color, marker) in (
     ("schwarz_block", "AS block", PALETTE[4], :rect),
@@ -3037,16 +3145,16 @@ function fig27_evp_local_work()
     for N in Ns
       mask =
         (local_stats.experiment .== "mesh") .&
-        (local_stats.regime .== "fixed_delta_over_H") .&
-        (local_stats.N .== N) .&
-        (local_stats.system .== system) .&
-        (system == "schwarz_block" ? trues(length(local_stats.N)) :
-         local_stats.method .== "var_dd")
+        (local_stats.regime .== "fixed_delta_over_H") .& (local_stats.N .== N) .&
+        (local_stats.system .== system) .& (
+          system == "schwarz_block" ? trues(length(local_stats.N)) :
+          local_stats.method .== "var_dd"
+        )
       push!(values, maximum(local_stats.factor_nnz[mask]))
     end
     add_series!(ax_factor, Ns, values; label, color, marker)
   end
-  axislegend(ax_factor; position=:lt)
+  axislegend(ax_factor; position = :lt)
   savefigs(fig, "fig27_evp_local_work")
 end
 
@@ -3077,42 +3185,44 @@ function fig28_method_variants()
   colors = tab10_colors(length(methods))
   ms = sort(unique(tbl.m))
   xmax = maximum(tbl.iteration) + 2
-  fig = Figure(; size=(PAPER_FULL_WIDTH, 350))
+  fig = Figure(; size = (PAPER_FULL_WIDTH, 350))
   for (column, m) in enumerate(ms)
     N = tbl.N[findfirst(tbl.m .== m)]
     ax = Axis(
       fig[1, column];
-      xlabel="outer sweep k",
-      ylabel=column == 1 ? "relative residual" : "",
-      yscale=log10,
-      yticks=LogTicks(collect(0:-2:-10)),
-      title="m = $m, 1/h = $N",
-      limits=((0, xmax), (5e-11, 2.0)),
+      xlabel = "outer sweep k",
+      ylabel = column == 1 ? "relative residual" : "",
+      yscale = log10,
+      yticks = LogTicks(collect(0:-2:-10)),
+      title = "m = $m, 1/h = $N",
+      limits = ((0, xmax), (5e-11, 2.0)),
     )
     for (index, method) in enumerate(methods)
       mask =
-        (tbl.m .== m) .& (tbl.method .== method) .&
-        (tbl.relative_residual .> 0)
+        (tbl.m .== m) .& (tbl.method .== method) .& (tbl.relative_residual .> 0)
       add_series!(
         ax,
         pick(tbl, :iteration, mask),
         pick(tbl, :relative_residual, mask);
-        color=colors[index],
-        marker=markers[method],
-        markersize=5,
+        color = colors[index],
+        marker = markers[method],
+        markersize = 5,
       )
     end
   end
   Legend(
     fig[2, 1:length(ms)],
     legend_line_marker_elements(
-      methods, markers; colors, markersizes=fill(5, length(methods))
+      methods,
+      markers;
+      colors,
+      markersizes = fill(5, length(methods)),
     ),
     [labels[method] for method in methods];
-    orientation=:horizontal,
-    nbanks=2,
-    framevisible=true,
-    labelsize=12,
+    orientation = :horizontal,
+    nbanks = 2,
+    framevisible = true,
+    labelsize = 12,
   )
   rowgap!(fig.layout, 6)
   return savefigs(fig, "fig28_method_variants")
