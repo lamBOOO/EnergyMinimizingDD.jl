@@ -1368,7 +1368,7 @@ function fig13_evp_cmp()
   ylims = (1e-6 * 0.5, maximum(finite_res) * 1.5)
   ytick_exps = sort(collect(floor(Int, log10(ylims[2])):-2:ceil(Int, log10(ylims[1]))))
   yticks = LogTicks(ytick_exps)
-  fig = Figure(size=(PAPER_FULL_WIDTH, 390))
+  fig = Figure(size=(PAPER_FULL_WIDTH, 350))
   for (j, m) in enumerate(ms)
     ax = Axis(
       fig[1, j];
@@ -1399,23 +1399,25 @@ function fig13_evp_cmp()
         markerstrokewidth = 0.7,
       )
     end
+    inset_layout = semilinear_inset_layout(fig[1, j])
     add_evp_solution_inset!(
-      fig[1, j],
+      inset_layout[1, 1],
       solutions;
-      halign=0.68,
-      valign=0.97,
-      inset_size=0.23,
-      inset_title="uₕ",
+      halign=:center,
+      valign=:center,
+      inset_size=1.0,
+      inset_title="",
     )
     add_partition_inset!(
-      fig[1, j],
+      inset_layout[1, 2],
       parts,
       m;
-      halign=0.99,
-      valign=0.97,
-      inset_size=0.23,
-      inset_title="Ωᵢ",
+      halign=:center,
+      valign=:center,
+      inset_size=1.0,
+      inset_title="",
     )
+    fix_semilinear_inset_sizes!(inset_layout)
   end
   Legend(
     fig[2, 1:length(ms)],
