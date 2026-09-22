@@ -868,15 +868,18 @@ function fig14b_gp_convergence_paper()
     "gp_projected_qemdd",
     "gp_projected_qemdd_history",
   )
-  gfdn_methods = ("gfdn_pcg_as_1", "gfdn_pcg_as_2", "gfdn_pcg_as_4")
+  gfdn_methods = (
+    # "gfdn_pcg_as_1", "gfdn_pcg_as_2",
+    "gfdn_pcg_as_4",
+  )
   cg_gfdn_methods = ("cg_gfdn_pcg_as_1", "cg_gfdn_pcg_as_2", "cg_gfdn_pcg_as_4")
   metric_methods = (gfdn_methods..., cg_gfdn_methods...)
   metric_legend_methods = (
     gfdn_methods[1],
     cg_gfdn_methods[1],
-    gfdn_methods[2],
+    # gfdn_methods[2],
     cg_gfdn_methods[2],
-    gfdn_methods[3],
+    # gfdn_methods[3],
     cg_gfdn_methods[3],
   )
   methods = (primary_methods..., metric_methods...)
@@ -887,10 +890,10 @@ function fig14b_gp_convergence_paper()
     # "gp_quadratic_history" => "quadratic EMDD (q = 2)",
     # "gp_tangent_quadratic" => "tangent KKT (q = 1)",
     # "gp_tangent_quadratic_history" => "tangent KKT (q = 2)",
-    "gp_projected_qemdd" => "projected qEMDD (q = 1)",
-    "gp_projected_qemdd_history" => "projected qEMDD (q = 2)",
-    "gfdn_pcg_as_1" => "GFDN-PCG(AS, 1)",
-    "gfdn_pcg_as_2" => "GFDN-PCG(AS, 2)",
+    "gp_projected_qemdd" => "qEMDD (q = 1)",
+    "gp_projected_qemdd_history" => "qEMDD (q = 2)",
+    # "gfdn_pcg_as_1" => "GFDN-PCG(AS, 1)",
+    # "gfdn_pcg_as_2" => "GFDN-PCG(AS, 2)",
     "gfdn_pcg_as_4" => "GFDN-PCG(AS, 4)",
     "cg_gfdn_pcg_as_1" => "CG-GFDN-PCG(AS, 1)",
     "cg_gfdn_pcg_as_2" => "CG-GFDN-PCG(AS, 2)",
@@ -905,17 +908,22 @@ function fig14b_gp_convergence_paper()
     # "gp_tangent_quadratic_history" => :diamond,
     "gp_projected_qemdd" => :utriangle,
     "gp_projected_qemdd_history" => :cross,
-    "gfdn_pcg_as_1" => :circle,
-    "gfdn_pcg_as_2" => :rect,
-    "gfdn_pcg_as_4" => :dtriangle,
+    # "gfdn_pcg_as_1" => :circle,
+    # "gfdn_pcg_as_2" => :rect,
+    "gfdn_pcg_as_4" => :cross,
     "cg_gfdn_pcg_as_1" => :circle,
     "cg_gfdn_pcg_as_2" => :rect,
     "cg_gfdn_pcg_as_4" => :dtriangle,
   )
   primary_colors = tab10_colors(length(primary_methods))
   gfdn_colors =
-    [RGBf(0.25, 0.25, 0.25), RGBf(0.45, 0.45, 0.45), RGBf(0.62, 0.62, 0.62)]
-  cg_gfdn_colors = copy(gfdn_colors)
+    [
+      # RGBf(0.25, 0.25, 0.25), RGBf(0.45, 0.45, 0.45), RGBf(0.62, 0.62, 0.62)
+      RGBf(0.78, 0.57, 0.02)
+    ]
+  cg_gfdn_colors = [
+    RGBf(0.25, 0.25, 0.25), RGBf(0.45, 0.45, 0.45), RGBf(0.62, 0.62, 0.62)
+  ]
   metric_linestyles = [
     fill((:dash, :dense), length(gfdn_methods))...,
     fill((:dot, :dense), length(cg_gfdn_methods))...,
@@ -924,17 +932,17 @@ function fig14b_gp_convergence_paper()
   metric_legend_colors = [
     gfdn_colors[1],
     cg_gfdn_colors[1],
-    gfdn_colors[2],
+    # gfdn_colors[2],
     cg_gfdn_colors[2],
-    gfdn_colors[3],
+    # gfdn_colors[3],
     cg_gfdn_colors[3],
   ]
   metric_legend_linestyles = [
     (:dash, :dense),
     (:dot, :dense),
-    (:dash, :dense),
+    # (:dash, :dense),
     (:dot, :dense),
-    (:dash, :dense),
+    # (:dash, :dense),
     (:dot, :dense),
   ]
   colors = [primary_colors..., metric_colors...]
@@ -1034,7 +1042,7 @@ function fig14b_gp_convergence_paper()
     ),
     [labels[method] for method in metric_legend_methods];
     orientation = :horizontal,
-    nbanks = 2,
+    nbanks = 1,
     framevisible = true,
   )
   rowgap!(fig.layout, 8)
