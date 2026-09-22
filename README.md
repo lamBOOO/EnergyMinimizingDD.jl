@@ -13,8 +13,6 @@
 
 EnergyMinimizingDD.jl implements energy-minimizing domain-decomposition methods for finite-element problems. Each iteration solves independent variational problems on overlapping local spaces and then recombines the resulting candidates through a small global minimization. A common solver interface supports quadratic source problems, generalized eigenproblems, semilinear energies, and Gross–Pitaevskii models.
 
-The figure visualizes one computed iteration of the Poisson example below, starting from an asymmetric initial field. The middle panels show the local corrections $\mathsf y_i^{(0)}-\mathsf u^{(0)}$; the white contours identify the degrees of freedom in each overlapping subspace. The displayed energy values are evaluated from the actual iterates. The figure can be reproduced with [`docs/generate_readme_figures.jl`](docs/generate_readme_figures.jl).
-
 ## Quick start: Poisson's equation
 
 Install the current development version directly from GitHub:
