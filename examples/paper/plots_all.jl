@@ -320,23 +320,39 @@ function add_semilinear_solution_inset!(
   node(ix, iy) = iy * (N + 1) + ix + 1
   TriangleFace = CairoMakie.GeometryBasics.TriangleFace
   faces = TriangleFace{Int}[]
+  face_values = Float64[]
   for iy = 0:(N-1), ix = 0:(N-1)
     lower_left = node(ix, iy)
     lower_right = node(ix + 1, iy)
     upper_left = node(ix, iy + 1)
     upper_right = node(ix + 1, iy + 1)
     push!(faces, TriangleFace(lower_left, lower_right, upper_left))
+    push!(
+      face_values,
+      (vertex_values[lower_left] + vertex_values[lower_right] + vertex_values[upper_left]) /
+      3,
+    )
     push!(faces, TriangleFace(lower_right, upper_right, upper_left))
+    push!(
+      face_values,
+      (vertex_values[lower_right] + vertex_values[upper_right] + vertex_values[upper_left]) /
+      3,
+    )
   end
   color_limit = maximum(abs, values)
-  mesh!(
+  polygons = [
+    Point2f[vertices[face[1]], vertices[face[2]], vertices[face[3]]] for
+    face in faces
+  ]
+  poly!(
     sax,
-    vertices,
-    faces;
-    color = vertex_values,
+    polygons;
+    # Per-face colors avoid Cairo's PDF Gouraud-shading primitive, which can be
+    # dropped by TeX/PDF post-processing while leaving the wireframe visible.
+    color = face_values,
     colormap = :balance,
     colorrange = (-color_limit, color_limit),
-    shading = NoShading,
+    strokewidth = 0,
   )
   wireframe!(
     sax,
@@ -365,10 +381,11 @@ function semilinear_inset_layout(
   inset_size = SEMILINEAR_INSET_SIZE,
   gap = SEMILINEAR_INSET_GAP,
   margin = SEMILINEAR_INSET_MARGIN,
+  columns = 2,
 )
   layout = GridLayout(
     figpos;
-    width = 2 * inset_size + gap,
+    width = columns * inset_size + (columns - 1) * gap,
     height = inset_size,
     halign = :right,
     valign = :top,
@@ -384,11 +401,15 @@ function fix_semilinear_inset_sizes!(
   layout;
   inset_size = SEMILINEAR_INSET_SIZE,
   gap = SEMILINEAR_INSET_GAP,
+  columns = 2,
 )
-  colsize!(layout, 1, Fixed(inset_size))
-  colsize!(layout, 2, Fixed(inset_size))
+  for column = 1:columns
+    colsize!(layout, column, Fixed(inset_size))
+  end
   rowsize!(layout, 1, Fixed(inset_size))
-  colgap!(layout, 1, Fixed(gap))
+  for column = 1:(columns-1)
+    colgap!(layout, column, Fixed(gap))
+  end
   return layout
 end
 
@@ -463,6 +484,7 @@ function add_lshape_solution_inset!(
   vertex_values = Float64[]
   TriangleFace = CairoMakie.GeometryBasics.TriangleFace
   faces = TriangleFace{Int}[]
+  face_values = Float64[]
   for index in eachindex(solutions.idx)
     first_vertex = length(vertices) + 1
     append!(
@@ -482,16 +504,27 @@ function add_lshape_solution_inset!(
       ],
     )
     push!(faces, TriangleFace(first_vertex, first_vertex + 1, first_vertex + 2))
+    push!(
+      face_values,
+      (solutions.value1[index] + solutions.value2[index] + solutions.value3[index]) /
+      3,
+    )
   end
   color_limit = maximum(abs, vertex_values)
-  mesh!(
+  polygons = [
+    Point2f[vertices[face[1]], vertices[face[2]], vertices[face[3]]] for
+    face in faces
+  ]
+  poly!(
     sax,
-    vertices,
-    faces;
-    color = vertex_values,
+    polygons;
+    # Per-face colors remain ordinary vector fills in exported PDFs. In
+    # contrast, per-vertex colors become a Gouraud mesh that some TeX/PDF
+    # pipelines discard while retaining the wireframe drawn below.
+    color = face_values,
     colormap = :balance,
     colorrange = (-color_limit, color_limit),
-    shading = NoShading,
+    strokewidth = 0,
   )
   wireframe!(
     sax,
@@ -1184,14 +1217,14 @@ function fig12b_poisson_cmp_paper()
   )
   ylims = (1e-11, maximum(finite_residuals) * 3)
   yticks = LogTicks(collect(1:-2:-11))
-  fig = Figure(size = (max(430 * length(ms), 1200), 350))
+  fig = Figure(size = (PAPER_FULL_WIDTH, 500))
   for (row, (problem_label, tbl)) in enumerate(problem_rows)
     for (column, m) in enumerate(ms)
       ax = Axis(
         fig[row, column];
         xlabel = row == length(problem_rows) ? "iteration" : "",
         ylabel = column == 1 ?
-                 "$problem_label\nrel. res.  ‖Axₖ-b‖₂/‖Ax₀-b‖₂" : "",
+                 "$problem_label\nrelative residual" : "",
         ylabelsize = 13,
         yscale = log10,
         yticks,
@@ -1215,7 +1248,17 @@ function fig12b_poisson_cmp_paper()
           markerstrokewidth = 0.7,
         )
       end
-      add_partition_inset!(fig[row, column], parts, m)
+      inset_layout = semilinear_inset_layout(fig[row, column]; columns = 1)
+      add_partition_inset!(
+        inset_layout[1, 1],
+        parts,
+        m;
+        halign = :center,
+        valign = :center,
+        inset_size = 1.0,
+        inset_title = "",
+      )
+      fix_semilinear_inset_sizes!(inset_layout; columns = 1)
     end
   end
   Legend(
