@@ -11,7 +11,6 @@ include("study8_linear_cmp.jl")
 include("study8_linear_sensitivity.jl")
 include("study9_evp_cmp.jl")
 include("study10_gp.jl")
-include("study10_gp_sensitivity.jl")
 include("study11_semilinear.jl")
 include("study11b_semilinear_l_shape.jl")
 
