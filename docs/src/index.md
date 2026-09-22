@@ -1,69 +1,46 @@
 # EnergyMinimizingDD.jl
 
-EnergyMinimizingDD.jl implements energy-minimizing domain-decomposition methods for finite-element source problems, generalized eigenproblems, semilinear equations, and Gross–Pitaevskii ground states.
-
-```@raw html
-<p style="text-align:center">
-  <img src="assets/energy-minimizing-dd-poisson-iteration.png" alt="A real Poisson iteration with four local update fields and a second-level minimizer" style="max-width:1000px;width:100%">
-</p>
-```
+EnergyMinimizingDD.jl contains the Julia implementation and numerical
+experiments for the accompanying paper on energy-minimizing domain
+decomposition.
 
 !!! warning "Project status"
-    EnergyMinimizingDD.jl is experimental research software. The public API may evolve before a stable release.
+    EnergyMinimizingDD.jl is experimental research software. The public API
+    may evolve before a stable release.
 
 ## Installation
 
-Install the development version from GitHub:
+From the repository root, instantiate the project environment with
 
-```julia
-import Pkg
-Pkg.add(url="https://github.com/lamBOOO/EnergyMinimizingDD.jl.git")
+```bash
+julia --project=. -e 'using Pkg; Pkg.instantiate()'
 ```
 
 Julia 1.10 or newer is required.
 
-## First solve
+## Reproducing the paper results
 
-This example discretizes ``-\Delta u=1`` on the unit square with homogeneous Dirichlet boundary conditions and minimizes the resulting quadratic energy using four overlapping Cartesian subdomains.
+Run every retained numerical study, generate the five paper figures, and
+regenerate the paper table with
 
-```julia
-using EnergyMinimizingDD, LinearAlgebra
-
-const FEM = EnergyMinimizingDD.FEMDiscretizations
-const E = EnergyMinimizingDD.Energies
-const S = EnergyMinimizingDD.Solvers
-
-A, _, b, subdomains, _ = FEM.FEM_Schroedinger(
-    16, 4; P=x -> 0.0, f=x -> 1.0, overlap=2,
-    partitioning=:cartesian,
-)
-energy = E.QuadraticEnergy(A, b)
-u, _, _, _, residuals = S.var_dd(
-    energy, subdomains; maxiter=50, tol=1e-8, verbose=false,
-)
-
-@show length(residuals) norm(A * u - b)
+```bash
+julia --project=. examples/paper/run_all.jl
 ```
 
-In the notation of the theory manuscript, the corresponding discrete energy and stationarity residual are
+For a smaller installation smoke test, use
 
-```math
-\mathcal E(\mathsf u)
-  =\frac12\mathsf u^\top\mathsf A\mathsf u-\mathsf b^\top\mathsf u,
-\qquad
-\mathsf r(\mathsf u):=\nabla\mathcal E(\mathsf u)
-  =\mathsf A\mathsf u-\mathsf b.
+```bash
+SMALL=1 FORCE=1 julia --project=. examples/paper/run_all.jl
 ```
 
-See the repository [README](https://github.com/lamBOOO/EnergyMinimizingDD.jl) for the measured convergence history, the local and second-level minimization problems, and links to the benchmark studies.
+The small run skips the publication table because it requires the full
+parameter grids. See the repository README for the mapping between paper
+outputs and study scripts.
 
-## Where to go next
+## Checks
 
-- The [API reference](@ref api-reference) documents the local solvers, second-level combination routines, and iteration drivers.
-- [`examples/heat_equation_dd.jl`](https://github.com/lamBOOO/EnergyMinimizingDD.jl/blob/main/examples/heat_equation_dd.jl) demonstrates warm-started quadratic solves for a gradient flow.
-- The [paper studies](https://github.com/lamBOOO/EnergyMinimizingDD.jl/tree/main/examples/paper) cover Poisson, eigenvalue, semilinear, heat, and Gross–Pitaevskii problems.
+Run the focused test suite with
 
-```@contents
-Pages = ["api.md"]
-Depth = 2
+```bash
+julia --project=. -e 'using Pkg; Pkg.test()'
 ```

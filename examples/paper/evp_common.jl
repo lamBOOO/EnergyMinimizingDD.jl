@@ -24,14 +24,6 @@ const EVP_JD_GMRES_ITERATIONS = Dict(
   :jd_gmres_as_4 => 4,
 )
 
-const EVP_LANCZOS_PCG_ITERATIONS = Dict(
-  :si_lanczos_pcg_as_2 => 2,
-  :si_lanczos_pcg_as_4 => 4,
-  :si_lanczos_pcg_as_8 => 8,
-  :si_lanczos_pcg_as_16 => 16,
-  :si_lanczos_pcg_as_32 => 32,
-)
-
 rayleigh(K, M, x) = dot(x, K * x) / dot(x, M * x)
 evp_residual(K, M, x, lambda) = K * x .- lambda .* (M * x)
 
@@ -148,170 +140,6 @@ function evp_lobpcg_as(K, M, schwarz; maxiter, relative_tolerance)
     )
   end
   return empty_evp_result(vec(result.X[:, 1]), history)
-end
-
-"PCG solve with explicit AS and operator-application counters."
-function evp_pcg_as(K, rhs, schwarz; relative_tolerance, maxiter)
-  x = zeros(length(rhs))
-  r = copy(rhs)
-  initial = norm(r)
-  initial == 0 && return (
-    x=x, Kx=zeros(length(rhs)), iterations=0, as_batches=0,
-    k_products=0, converged=true, relative_residual=0.0,
-  )
-  z = apply_AS(schwarz, r)
-  as_batches = 1
-  p = copy(z)
-  rz = dot(r, z)
-  iterations = 0
-  converged = false
-  for iteration = 1:maxiter
-    Kp = K * p
-    denominator = dot(p, Kp)
-    (!isfinite(denominator) || denominator <= 0) && break
-    alpha = rz / denominator
-    x .+= alpha .* p
-    r .-= alpha .* Kp
-    iterations = iteration
-    if norm(r) <= relative_tolerance * initial
-      converged = true
-      break
-    end
-    iteration == maxiter && break
-    z = apply_AS(schwarz, r)
-    as_batches += 1
-    rz_new = dot(r, z)
-    (!isfinite(rz_new) || rz_new <= 0) && break
-    p .= z .+ (rz_new / rz) .* p
-    rz = rz_new
-  end
-  return (
-    x=x,
-    Kx=rhs - r,
-    iterations=iterations,
-    as_batches=as_batches,
-    k_products=iterations,
-    converged=converged,
-    relative_residual=norm(r) / initial,
-  )
-end
-
-"Inexact shift-and-invert Lanczos with full K-orthogonalization."
-function evp_si_lanczos_pcg_as(
-  K,
-  M,
-  schwarz;
-  maxiter,
-  relative_tolerance,
-  inner_relative_tolerance=1e-10,
-  inner_maxiter=500,
-  restart_dimension=20,
-)
-  x = ones(size(K, 1))
-  Kx = K * x
-  Mx = M * x
-  scale = sqrt(dot(x, Kx))
-  x ./= scale
-  Kx ./= scale
-  Mx ./= scale
-  V = reshape(copy(x), :, 1)
-  KV = reshape(copy(Kx), :, 1)
-  MV = reshape(copy(Mx), :, 1)
-  lambda = dot(x, Kx) / dot(x, Mx)
-  initial = norm(Kx - lambda .* Mx)
-  history = [evp_entry(0, lambda, initial, initial; global_k_products=1, global_m_products=1)]
-  inner_stats = NamedTuple[]
-  linear_batches = 0
-  inner_iterations = 0
-  k_products = 1
-  m_products = 1
-
-  for outer = 1:maxiter
-    if size(V, 2) >= restart_dimension
-      scale = sqrt(dot(x, Kx))
-      V = reshape(x ./ scale, :, 1)
-      KV = reshape(Kx ./ scale, :, 1)
-      MV = reshape(Mx ./ scale, :, 1)
-    end
-
-    inner = evp_pcg_as(
-      K,
-      view(MV, :, size(MV, 2)),
-      schwarz;
-      relative_tolerance=inner_relative_tolerance,
-      maxiter=inner_maxiter,
-    )
-    linear_batches += inner.as_batches
-    inner_iterations += inner.iterations
-    k_products += inner.k_products
-    z = copy(inner.x)
-    # Form K*z explicitly before orthogonalization. For a tightly converged
-    # inner solve, recovering it as rhs-r is accurate enough; after only a few
-    # PCG steps, however, the resulting recurrence-level roundoff can be
-    # amplified when the new direction is nearly in the current subspace.
-    Kz = K * z
-    k_products += 1
-
-    # Full two-pass K-orthogonalization preserves the symmetric
-    # shift-and-invert subspace despite finite-precision inner solves.
-    for _ = 1:2
-      coefficients = V' * Kz
-      z .-= V * coefficients
-      Kz .-= KV * coefficients
-    end
-    z_norm = sqrt(max(dot(z, Kz), 0.0))
-    z_norm <= 100 * eps(Float64) && break
-    z ./= z_norm
-    Kz ./= z_norm
-    Mz = M * z
-    m_products += 1
-    V = hcat(V, z)
-    KV = hcat(KV, Kz)
-    MV = hcat(MV, Mz)
-
-    reduced_stiffness = Symmetric(V' * KV)
-    reduced_mass = Symmetric(V' * MV)
-    # Fixed, low PCG budgets may make the inverse application almost
-    # collinear with the retained Ritz vector after a restart. Stop at the
-    # last valid Ritz pair instead of passing a numerically dependent basis
-    # to the definite generalized eigensolver.
-    (!isposdef(reduced_stiffness) || !isposdef(reduced_mass)) && break
-    reduced = eigen(reduced_stiffness, reduced_mass)
-    coefficient = reduced.vectors[:, 1]
-    x = V * coefficient
-    Kx = KV * coefficient
-    Mx = MV * coefficient
-    scale = sqrt(dot(x, Mx))
-    x ./= scale
-    Kx ./= scale
-    Mx ./= scale
-    lambda = reduced.values[1]
-    residual = norm(Kx - lambda .* Mx)
-    push!(
-      inner_stats,
-      (
-        outer_iteration=outer,
-        iterations=inner.iterations,
-        converged=inner.converged,
-        relative_residual=inner.relative_residual,
-      ),
-    )
-    push!(
-      history,
-      evp_entry(
-        outer,
-        lambda,
-        residual,
-        initial;
-        linear_as_batches=linear_batches,
-        global_k_products=k_products,
-        global_m_products=m_products,
-        inner_iterations=inner_iterations,
-      ),
-    )
-    residual <= relative_tolerance * initial && break
-  end
-  return empty_evp_result(x, history; inner_stats)
 end
 
 "Flexible GMRES solution of the projected Jacobi--Davidson correction equation."
@@ -623,17 +451,6 @@ function evp_method_result(
     return evp_lopsd_as(K, M, schwarz; maxiter, relative_tolerance)
   elseif method == :lobpcg_as
     return evp_lobpcg_as(K, M, schwarz; maxiter, relative_tolerance)
-  elseif method == :jd_gmres_as
-    return evp_jd_gmres_as(
-      K,
-      M,
-      schwarz;
-      maxiter,
-      relative_tolerance,
-      inner_relative_tolerance=1e-2,
-      inner_maxiter=SMALL ? 8 : 20,
-      restart_dimension=20,
-    )
   elseif haskey(EVP_JD_GMRES_ITERATIONS, method)
     return evp_jd_gmres_as(
       K,
@@ -645,20 +462,6 @@ function evp_method_result(
       # the prescribed iteration budgets.
       inner_relative_tolerance=0.0,
       inner_maxiter=EVP_JD_GMRES_ITERATIONS[method],
-      restart_dimension=20,
-    )
-  elseif haskey(EVP_LANCZOS_PCG_ITERATIONS, method)
-    return evp_si_lanczos_pcg_as(
-      K,
-      M,
-      schwarz;
-      maxiter,
-      relative_tolerance,
-      # These are deliberately fixed-work applications of PCG(AS), not
-      # accurate inner solves. Otherwise AS is hidden inside an effectively
-      # exact shift-and-invert operation and is not a meaningful baseline.
-      inner_relative_tolerance=0.0,
-      inner_maxiter=EVP_LANCZOS_PCG_ITERATIONS[method],
       restart_dimension=20,
     )
   end

@@ -1,3 +1,6 @@
 [deps]
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
 EnergyMinimizingDD = "9c6c9d9d-5f2b-4a5e-9c3d-4a7bb2f3d6af"
+
+[compat]
+Documenter = "1"
