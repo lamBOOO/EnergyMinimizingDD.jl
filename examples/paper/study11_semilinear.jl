@@ -14,8 +14,7 @@ const SEMILINEAR_MODES = (
   (0.55, 2, 3),
   (0.35, 3, 2),
 )
-const SEMILINEAR_BETA = 1.0
-const SEMILINEAR_BETAS = (1.0, 10.0, 100.0)
+const SEMILINEAR_BETAS = (1.0, 100.0)
 
 semilinear_exact(x) = sum(
   coefficient * sinpi(kx * x[1]) * sinpi(ky * x[2]) for
@@ -25,9 +24,6 @@ semilinear_minus_laplacian(x) = pi^2 * sum(
   coefficient * (kx^2 + ky^2) * sinpi(kx * x[1]) * sinpi(ky * x[2]) for
   (coefficient, kx, ky) in SEMILINEAR_MODES
 )
-semilinear_forcing(x) =
-  semilinear_minus_laplacian(x) + SEMILINEAR_BETA * semilinear_exact(x)^3
-
 function run_study11()
   files = (
     "study11_semilinear_conv.csv",
@@ -148,10 +144,9 @@ function run_study11()
     dofspar,
     _,
     _,
-    stiffness,
+    _,
     initial,
-    core_dofspar,
-    mass = FEMDiscretizations.FEM_SemilinearPoisson(
+    core_dofspar = FEMDiscretizations.FEM_SemilinearPoisson(
       N,
       m;
       potential=s -> beta * s^4 / 4,
@@ -161,7 +156,6 @@ function run_study11()
       overlap=overlap,
       quadrature_degree=8,
       initial_guess=x -> 0.0,
-      return_mass_matrix=true,
     )
     @info "  ndofs = $ndofs, core_ndofs = $(length(core_dofspar))"
     energy = Energies.NonlinearEnergy(
@@ -173,17 +167,7 @@ function run_study11()
     )
 
     for method in SEMILINEAR_SOURCE_METHODS
-      @time result = if method == :nonlinear_as
-        nonlinear_source_schwarz_baseline(
-          energy,
-          dofspar;
-          method=method,
-          core_subdomains=core_dofspar,
-          u0=initial,
-          maxiter=maxiter,
-          tolerance=tolerance,
-        )
-      elseif method == :anderson_ras
+      @time result = if method == :anderson_ras
         nonlinear_source_anderson_ras(
           energy,
           dofspar,
@@ -200,15 +184,6 @@ function run_study11()
           u0=initial,
           maxiter=maxiter,
           tolerance=tolerance,
-        )
-      elseif method == :newton_pcg_as_8
-        nonlinear_source_newton_pcg_as(
-          energy,
-          dofspar;
-          u0=initial,
-          maxiter=maxiter,
-          tolerance=tolerance,
-          inner_iterations=8,
         )
       elseif method == :newton_pcg_as_4
         nonlinear_source_newton_pcg_as(
@@ -236,40 +211,6 @@ function run_study11()
           maxiter=maxiter,
           tolerance=tolerance,
           inner_iterations=1,
-        )
-      elseif method == :energy_imex_pcg_as
-        nonlinear_source_energy_imex_pcg_as(
-          energy,
-          stiffness,
-          mass,
-          dofspar;
-          u0=initial,
-          maxiter=maxiter,
-          tolerance=tolerance,
-          timestep=1.0,
-          inner_maxiter=SMALL ? 30 : 200,
-          inner_relative_tolerance=1e-10,
-        )
-      elseif method == :raspen
-        nonlinear_source_raspen(
-          energy,
-          dofspar,
-          core_dofspar;
-          u0=initial,
-          maxiter=maxiter,
-          tolerance=tolerance,
-          inner_maxiter=SMALL ? 8 : 40,
-          inner_relative_tolerance=1e-6,
-        )
-      elseif method == :aspin
-        nonlinear_source_aspin(
-          energy,
-          dofspar;
-          u0=initial,
-          maxiter=maxiter,
-          tolerance=tolerance,
-          inner_maxiter=SMALL ? 8 : 40,
-          inner_relative_tolerance=1e-6,
         )
       elseif method == :var_dd
         nonlinear_source_vardd(

@@ -47,28 +47,3 @@ function quadratic_model(e::AbstractEnergy{T}, u::AbstractVector{T}) where {T}
   c = energy(e, u) + T(0.5) * dot(u, Au) - dot(g, u)
   return QuadraticEnergy(A, b; c=c)
 end
-
-"""
-    LinearRegressionEnergy(A, b)
-
-Least-squares energy `E(x) = norm(A*x - b)^2`.
-"""
-struct LinearRegressionEnergy{T,M<:AbstractMatrix{T},V<:AbstractVector{T}} <:
-       AbstractEnergy{T}
-  A::M
-  b::V
-end
-
-function energy(e::LinearRegressionEnergy{T}, x::AbstractVector{T}) where {T}
-  residual = e.A * x .- e.b
-  return dot(residual, residual)
-end
-
-dimension(e::LinearRegressionEnergy) = size(e.A, 2)
-
-function gradient(e::LinearRegressionEnergy{T}, x::AbstractVector{T}) where {T}
-  return 2 .* (e.A' * (e.A * x .- e.b))
-end
-
-hessian(e::LinearRegressionEnergy) = 2 .* (e.A' * e.A)
-hessian(e::LinearRegressionEnergy, x::AbstractVector) = hessian(e)

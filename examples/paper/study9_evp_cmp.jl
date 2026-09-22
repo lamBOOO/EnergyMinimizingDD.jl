@@ -33,46 +33,11 @@ function append_evp_history!(rows, method, m, lambda_reference, result)
   end
 end
 
-function append_evp_diagnostics!(local_rows, combination_rows, inner_rows, method, m, result)
-  for stat in result.local_stats
-    push!(local_rows.method, string(method))
-    push!(local_rows.m, m)
-    push!(local_rows.outer_iteration, stat.outer_iteration)
-    push!(local_rows.subdomain, stat.subdomain)
-    push!(local_rows.dimension, stat.dimension)
-    push!(local_rows.iterations, stat.iterations)
-    push!(local_rows.converged, Int(stat.converged))
-    push!(local_rows.residual, stat.residual)
-    push!(local_rows.k_nnz, stat.k_nnz)
-    push!(local_rows.factor_nnz, stat.factor_nnz)
-  end
-  for stat in result.combination_stats
-    push!(combination_rows.method, string(method))
-    push!(combination_rows.m, m)
-    push!(combination_rows.outer_iteration, stat.outer_iteration)
-    push!(combination_rows.basis_columns, stat.basis_columns)
-    push!(combination_rows.effective_rank, stat.effective_rank)
-    push!(combination_rows.mass_condition, stat.mass_condition)
-    push!(combination_rows.relative_gap, stat.relative_gap)
-  end
-  for stat in result.inner_stats
-    push!(inner_rows.method, string(method))
-    push!(inner_rows.m, m)
-    push!(inner_rows.outer_iteration, stat.outer_iteration)
-    push!(inner_rows.iterations, stat.iterations)
-    push!(inner_rows.converged, Int(stat.converged))
-    push!(inner_rows.relative_residual, stat.relative_residual)
-  end
-end
-
 function run_study9()
   files = (
     "study9_evp_cmp.csv",
     "study9_evp_solution.csv",
     "study9_partitions.csv",
-    "study9_evp_local_stats.csv",
-    "study9_evp_combination_stats.csv",
-    "study9_evp_inner_stats.csv",
   )
   if !needs_run(files...)
     println("study9: cached, skipping")
@@ -93,19 +58,6 @@ function run_study9()
     local_eigen_batches=Int[], linear_as_batches=Int[],
     local_iterations_critical=Int[], local_iterations_total=Int[],
     global_k_products=Int[], global_m_products=Int[], inner_iterations=Int[],
-  )
-  local_rows = (
-    method=String[], m=Int[], outer_iteration=Int[], subdomain=Int[],
-    dimension=Int[], iterations=Int[], converged=Int[], residual=Float64[],
-    k_nnz=Int[], factor_nnz=Int[],
-  )
-  combination_rows = (
-    method=String[], m=Int[], outer_iteration=Int[], basis_columns=Int[],
-    effective_rank=Int[], mass_condition=Float64[], relative_gap=Float64[],
-  )
-  inner_rows = (
-    method=String[], m=Int[], outer_iteration=Int[], iterations=Int[],
-    converged=Int[], relative_residual=Float64[],
   )
   solution_rows = (N=Int[], idx=Int[], value=Float64[])
   part_rows = (m=Int[], N=Int[], idx=Int[], owner=Int[], mult=Int[])
@@ -153,9 +105,6 @@ function run_study9()
         history_depth=1,
       )
       append_evp_history!(rows, method, m, lambda_reference, result)
-      append_evp_diagnostics!(
-        local_rows, combination_rows, inner_rows, method, m, result
-      )
       terminal = last(result.history)
       @printf(
         "  m=%d, %-22s: %3d outer, relres %.2e, AS batches %d\n",
@@ -170,9 +119,6 @@ function run_study9()
   savetable("study9_evp_cmp.csv", rows)
   savetable("study9_evp_solution.csv", solution_rows)
   savetable("study9_partitions.csv", part_rows)
-  savetable("study9_evp_local_stats.csv", local_rows)
-  savetable("study9_evp_combination_stats.csv", combination_rows)
-  savetable("study9_evp_inner_stats.csv", inner_rows)
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__

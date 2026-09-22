@@ -1,41 +1,27 @@
-# Regenerates the LaTeX tables for the paper from data/*.csv (no solves).
-# Run: julia --project=. examples/paper/tables_all.jl
-# Check: julia --project=. examples/paper/tables_all.jl --check
+# Regenerate the only table included in the final paper.
 
 using CSV
 
 const TABLES_PAPER_DIR = @__DIR__
 const TABLES_DATA_DIR = joinpath(TABLES_PAPER_DIR, "data")
 const TABLE_DIR = joinpath(TABLES_PAPER_DIR, "tables")
-const FIG18_GENERATED_TABLE_FILES = (
+const GENERATED_TABLE_FILES = (
   "fig18_poisson_scaling.csv",
   "fig18_poisson_scaling.tex",
 )
-const FIG12D_GENERATED_TABLE_FILES = (
-  "fig12d_poisson_weak_scaling.csv",
-  "fig12d_poisson_weak_scaling.tex",
-)
-const GENERATED_TABLE_FILES = (
-  FIG18_GENERATED_TABLE_FILES...,
-  FIG12D_GENERATED_TABLE_FILES...,
-)
 
-"Return the terminal parallel local-solve batch count for one Figure 18 curve."
-function fig18_terminal_batches(rows; experiment, regime, method, parameter, value)
+function terminal_batches(rows; experiment, regime, method, parameter, value)
   matches = filter(rows) do row
-    row.experiment == experiment &&
-      row.regime == regime &&
-      row.method == method &&
-      getproperty(row, parameter) == value
+    row.experiment == experiment && row.regime == regime &&
+      row.method == method && getproperty(row, parameter) == value
   end
   isempty(matches) && error(
-    "missing Figure 18 data for " *
-    "($experiment, $regime, $method, $parameter=$value)",
+    "missing scaling data for ($experiment, $regime, $method, $parameter=$value)"
   )
   terminal = argmax(row -> row.local_batches, matches)
   terminal.relative_residual <= 1e-10 || error(
-    "Figure 18 curve did not reach the requested tolerance: " *
-    "($(terminal.relative_residual) > 1e-10)",
+    "curve did not reach the requested tolerance: " *
+    "$(terminal.relative_residual) > 1e-10"
   )
   return terminal.local_batches
 end
@@ -45,8 +31,7 @@ function make_fig18_table(;
   data_file=joinpath(TABLES_DATA_DIR, "study8_sensitivity.csv"),
 )
   isfile(data_file) || error(
-    "missing Study 8 source data at $data_file; run the Study 8 sensitivity " *
-    "experiment before generating or checking the table",
+    "missing $data_file; run study8_linear_sensitivity.jl first"
   )
   mkpath(output_dir)
   rows = collect(CSV.File(data_file))
@@ -59,76 +44,55 @@ function make_fig18_table(;
     ("\\(\\mathrm{GMRES{+}RAS}\\)", "gmres_ras"),
   )
   mesh_sizes = (20, 40, 60, 80, 100, 120)
-  overlap_layers = (1, 2, 4, 8)
-
+  overlaps = (1, 2, 4, 8)
   columns = Dict{Symbol,Vector{String}}(:method => String[])
   for N in mesh_sizes
     columns[Symbol("fixed_layers_h$N")] = String[]
     columns[Symbol("fixed_ratio_h$N")] = String[]
   end
-  for overlap in overlap_layers
+  for overlap in overlaps
     columns[Symbol("overlap$overlap")] = String[]
   end
-
   for (label, method) in methods
     push!(columns[:method], label)
     for N in mesh_sizes
-      fixed_layers = fig18_terminal_batches(
-        rows;
-        experiment="mesh",
-        regime="fixed_layers",
-        method,
-        parameter=:N,
-        value=N,
-      )
-      fixed_ratio = fig18_terminal_batches(
-        rows;
-        experiment="mesh",
-        regime="fixed_delta_over_H",
-        method,
-        parameter=:N,
-        value=N,
-      )
-      push!(columns[Symbol("fixed_layers_h$N")], string(fixed_layers))
-      push!(columns[Symbol("fixed_ratio_h$N")], string(fixed_ratio))
+      push!(columns[Symbol("fixed_layers_h$N")], string(terminal_batches(
+        rows; experiment="mesh", regime="fixed_layers", method,
+        parameter=:N, value=N,
+      )))
+      push!(columns[Symbol("fixed_ratio_h$N")], string(terminal_batches(
+        rows; experiment="mesh", regime="fixed_delta_over_H", method,
+        parameter=:N, value=N,
+      )))
     end
-    for overlap in overlap_layers
-      batches = fig18_terminal_batches(
-        rows;
-        experiment="overlap",
-        regime="layer_sweep",
-        method,
-        parameter=:overlap,
-        value=overlap,
-      )
-      push!(columns[Symbol("overlap$overlap")], string(batches))
+    for overlap in overlaps
+      push!(columns[Symbol("overlap$overlap")], string(terminal_batches(
+        rows; experiment="overlap", regime="layer_sweep", method,
+        parameter=:overlap, value=overlap,
+      )))
     end
   end
-
-  ordered = (; method=columns[:method],
+  ordered = (;
+    method=columns[:method],
     (Symbol("fixed_layers_h$N") => columns[Symbol("fixed_layers_h$N")]
       for N in mesh_sizes)...,
     (Symbol("fixed_ratio_h$N") => columns[Symbol("fixed_ratio_h$N")]
       for N in mesh_sizes)...,
     (Symbol("overlap$overlap") => columns[Symbol("overlap$overlap")]
-      for overlap in overlap_layers)...,
+      for overlap in overlaps)...,
   )
-  data_name = "fig18_poisson_scaling.csv"
-  CSV.write(joinpath(output_dir, data_name), ordered)
-
+  CSV.write(joinpath(output_dir, GENERATED_TABLE_FILES[1]), ordered)
   latex = raw"""% Generated by examples/paper/tables_all.jl; do not edit by hand.
 % Requires booktabs, graphicx, and pgfplotstable.
-% Override \varddtablepath before inputting this file if the table data live
-% somewhere else relative to the main LaTeX document.
 \providecommand{\varddtablepath}{./examples/paper/tables}
 \begin{table*}[t]
   \footnotesize
   \centering
   \caption{%
     Parallel local-solve batches required to reduce the relative residual below
-    \(10^{-10}\) for the Poisson problem. The first two column
-    groups refine the mesh for \(m=4\); the third varies the overlap for
-    \(1/h=64\) and \(m=4\). Here \(q\) denotes the EMDD history-space dimension.
+    \(10^{-10}\) for the Poisson problem. The first two column groups refine
+    the mesh for \(m=4\); the third varies the overlap for \(1/h=64\) and
+    \(m=4\). Here \(q\) denotes the EMDD history-space dimension.
   }
   \label{tab:poisson-scaling}
   \resizebox{\textwidth}{!}{%
@@ -144,13 +108,10 @@ function make_fig18_table(;
         \toprule
         & \multicolumn{6}{c}{\makebox[0pt]{discretization \(1/h\) (\(\ell=2\))}}
         & \multicolumn{6}{c}{\makebox[0pt]{discretization \(1/h\) (\(\delta/H\approx0.1\))}}
-        % One header row per column group: these labels sit in zero-width
-        % boxes, so a second row of group titles overflowed into its neighbour.
         & \multicolumn{4}{c}{\makebox[0pt]{layers \(\ell\) (\(1/h=64\))}} \\
         \cmidrule(lr){2-7} \cmidrule(lr){8-13} \cmidrule(lr){14-17}
         method & 20 & 40 & 60 & 80 & 100 & 120
-        & 20 & 40 & 60 & 80 & 100 & 120
-        & 1 & 2 & 4 & 8 \\
+        & 20 & 40 & 60 & 80 & 100 & 120 & 1 & 2 & 4 & 8 \\
       },
       after row=\midrule
     },
@@ -161,155 +122,33 @@ function make_fig18_table(;
   }
 \end{table*}
 """
-  write(joinpath(output_dir, "fig18_poisson_scaling.tex"), latex)
+  write(joinpath(output_dir, GENERATED_TABLE_FILES[2]), latex)
   println("saved tables/fig18_poisson_scaling.{csv,tex}")
-  return nothing
-end
-
-"Return the terminal converged weak-scaling row for one method and subdomain count."
-function weak_scaling_terminal(rows; method, m)
-  matches = filter(rows) do row
-    return row.method == method && row.m == m
-  end
-  isempty(matches) && error("missing weak-scaling data for ($method, m=$m)")
-  terminal = argmax(row -> row.local_batches, matches)
-  terminal.relative_residual <= 1e-10 || error(
-    "weak-scaling curve did not reach the requested tolerance: " *
-    "($(terminal.relative_residual) > 1e-10)",
-  )
-  return terminal
-end
-
-function make_fig12d_table(;
-  output_dir=TABLE_DIR,
-  data_file=joinpath(TABLES_DATA_DIR, "study8_weak_scaling.csv"),
-)
-  isfile(data_file) || error(
-    "missing Study 8 weak-scaling data at $data_file; run the weak-scaling " *
-    "experiment before generating or checking the table",
-  )
-  mkpath(output_dir)
-  rows = collect(CSV.File(data_file))
-  methods = (
-    ("\\(\\mathrm{EMDD}\\;(q=1)\\)", "none", "emdd_q1"),
-    ("", "multiplicity PoU", "emdd_q1_multiplicity"),
-    ("", "harmonic Nicolaides", "emdd_q1_nicolaides"),
-    ("\\(\\mathrm{REMDD}\\;(q=1)\\)", "none", "remdd_q1"),
-    ("", "multiplicity PoU", "remdd_q1_multiplicity"),
-    ("", "harmonic Nicolaides", "remdd_q1_nicolaides"),
-    ("\\(\\mathrm{EMDD}\\;(q=2)\\)", "none", "emdd_q2"),
-    ("", "multiplicity PoU", "emdd_q2_multiplicity"),
-    ("", "harmonic Nicolaides", "emdd_q2_nicolaides"),
-    ("\\(\\mathrm{REMDD}\\;(q=2)\\)", "none", "remdd_q2"),
-    ("", "multiplicity PoU", "remdd_q2_multiplicity"),
-    ("", "harmonic Nicolaides", "remdd_q2_nicolaides"),
-  )
-  subdomain_counts = (4, 16, 64)
-  columns = Dict{Symbol,Vector{String}}(
-    :method => String[], :coarse => String[]
-  )
-  for m in subdomain_counts
-    columns[Symbol("m$m")] = String[]
-  end
-
-  for (label, coarse, method) in methods
-    push!(columns[:method], label)
-    push!(columns[:coarse], coarse)
-    for m in subdomain_counts
-      terminal = weak_scaling_terminal(rows; method, m)
-      push!(columns[Symbol("m$m")], string(terminal.local_batches))
-    end
-  end
-
-  ordered = (;
-    method=columns[:method],
-    coarse=columns[:coarse],
-    (Symbol("m$m") => columns[Symbol("m$m")] for m in subdomain_counts)...,
-  )
-  data_name = "fig12d_poisson_weak_scaling.csv"
-  CSV.write(joinpath(output_dir, data_name), ordered)
-
-  latex = raw"""% Generated by examples/paper/tables_all.jl; do not edit by hand.
-% Requires booktabs and pgfplotstable.
-% Override \varddtablepath before inputting this file if the table data live
-% somewhere else relative to the main LaTeX document.
-\providecommand{\varddtablepath}{./examples/paper/tables}
-\begin{table}[t]
-  \footnotesize
-  \centering
-  \caption{%
-    Parallel local-solve batches required to reduce the relative residual below
-    \(10^{-10}\) in the Poisson weak-scaling experiment of Figure~12d. Each
-    subdomain has \(10\times10\) cells and two overlap layers, so \(H/h=10\)
-    and \(H/\delta=5\) remain fixed. The multiplicity columns are included as
-    a non-harmonic coarse-space comparator.
-  }
-  \label{tab:poisson-weak-scaling}
-  \pgfplotstabletypeset[
-    col sep=comma,
-    columns={method,coarse,m4,m16,m64},
-    every head row/.style={
-      output empty row,
-      before row={
-        \toprule
-        method & coarse space & \multicolumn{3}{c}{subdomains, \(m\)} \\
-        \cmidrule(lr){3-5}
-        & & 4 & 16 & 64 \\
-      },
-      after row=\midrule
-    },
-    every last row/.style={after row=\bottomrule},
-    every column/.style={string type,column type={r}},
-    columns/method/.style={string type,column type={l}},
-    columns/coarse/.style={string type,column type={l}},
-  ]{\varddtablepath/fig12d_poisson_weak_scaling.csv}
-\end{table}
-"""
-  write(joinpath(output_dir, "fig12d_poisson_weak_scaling.tex"), latex)
-  println("saved tables/fig12d_poisson_weak_scaling.{csv,tex}")
-  return nothing
 end
 
 function check_generated_tables(;
   data_file=joinpath(TABLES_DATA_DIR, "study8_sensitivity.csv"),
-  weak_data_file=nothing,
   committed_dir=TABLE_DIR,
 )
   stale = String[]
-  generated_files = isnothing(weak_data_file) ?
-    collect(FIG18_GENERATED_TABLE_FILES) : collect(GENERATED_TABLE_FILES)
   mktempdir() do temporary_dir
     make_fig18_table(; output_dir=temporary_dir, data_file)
-    if !isnothing(weak_data_file)
-      make_fig12d_table(; output_dir=temporary_dir, data_file=weak_data_file)
-    end
-    for name in generated_files
+    for name in GENERATED_TABLE_FILES
       generated = joinpath(temporary_dir, name)
       committed = joinpath(committed_dir, name)
-      if !isfile(committed) || read(generated) != read(committed)
-        push!(stale, name)
-      end
+      (!isfile(committed) || read(generated) != read(committed)) && push!(stale, name)
     end
   end
   isempty(stale) || error(
-    "generated paper tables are stale: $(join(stale, ", ")). " *
-    "Run `julia --project=. examples/paper/tables_all.jl` and commit the results.",
+    "generated paper tables are stale: $(join(stale, ", "))"
   )
   println("generated paper tables are up to date")
-  return nothing
 end
 
 function main(args=ARGS)
-  weak_data_file = joinpath(TABLES_DATA_DIR, "study8_weak_scaling.csv")
-  if isempty(args)
-    make_fig18_table()
-    make_fig12d_table(; data_file=weak_data_file)
-  elseif args == ["--check"]
-    check_generated_tables(; weak_data_file)
-  else
-    error("usage: julia --project=. examples/paper/tables_all.jl [--check]")
-  end
-  return nothing
+  isempty(args) ? make_fig18_table() :
+  args == ["--check"] ? check_generated_tables() :
+  error("usage: julia --project=. examples/paper/tables_all.jl [--check]")
 end
 
 abspath(PROGRAM_FILE) == abspath(@__FILE__) && main()

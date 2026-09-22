@@ -7,7 +7,7 @@ isdefined(Main, :PAPER_COMMON) || include("common.jl")
 isdefined(Main, :SEMILINEAR_SOURCE_METHODS) ||
   include("nonlinear_source_common.jl")
 isdefined(Main, :REACTION_AMPLITUDE) ||
-  include(joinpath(@__DIR__, "..", "semilinear_l_shape_section_61.jl"))
+  include("lshape_problem.jl")
 
 const LSHAPE_FIG17B_METHODS = (
   :var_dd,
@@ -19,7 +19,6 @@ const LSHAPE_FIG17B_METHODS = (
   :newton_pcg_as_1,
   :newton_pcg_as_2,
   :newton_pcg_as_4,
-  :newton_pcg_as_8,
 )
 const LSHAPE_NONLINEARITY_CASES = (
   (id="exponential", beta=12.0),
@@ -47,7 +46,7 @@ function lshape_fig17b_method(
       tolerance=tolerance,
     )
   elseif method in (
-    :newton_pcg_as_1, :newton_pcg_as_2, :newton_pcg_as_4, :newton_pcg_as_8
+    :newton_pcg_as_1, :newton_pcg_as_2, :newton_pcg_as_4
   )
     inner_iterations = parse(Int, split(string(method), "_")[end])
     return nonlinear_source_newton_pcg_as(

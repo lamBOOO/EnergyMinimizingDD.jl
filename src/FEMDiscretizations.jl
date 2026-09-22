@@ -5,10 +5,6 @@ using SparseArrays
 using Gridap
 using GridapDistributed
 using Metis
-using IterativeSolvers
-using Arpack
-using Printf
-using Random
 
 function FEM_Schroedinger(
   N::Int,

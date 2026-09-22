@@ -1,46 +1,26 @@
-# Driver for the full Section 4 numerical results suite.
+# Driver for every numerical result in the final paper.
 #
-#   julia --project=. examples/paper/run_all.jl          # full run (~30-60 min)
-#   SMALL=1 julia --project=. examples/paper/run_all.jl  # smoke test (~2 min)
+#   julia --project=. examples/paper/run_all.jl          # publication run
+#   SMALL=1 julia --project=. examples/paper/run_all.jl  # smoke test
 #   FORCE=1 ...                                          # ignore cached CSVs
 #
 # Studies write CSVs into data/; figures are then regenerated from the CSVs.
 
 include("common.jl")
-include("study1_setup.jl")
-include("study2_evp.jl")
-include("study3_robustness.jl")
-include("study4_poisson.jl")
-include("study6_heat.jl")
-include("study7_local3d.jl")
 include("study8_linear_cmp.jl")
 include("study8_linear_sensitivity.jl")
-include("study8_weak_scaling.jl")
 include("study9_evp_cmp.jl")
-include("study9_evp_sensitivity.jl")
 include("study10_gp.jl")
 include("study11_semilinear.jl")
 include("study11b_semilinear_l_shape.jl")
-include("study11_semilinear_sensitivity.jl")
-include("study12_variants.jl")
 
 t0 = time()
-run_study1()
-run_study2()
-run_study3()
-run_study4()
-run_study6()
-run_study7()
 run_study8()
 run_study8_sensitivity()
-run_study8_weak_scaling()
 run_study9()
-run_study9_sensitivity()
 run_study10()
 run_study11()
 run_study11b()
-run_study11_sensitivity()
-run_study12()
 include("plots_all.jl")
 make_all_figures()
 if SMALL
@@ -48,6 +28,5 @@ if SMALL
 else
   include("tables_all.jl")
   make_fig18_table()
-  make_fig12d_table()
 end
 @printf("run_all: finished in %.1f min\n", (time() - t0) / 60)

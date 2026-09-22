@@ -15,11 +15,9 @@ using EnergyMinimizingDD.Solvers
 using Gridap
 using GridapDistributed
 using Metis
-using Arpack
 using LinearAlgebra
 using SparseArrays
 using Random
-using Statistics
 using Printf
 using CSV
 using Tables
@@ -40,18 +38,6 @@ needs_run(files...) = FORCE || !all(f -> isfile(datafile(f)), files)
 
 savetable(name, tbl) = CSV.write(datafile(name), tbl)
 loadtable(name) = Tables.columntable(CSV.File(datafile(name)))
-
-"""
-    timed_median(f; repeats = 3)
-
-Wall-clock timing of `f()`: one warm-up call (also covers compilation),
-then the median over `repeats` timed calls. Returns (median_seconds, result).
-"""
-function timed_median(f; repeats = 3)
-  result = f()  # warm-up
-  ts = [(@elapsed f()) for _ = 1:repeats]
-  return median(ts), result
-end
 
 # ---------------------------------------------------------------------------
 # Problem setup helpers
@@ -139,37 +125,6 @@ end
 function metis_cell_partition(N, m, overlap)
   return cell_partition_overlap(N, m, overlap, metis_cell_owners(N, m))
 end
-
-"Reference lowest eigenvalue of the discrete pencil (K, M) via Arpack."
-function reference_lambda(K, M)
-  vals, _ = Arpack.eigs(K, M; nev = 1, which = :SM, maxiter = 1000)
-  return real(vals[1])
-end
-
-"Reference lowest eigenvalue of the discrete pencil (K, M) via dense LAPACK."
-function dense_reference_lambda(K, M)
-  vals = eigen(Symmetric(Matrix(K)), Symmetric(Matrix(M))).values
-  return minimum(vals)
-end
-
-"Free dofs of the Q1 space on the N×N Cartesian mesh are the interior nodes
-in lexicographic (x1-fastest) ordering; reshape accordingly for heatmaps."
-field_matrix(u, N) = Matrix(reshape(u, N - 1, N - 1)')
-
-interior_nodes(N) = range(1 / N, 1 - 1 / N; length = N - 1)
-
-all_nodes(N) = range(0, 1; length = N + 1)
-
-"Pad a free-dof field with its homogeneous Dirichlet boundary values (zero)
-so surface/heatmap plots extend to the actual domain boundary."
-function field_matrix_with_bc(u, N)
-  Z = zeros(N + 1, N + 1)
-  Z[2:N, 2:N] .= field_matrix(u, N)
-  return Z
-end
-
-"Floor values for semilog plots (histories hit machine precision)."
-logfloor(v; floor = 1e-16) = max.(v, floor)
 
 # ---------------------------------------------------------------------------
 # Schwarz building blocks (baselines for studies 8/9), sharing the var_dd
