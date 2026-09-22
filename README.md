@@ -1,63 +1,59 @@
-# EnergyMinimizingDD.jl — paper reproducibility code
+# EnergyMinimizingDD.jl
 
-This repository contains the Julia implementation and numerical experiments
-used in the accompanying paper on energy-minimizing domain decomposition
-(EMDD). It has intentionally been reduced to the code needed to reproduce the
-five published figures and the linear-source scaling table.
+<p align="center">
+  <strong>Energy-minimizing domain decomposition for finite-element problems in Julia</strong>
+</p>
 
-## Requirements
+<p align="center">
+  <a href="https://github.com/lamBOOO/EnergyMinimizingDD.jl/actions/workflows/ci.yml"><img src="https://github.com/lamBOOO/EnergyMinimizingDD.jl/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
+  <a href="https://julialang.org/"><img src="https://img.shields.io/badge/Julia-1.10%2B-9558B2?logo=julia&logoColor=white" alt="Julia 1.10 or newer"></a>
+  <a href="https://lambooo.github.io/EnergyMinimizingDD.jl/dev/"><img src="https://img.shields.io/badge/docs-dev-2B6CB0" alt="Documentation"></a>
+  <a href="#project-status"><img src="https://img.shields.io/badge/status-experimental-EA8C00" alt="Experimental status"></a>
+</p>
 
-- Julia 1.10 or newer
-- a LaTeX installation only if the generated table is compiled with the paper
+EnergyMinimizingDD.jl implements energy-minimizing domain-decomposition methods for finite-element problems. Each iteration solves independent variational problems on overlapping local spaces and then recombines the resulting candidates through a small global minimization. A common solver interface supports quadratic source problems, generalized eigenproblems, semilinear energies, and Gross–Pitaevskii models.
 
-Instantiate the package environment from the repository root:
+The figure visualizes one computed iteration of the Poisson example below, starting from an asymmetric initial field. The middle panels show the local corrections $\mathsf y_i^{(0)}-\mathsf u^{(0)}$; the white contours identify the degrees of freedom in each overlapping subspace. The displayed energy values are evaluated from the actual iterates. The figure can be reproduced with [`docs/generate_readme_figures.jl`](docs/generate_readme_figures.jl).
 
-```bash
-julia --project=. -e 'using Pkg; Pkg.instantiate()'
+## Quick start: Poisson's equation
+
+Install the current development version directly from GitHub:
+
+```julia
+import Pkg
+Pkg.add(url="https://github.com/lamBOOO/EnergyMinimizingDD.jl.git")
 ```
 
-## Reproduce every result
+The following example solves
 
-```bash
-julia --project=. examples/paper/run_all.jl
+$$
+-\Delta u = 1 \quad \text{in } (0,1)^2,
+\qquad u = 0 \quad \text{on } \partial(0,1)^2,
+$$
+
+with four overlapping subdomains:
+
+```julia
+using EnergyMinimizingDD, LinearAlgebra
+
+const FEM = EnergyMinimizingDD.FEMDiscretizations
+const E = EnergyMinimizingDD.Energies
+const S = EnergyMinimizingDD.Solvers
+
+A, _, b, subdomains, _ = FEM.FEM_Schroedinger(
+    16, 4; P=x -> 0.0, f=x -> 1.0, overlap=2,
+    partitioning=:cartesian,
+)
+energy = E.QuadraticEnergy(A, b)
+u, _, _, _, residuals = S.var_dd(
+    energy, subdomains; maxiter=50, tol=1e-8, verbose=false,
+)
+
+@show length(residuals) norm(A * u - b)
+# length(residuals) = 28
+# norm(A * u - b) = 5.337471100984455e-9
 ```
 
-The study scripts cache raw CSV data in `examples/paper/data/`. Figures are
-written as PDF and PNG files to `examples/paper/figures/`, and the generated
-table is written to `examples/paper/tables/`.
+## Development notice
 
-Set `FORCE=1` to recompute cached experiments. A small, inexpensive smoke run
-is available for installation checks:
-
-```bash
-SMALL=1 FORCE=1 julia --project=. examples/paper/run_all.jl
-```
-
-The small run deliberately skips the publication table because that table
-requires the full parameter grid.
-
-## Paper outputs and source scripts
-
-| Paper output | Experiment |
-|---|---|
-| Fig. 12b, linear source problems | `study8_linear_cmp.jl` |
-| Table 18, mesh/overlap sensitivity | `study8_linear_sensitivity.jl` |
-| Fig. 13, linear eigenproblem | `study9_evp_cmp.jl` |
-| Fig. 14b, Gross–Pitaevskii problem | `study10_gp.jl` |
-| Fig. 17b, semilinear square problem | `study11_semilinear.jl` |
-| Fig. 17b, semilinear L-domain problem | `study11b_semilinear_l_shape.jl` |
-
-All paths in the table are relative to `examples/paper/`. The shared numerical
-baselines are in `common.jl`, `evp_common.jl`, and
-`nonlinear_source_common.jl`. Plotting and table generation are separated from
-the expensive solves in `plots_all.jl` and `tables_all.jl`.
-
-## Run checks
-
-```bash
-julia --project=. -e 'using Pkg; Pkg.test()'
-julia --project=. examples/paper/tables_all.jl --check
-```
-
-Every Julia command should be run with `--project=.` so that it uses the
-repository environment.
+AI/LLM-based tools are used to assist with coding in this repository.
