@@ -3202,6 +3202,117 @@ function fig27_evp_local_work()
 end
 
 # ---------------------------------------------------------------------------
+# Fig 29: Gross--Pitaevskii history-depth sensitivity
+# ---------------------------------------------------------------------------
+
+const GP_HISTORY_METHODS = ("gp_additive", "gp_projected_qemdd")
+
+const GP_HISTORY_LABELS = Dict(
+  "gp_additive" => "additive GP-EMDD",
+  "gp_projected_qemdd" => "projected qEMDD",
+)
+
+const GP_HISTORY_MARKERS =
+  Dict("gp_additive" => :hexagon, "gp_projected_qemdd" => :diamond)
+
+function fig29_gp_history()
+  tbl = loadtable("study10_gp_sensitivity.csv")
+  methods = collect(GP_HISTORY_METHODS)
+  qs = sort(unique(tbl.q))
+  colors = tab10_colors(length(methods))
+  fig = Figure(size = (1120, 400))
+  Label(
+    fig[0, 1:3],
+    "One previous iterate supplies the useful GP history enrichment";
+    fontsize = 22,
+    font = :bold,
+  )
+
+  ax_iterations = Axis(
+    fig[1, 1];
+    xlabel = "local subspace dimension q",
+    ylabel = "outer sweeps to tolerance",
+    title = "cost to reach ‖r‖ ≤ 10⁻⁶",
+    xticks = qs,
+  )
+  for (index, method) in enumerate(methods)
+    iterations = Float64[]
+    unconverged = Int[]
+    for q in qs
+      mask = (tbl.method .== method) .& (tbl.q .== q)
+      row = findfirst(mask)
+      push!(iterations, tbl.outer_iterations[row])
+      tbl.converged[row] == 1 || push!(unconverged, q)
+    end
+    add_series!(
+      ax_iterations,
+      qs,
+      iterations;
+      color = colors[index],
+      marker = GP_HISTORY_MARKERS[method],
+    )
+    if !isempty(unconverged)
+      scatter!(
+        ax_iterations,
+        unconverged,
+        iterations[indexin(unconverged, qs)];
+        color = :black,
+        marker = :xcross,
+        markersize = 14,
+      )
+    end
+  end
+  vlines!(ax_iterations, [2]; color = (:black, 0.45), linestyle = :dash)
+
+  # Residual histories per depth: the enrichment changes the rate, not only
+  # the terminal sweep count.
+  depth_colors = tab10_colors(length(qs))
+  for (column, method) in enumerate(methods)
+    ax = Axis(
+      fig[1, column+1];
+      xlabel = "outer sweep k",
+      ylabel = column == 1 ? "residual norm ‖r(uₖ)‖" : "",
+      yscale = log10,
+      title = GP_HISTORY_LABELS[method],
+    )
+    for (index, q) in enumerate(qs)
+      mask = (tbl.method .== method) .& (tbl.q .== q) .& (tbl.resnorm .> 0)
+      add_series!(
+        ax,
+        pick(tbl, :iteration, mask),
+        pick(tbl, :resnorm, mask);
+        color = depth_colors[index],
+        marker = :circle,
+        markersize = 5,
+      )
+    end
+    hlines!(ax, [1e-6]; color = (:black, 0.45), linestyle = :dash)
+  end
+
+  Legend(
+    fig[2, 1],
+    legend_line_marker_elements(methods, GP_HISTORY_MARKERS; colors),
+    [GP_HISTORY_LABELS[method] for method in methods];
+    orientation = :horizontal,
+    nbanks = 2,
+  )
+  Legend(
+    fig[2, 2:3],
+    legend_line_marker_elements(
+      string.(qs),
+      Dict(string(q) => :circle for q in qs);
+      colors = depth_colors,
+      markersizes = fill(5, length(qs)),
+    ),
+    ["q = $q" for q in qs];
+    orientation = :horizontal,
+    nbanks = 1,
+  )
+  rowgap!(fig.layout, 8)
+  return savefigs(fig, "fig29_gp_history")
+end
+
+# ---------------------------------------------------------------------------
 # Fig 28: compact paper figure comparing variants of the method
 # ---------------------------------------------------------------------------
 function fig28_method_variants()
@@ -3308,6 +3419,7 @@ function make_all_figures()
   fig26_evp_history()
   fig27_evp_local_work()
   fig28_method_variants()
+  fig29_gp_history()
   println("plots: done -> $(FIG_DIR)")
 end
 
