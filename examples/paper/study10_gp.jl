@@ -36,9 +36,11 @@ function gp_history_entry(e, u, solves)
 end
 
 function gp_var_dd_history(e, dofs, u0; maxiter, tol, kwargs...)
-  solution, _, energies, iterates, residuals = Solvers.var_dd(
+  result = Solvers.var_dd(
     e, dofs; u0, maxiter, tol, verbose=false, kwargs...
   )
+  solution, energies = result.u, result.energy_history
+  iterates, residuals = result.iterate_history, result.residual_history
   m = length(dofs)
   history = Tuple{Int,Float64,Float64,Float64,Float64}[]
   for index in eachindex(energies)

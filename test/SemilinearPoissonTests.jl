@@ -170,8 +170,44 @@ const SPSolvers = EnergyMinimizingDD.Solvers
       history_depth=1,
       verbose=false,
     )
-    @test all(diff(result[3]) .<= 1e-11)
-    @test result[5][end] < initial_residual
+    @test all(diff(result.energy_history) .<= 1e-11)
+    @test result.residual_history[end] < initial_residual
+
+    # The result struct must stay internally consistent: histories start at u0,
+    # one residual is recorded per sweep, and a run stopped by maxiter reports
+    # itself as not converged.
+    @test result isa SPSolvers.VarDDResult
+    @test !result.converged
+    @test result.iterations == 4
+    @test length(result.residual_history) == result.iterations
+    @test length(result.energy_history) == result.iterations + 1
+    @test length(result.iterate_history) == result.iterations + 1
+    @test result.iterate_history[1] == initial
+    @test result.iterate_history[end] == result.u
+    @test result.energy == result.energy_history[end]
+    @test SPEnergies.energy(energy, result.u) ≈ result.energy
+    @test isnothing(result.local_update_history)
+    @test occursin("not converged", sprint(show, result))
+
+    converged_result = SPSolvers.var_dd(
+      energy, subdomains; u0=initial, maxiter=100,
+      tol=1e-8 * initial_residual, verbose=false,
+    )
+    @test converged_result.converged
+    @test converged_result.iterations < 100
+    @test converged_result.residual_history[end] < 1e-8 * initial_residual
+    @test !occursin("not converged", sprint(show, converged_result))
+
+    saved = SPSolvers.var_dd(
+      energy, subdomains; u0=initial, maxiter=2, tol=1e-12,
+      save_local_updates=true, verbose=false,
+    )
+    @test length(saved.local_update_history) == saved.iterations
+    @test all(length.(saved.local_update_history) .== length(subdomains))
+    @test all(
+      length(update) == length(initial)
+      for sweep in saved.local_update_history for update in sweep
+    )
   end
 
   @testset "quadratic-model DD sweeps" begin
@@ -211,9 +247,9 @@ const SPSolvers = EnergyMinimizingDD.Solvers
       quadratic_model=true,
       verbose=false,
     )
-    @test result[5][end] < 1e-8 * initial_residual
-    @test all(diff(result[3]) .<= 1e-12)
-    @test hessian_calls[] >= length(result[5])
+    @test result.residual_history[end] < 1e-8 * initial_residual
+    @test all(diff(result.energy_history) .<= 1e-12)
+    @test hessian_calls[] >= length(result.residual_history)
 
     local_iterations = Ref(0)
     SPSolvers.var_dd(
@@ -245,8 +281,8 @@ const SPSolvers = EnergyMinimizingDD.Solvers
       quadratic_model=true,
       verbose=false,
     )
-    @test strong_result[3][end] <= strong_result[3][1]
-    @test strong_result[1] ≈ target atol=1e-8
+    @test strong_result.energy_history[end] <= strong_result.energy_history[1]
+    @test strong_result.u ≈ target atol=1e-8
 
     no_hessian = SPEnergies.NonlinearEnergy(
       "no Hessian",

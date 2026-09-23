@@ -117,13 +117,14 @@ function gmres_ras(K, b, schwarz; maxiter, tol, x_sol=nothing)
 end
 
 function var_dd_linear_history(K, b, dofs; maxiter, tol, x_sol=nothing, kwargs...)
-  _, _, _, iterates, residuals = Solvers.var_dd(
+  result = Solvers.var_dd(
     Energies.QuadraticEnergy(K, b), dofs;
     maxiter,
     tol,
     verbose=false,
     kwargs...,
   )
+  iterates, residuals = result.iterate_history, result.residual_history
   m = length(dofs)
   initial = norm(b - K * ones(length(b)))
   if isnothing(x_sol)

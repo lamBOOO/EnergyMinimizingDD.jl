@@ -1270,7 +1270,50 @@ function reconstruct_implicit!(
 end
 
 """
-    var_dd(e, subdomain_dofs; maxiter=50, tol=1e-8, ...)
+    VarDDResult
+
+Result of [`var_dd`](@ref).
+
+# Fields
+- `u::Vector{Float64}`: final iterate
+- `energy::Float64`: energy of `u`
+- `energy_history::Vector{Float64}`: energies of `u_0, ..., u_k`, so its length
+  is `iterations + 1`
+- `iterate_history::Vector{Vector{Float64}}`: the iterates `u_0, ..., u_k`
+- `residual_history::Vector{Float64}`: residual norms of `u_1, ..., u_k`, so
+  its length is `iterations`
+- `local_update_history::Union{Nothing,Vector{Vector{Vector{Float64}}}}`: for
+  each sweep, the local increments `u_i - u_cur` of every subdomain. This is
+  `nothing` unless `var_dd` was called with `save_local_updates=true`
+- `converged::Bool`: whether the residual tolerance was reached
+- `iterations::Int`: number of outer sweeps performed
+"""
+struct VarDDResult
+  u::Vector{Float64}
+  energy::Float64
+  energy_history::Vector{Float64}
+  iterate_history::Vector{Vector{Float64}}
+  residual_history::Vector{Float64}
+  local_update_history::Union{Nothing,Vector{Vector{Vector{Float64}}}}
+  converged::Bool
+  iterations::Int
+end
+
+function Base.show(io::IO, result::VarDDResult)
+  status = result.converged ? "converged" : "not converged"
+  @printf(
+    io,
+    "VarDDResult(%s after %d iterations, energy = %.6e, residual = %.6e)",
+    status,
+    result.iterations,
+    result.energy,
+    isempty(result.residual_history) ? NaN : last(result.residual_history),
+  )
+  return nothing
+end
+
+"""
+    var_dd(e, subdomain_dofs; maxiter=50, tol=1e-8, ...) -> VarDDResult
 
 Variational domain decomposition algorithm for solving various energy minimization problems.
 
@@ -1304,6 +1347,10 @@ Variational domain decomposition algorithm for solving various energy minimizati
   nonlinear energies it records the reduced dimension, L-BFGS iterations,
   convergence, projected residual, and energy evaluations.
 - `verbose::Bool=true`: Print per-iteration convergence information
+
+# Returns
+A [`VarDDResult`](@ref) holding the final iterate, its energy, the energy,
+iterate and residual histories, and the convergence status.
 """
 function var_dd(
   e::Energies.AbstractEnergy{Float64},
@@ -1319,8 +1366,6 @@ function var_dd(
   local_solve_callback = nothing,
   verbose::Bool = true,
 )
-  # TODO: Make local updates and other returns more elgant with info struct?
-
   history_depth >= 0 ||
     throw(ArgumentError("history_depth must be nonnegative"))
   quadratic_model + projected_gp_model <= 1 || throw(
@@ -1416,11 +1461,16 @@ function var_dd(
     push!(sol_hist, copy(u_new))
     if resnorm < tol
       verbose && println("Converged at iteration $n with energy e = $e_new")
-      if save_local_updates
-        return u_new, e_new, e_hist, sol_hist, resnorm_hist, local_update_hist
-      else
-        return u_new, e_new, e_hist, sol_hist, resnorm_hist
-      end
+      return VarDDResult(
+        u_new,
+        e_new,
+        e_hist,
+        sol_hist,
+        resnorm_hist,
+        save_local_updates ? local_update_hist : nothing,
+        true,
+        n,
+      )
     end
 
     if history_depth > 0
@@ -1432,11 +1482,16 @@ function var_dd(
   end
 
   @warn "Reached maxiter=$maxiter with energy ≈ $e_cur"
-  if save_local_updates
-    return u_cur, e_cur, e_hist, sol_hist, resnorm_hist, local_update_hist
-  else
-    return u_cur, e_cur, e_hist, sol_hist, resnorm_hist
-  end
+  return VarDDResult(
+    u_cur,
+    e_cur,
+    e_hist,
+    sol_hist,
+    resnorm_hist,
+    save_local_updates ? local_update_hist : nothing,
+    false,
+    maxiter,
+  )
 end
 
 end # module

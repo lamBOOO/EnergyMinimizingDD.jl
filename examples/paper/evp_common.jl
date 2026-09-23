@@ -385,7 +385,7 @@ function evp_vardd(
       ),
     )
   end
-  u, _, energies, solutions, _ = Solvers.var_dd(
+  result = Solvers.var_dd(
     Energies.GeneralizedRayleighQuotient(K, M),
     dofspar;
     u0,
@@ -396,6 +396,8 @@ function evp_vardd(
     subspace_callback=combination_callback,
     verbose=false,
   )
+  u, energies, solutions = result.u, result.energy_history,
+    result.iterate_history
   history = NamedTuple[]
   for (index, (lambda, solution)) in enumerate(zip(energies, solutions))
     iteration = index - 1
