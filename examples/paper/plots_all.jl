@@ -37,6 +37,11 @@ set_theme!(
 
 const PALETTE = Makie.wong_colors()
 const MARKERSIZE = 10
+const PAPER_MARKER_STRIDE = 8
+const PAPER_PRIMARY_LINEWIDTH = 2.8
+const PAPER_REFERENCE_LINEWIDTH = 1.8
+const PAPER_MARKER_STROKEWIDTH = 0.7
+const PAPER_ROW_GAP = 8
 
 """
     tab10_colors(n)
@@ -80,11 +85,11 @@ function add_series!(
   color = nothing,
   linestyle = :solid,
   marker = :circle,
-  marker_stride = 1,
+  marker_stride = PAPER_MARKER_STRIDE,
   markersize = MARKERSIZE,
-  markerstrokecolor = :transparent,
-  markerstrokewidth = 0,
-  linewidth = 2.5,
+  markerstrokecolor = :black,
+  markerstrokewidth = PAPER_MARKER_STROKEWIDTH,
+  linewidth = PAPER_PRIMARY_LINEWIDTH,
 )
   c = isnothing(color) ? PALETTE[1] : color
   lines!(
@@ -156,10 +161,10 @@ function legend_line_marker_elements(
   markers;
   colors = [color_for(i) for i in eachindex(methods)],
   linestyles = fill(:solid, length(methods)),
-  linewidths = fill(2.5, length(methods)),
+  linewidths = fill(PAPER_PRIMARY_LINEWIDTH, length(methods)),
   markersizes = fill(MARKERSIZE, length(methods)),
-  markerstrokecolors = fill(:transparent, length(methods)),
-  markerstrokewidths = fill(0, length(methods)),
+  markerstrokecolors = fill(:black, length(methods)),
+  markerstrokewidths = fill(PAPER_MARKER_STROKEWIDTH, length(methods)),
 )
   return [
     [
@@ -244,6 +249,44 @@ function add_partition_inset!(
     )
   end
   return pax
+end
+
+function add_linear_solution_inset!(
+  figpos,
+  solutions;
+  signed = false,
+  halign = :center,
+  valign = :center,
+  inset_size = 1.0,
+)
+  N = solutions.N[1]
+  values = solutions.value
+  sax = Axis(
+    figpos;
+    width = Relative(inset_size),
+    height = Relative(inset_size),
+    halign,
+    valign,
+    tellwidth = false,
+    tellheight = false,
+    aspect = DataAspect(),
+    limits = (0, 1, 0, 1),
+  )
+  translate!(sax.blockscene, 0, 0, 150)
+  hidedecorations!(sax)
+  hidespines!(sax)
+  color_limit = maximum(abs, values)
+  colorrange = signed ? (-color_limit, color_limit) : (0, color_limit)
+  contourf!(
+    sax,
+    collect(all_nodes(N)),
+    collect(all_nodes(N)),
+    field_matrix_with_bc(values, N);
+    levels = range(colorrange[1], colorrange[2]; length = 17),
+    colormap = signed ? :balance : :viridis,
+    colorrange,
+  )
+  return sax
 end
 
 function add_gp_solution_inset!(
@@ -633,8 +676,18 @@ end
 # ---------------------------------------------------------------------------
 function fig12b_poisson_cmp_paper()
   problem_rows = (
-    ("Poisson", loadtable("study8_linear_cmp_poisson.csv")),
-    ("variable diffusion", loadtable("study8_linear_cmp_sign_changing.csv")),
+    (
+      "Poisson",
+      loadtable("study8_linear_cmp_poisson.csv"),
+      loadtable("study8_linear_solution_poisson.csv"),
+      false,
+    ),
+    (
+      "variable diffusion",
+      loadtable("study8_linear_cmp_sign_changing.csv"),
+      loadtable("study8_linear_solution_sign_changing.csv"),
+      true,
+    ),
   )
   parts = loadtable("study8_partitions.csv")
   ms = sort(unique(problem_rows[end][2].m))
@@ -658,20 +711,20 @@ function fig12b_poisson_cmp_paper()
   finite_residuals = vcat(
     [
       tbl.relative_residual[tbl.relative_residual .> 0] for
-      (_, tbl) in problem_rows
+      (_, tbl, _, _) in problem_rows
     ]...,
   )
   ylims = (1e-11, maximum(finite_residuals) * 3)
   yticks = LogTicks(collect(1:-2:-11))
   fig = Figure(size = (PAPER_FULL_WIDTH, 500))
-  for (row, (problem_label, tbl)) in enumerate(problem_rows)
+  for (row, (problem_label, tbl, solutions, signed_solution)) in
+      enumerate(problem_rows)
     for (column, m) in enumerate(ms)
       ax = Axis(
         fig[row, column];
         xlabel = row == length(problem_rows) ? "iteration" : "",
         ylabel = column == 1 ?
                  "$problem_label\nrelative residual" : "",
-        ylabelsize = 13,
         yscale = log10,
         yticks,
         title = row == 1 ? "m = $m" : "",
@@ -688,15 +741,20 @@ function fig12b_poisson_cmp_paper()
           label = labels[method],
           color = colors[index],
           marker = markers[method],
-          linewidth = 2.8,
-          marker_stride = 8,
+          linewidth = PAPER_PRIMARY_LINEWIDTH,
+          marker_stride = PAPER_MARKER_STRIDE,
           markerstrokecolor = :black,
-          markerstrokewidth = 0.7,
+          markerstrokewidth = PAPER_MARKER_STROKEWIDTH,
         )
       end
-      inset_layout = semilinear_inset_layout(fig[row, column]; columns = 1)
-      add_partition_inset!(
+      inset_layout = semilinear_inset_layout(fig[row, column])
+      add_linear_solution_inset!(
         inset_layout[1, 1],
+        solutions;
+        signed = signed_solution,
+      )
+      add_partition_inset!(
+        inset_layout[1, 2],
         parts,
         m;
         halign = :center,
@@ -704,7 +762,7 @@ function fig12b_poisson_cmp_paper()
         inset_size = 1.0,
         inset_title = "",
       )
-      fix_semilinear_inset_sizes!(inset_layout; columns = 1)
+      fix_semilinear_inset_sizes!(inset_layout)
     end
   end
   Legend(
@@ -713,16 +771,16 @@ function fig12b_poisson_cmp_paper()
       methods,
       markers;
       colors,
-      linewidths = fill(2.8, length(methods)),
+      linewidths = fill(PAPER_PRIMARY_LINEWIDTH, length(methods)),
       markerstrokecolors = fill(:black, length(methods)),
-      markerstrokewidths = fill(0.7, length(methods)),
+      markerstrokewidths = fill(PAPER_MARKER_STROKEWIDTH, length(methods)),
     ),
     [labels[method] for method in methods];
     orientation = :horizontal,
     nbanks = 1,
     framevisible = true,
   )
-  rowgap!(fig.layout, 8)
+  rowgap!(fig.layout, PAPER_ROW_GAP)
   savefigs(fig, "fig12b_poisson_cmp_paper")
 end
 function fig13_evp_cmp()
@@ -757,7 +815,7 @@ function fig13_evp_cmp()
   colors = [primary_colors..., jd_colors...]
   linestyles = [fill(:solid, length(primary_methods))..., jd_linestyles...]
   linewidths =
-    [fill(2.8, length(primary_methods))..., fill(1.8, length(jd_methods))...]
+    [fill(PAPER_PRIMARY_LINEWIDTH, length(primary_methods))..., fill(PAPER_REFERENCE_LINEWIDTH, length(jd_methods))...]
   markersizes = [
     fill(MARKERSIZE, length(primary_methods))...,
     fill(MARKERSIZE, length(jd_methods))...,
@@ -771,7 +829,7 @@ function fig13_evp_cmp()
   for (j, m) in enumerate(ms)
     ax = Axis(
       fig[1, j];
-      xlabel = "outer iteration",
+      xlabel = "iteration",
       ylabel = j == 1 ? "relative residual" : "",
       yscale = log10,
       yticks = yticks,
@@ -791,9 +849,9 @@ function fig13_evp_cmp()
         marker = markers[method],
         linewidth = linewidths[i],
         markersize = markersizes[i],
-        marker_stride = 8,
+        marker_stride = PAPER_MARKER_STRIDE,
         markerstrokecolor = :black,
-        markerstrokewidth = 0.7,
+        markerstrokewidth = PAPER_MARKER_STROKEWIDTH,
       )
     end
     inset_layout = semilinear_inset_layout(fig[1, j])
@@ -823,9 +881,9 @@ function fig13_evp_cmp()
       markers;
       markersizes = fill(MARKERSIZE, length(primary_methods)),
       colors = primary_colors,
-      linewidths = fill(2.8, length(primary_methods)),
+      linewidths = fill(PAPER_PRIMARY_LINEWIDTH, length(primary_methods)),
       markerstrokecolors = fill(:black, length(primary_methods)),
-      markerstrokewidths = fill(0.7, length(primary_methods)),
+      markerstrokewidths = fill(PAPER_MARKER_STROKEWIDTH, length(primary_methods)),
     ),
     [labels[method] for method in primary_methods];
     orientation = :horizontal,
@@ -840,16 +898,16 @@ function fig13_evp_cmp()
       markersizes = fill(MARKERSIZE, length(jd_methods)),
       colors = jd_colors,
       linestyles = jd_linestyles,
-      linewidths = fill(1.8, length(jd_methods)),
+      linewidths = fill(PAPER_REFERENCE_LINEWIDTH, length(jd_methods)),
       markerstrokecolors = fill(:black, length(jd_methods)),
-      markerstrokewidths = fill(0.7, length(jd_methods)),
+      markerstrokewidths = fill(PAPER_MARKER_STROKEWIDTH, length(jd_methods)),
     ),
     [labels[method] for method in jd_methods];
     orientation = :horizontal,
     nbanks = 1,
     framevisible = true,
   )
-  rowgap!(fig.layout, 8)
+  rowgap!(fig.layout, PAPER_ROW_GAP)
   savefigs(fig, "fig13_evp_cmp")
 end
 function fig14b_gp_convergence_paper()
@@ -948,12 +1006,12 @@ function fig14b_gp_convergence_paper()
   colors = [primary_colors..., metric_colors...]
   linestyles = [fill(:solid, length(primary_methods))..., metric_linestyles...]
   linewidths = [
-    fill(2.8, length(primary_methods))...,
-    fill(1.8, length(metric_methods))...,
+    fill(PAPER_PRIMARY_LINEWIDTH, length(primary_methods))...,
+    fill(PAPER_REFERENCE_LINEWIDTH, length(metric_methods))...,
   ]
   markersizes = [
     fill(MARKERSIZE, length(primary_methods))...,
-    fill(7, length(metric_methods))...,
+    fill(MARKERSIZE, length(metric_methods))...,
   ]
   mask_beta = tbl.beta .== beta
   positive_residuals = tbl.resnorm[mask_beta .& (tbl.resnorm .> 0)]
@@ -965,7 +1023,7 @@ function fig14b_gp_convergence_paper()
   for (column, m) in enumerate(ms)
     ax = Axis(
       fig[1, column];
-      xlabel = "outer iteration",
+      xlabel = "iteration",
       ylabel = column == 1 ? "relative residual" : "",
       title = "m = $m",
       yscale = log10,
@@ -986,9 +1044,9 @@ function fig14b_gp_convergence_paper()
         marker = markers[method],
         linewidth = linewidths[index],
         markersize = markersizes[index],
-        marker_stride = 8,
+        marker_stride = PAPER_MARKER_STRIDE,
         markerstrokecolor = :black,
-        markerstrokewidth = 0.7,
+        markerstrokewidth = PAPER_MARKER_STROKEWIDTH,
       )
     end
     inset_layout = semilinear_inset_layout(fig[1, column])
@@ -1019,9 +1077,9 @@ function fig14b_gp_convergence_paper()
       markers;
       markersizes = fill(MARKERSIZE, length(primary_methods)),
       colors = primary_colors,
-      linewidths = fill(2.8, length(primary_methods)),
+      linewidths = fill(PAPER_PRIMARY_LINEWIDTH, length(primary_methods)),
       markerstrokecolors = fill(:black, length(primary_methods)),
-      markerstrokewidths = fill(0.7, length(primary_methods)),
+      markerstrokewidths = fill(PAPER_MARKER_STROKEWIDTH, length(primary_methods)),
     ),
     [labels[method] for method in primary_methods];
     orientation = :horizontal,
@@ -1033,19 +1091,19 @@ function fig14b_gp_convergence_paper()
     legend_line_marker_elements(
       metric_legend_methods,
       markers;
-      markersizes = fill(7, length(metric_methods)),
+      markersizes = fill(MARKERSIZE, length(metric_methods)),
       colors = metric_legend_colors,
       linestyles = metric_legend_linestyles,
-      linewidths = fill(1.8, length(metric_methods)),
+      linewidths = fill(PAPER_REFERENCE_LINEWIDTH, length(metric_methods)),
       markerstrokecolors = fill(:black, length(metric_methods)),
-      markerstrokewidths = fill(0.7, length(metric_methods)),
+      markerstrokewidths = fill(PAPER_MARKER_STROKEWIDTH, length(metric_methods)),
     ),
     [labels[method] for method in metric_legend_methods];
     orientation = :horizontal,
     nbanks = 1,
     framevisible = true,
   )
-  rowgap!(fig.layout, 8)
+  rowgap!(fig.layout, PAPER_ROW_GAP)
   savefigs(fig, "fig14b_gp_convergence_paper")
 end
 function fig17b_semilinear_poisson_paper()
@@ -1100,8 +1158,8 @@ function fig17b_semilinear_poisson_paper()
   linestyles =
     [fill(:solid, length(primary_methods))..., reference_linestyles...]
   linewidths = [
-    fill(2.8, length(primary_methods))...,
-    fill(1.8, length(reference_methods))...,
+    fill(PAPER_PRIMARY_LINEWIDTH, length(primary_methods))...,
+    fill(PAPER_REFERENCE_LINEWIDTH, length(reference_methods))...,
   ]
   markersizes = [
     fill(MARKERSIZE, length(primary_methods))...,
@@ -1117,7 +1175,7 @@ function fig17b_semilinear_poisson_paper()
   for (row, beta) in enumerate(betas), (column, m) in enumerate(ms)
     ax = Axis(
       fig[row, column];
-      xlabel = row == length(betas) ? "outer iteration" : "",
+      xlabel = row == length(betas) ? "iteration" : "",
       ylabel = column == 1 ? "β = $(Int(beta))\nrelative residual" : "",
       title = row == 1 ? "m = $m" : "",
       yscale = log10,
@@ -1138,9 +1196,9 @@ function fig17b_semilinear_poisson_paper()
         marker = markers[method],
         linewidth = linewidths[index],
         markersize = markersizes[index],
-        marker_stride = 8,
+        marker_stride = PAPER_MARKER_STRIDE,
         markerstrokecolor = :black,
-        markerstrokewidth = 0.7,
+        markerstrokewidth = PAPER_MARKER_STROKEWIDTH,
       )
     end
     hlines!(ax, [1e-7]; color = :black, linestyle = :dot, linewidth = 1.2)
@@ -1172,9 +1230,9 @@ function fig17b_semilinear_poisson_paper()
       markers;
       markersizes = fill(MARKERSIZE, length(primary_methods)),
       colors = primary_colors,
-      linewidths = fill(2.8, length(primary_methods)),
+      linewidths = fill(PAPER_PRIMARY_LINEWIDTH, length(primary_methods)),
       markerstrokecolors = fill(:black, length(primary_methods)),
-      markerstrokewidths = fill(0.7, length(primary_methods)),
+      markerstrokewidths = fill(PAPER_MARKER_STROKEWIDTH, length(primary_methods)),
     ),
     [labels[method] for method in primary_methods];
     orientation = :horizontal,
@@ -1189,16 +1247,16 @@ function fig17b_semilinear_poisson_paper()
       markersizes = fill(MARKERSIZE, length(reference_methods)),
       colors = reference_colors,
       linestyles = reference_linestyles,
-      linewidths = fill(1.8, length(reference_methods)),
+      linewidths = fill(PAPER_REFERENCE_LINEWIDTH, length(reference_methods)),
       markerstrokecolors = fill(:black, length(reference_methods)),
-      markerstrokewidths = fill(0.7, length(reference_methods)),
+      markerstrokewidths = fill(PAPER_MARKER_STROKEWIDTH, length(reference_methods)),
     ),
     [labels[method] for method in reference_methods];
     orientation = :horizontal,
     nbanks = 1,
     framevisible = true,
   )
-  rowgap!(fig.layout, 8)
+  rowgap!(fig.layout, PAPER_ROW_GAP)
   savefigs(fig, "fig17b_semilinear_poisson_paper")
 end
 
@@ -1254,8 +1312,8 @@ function fig17b_semilinear_l_shape_section61()
   linestyles =
     [fill(:solid, length(primary_methods))..., reference_linestyles...]
   linewidths = [
-    fill(2.8, length(primary_methods))...,
-    fill(1.8, length(reference_methods))...,
+    fill(PAPER_PRIMARY_LINEWIDTH, length(primary_methods))...,
+    fill(PAPER_REFERENCE_LINEWIDTH, length(reference_methods))...,
   ]
   markersizes = [
     fill(MARKERSIZE, length(primary_methods))...,
@@ -1271,7 +1329,7 @@ function fig17b_semilinear_l_shape_section61()
   for (row, case) in enumerate(cases), (column, m) in enumerate(ms)
     ax = Axis(
       fig[row, column];
-      xlabel = row == length(cases) ? "outer iteration" : "",
+      xlabel = row == length(cases) ? "iteration" : "",
       ylabel = column == 1 ? "relative residual" : "",
       title = "m = $m",
       yscale = log10,
@@ -1292,9 +1350,9 @@ function fig17b_semilinear_l_shape_section61()
         marker = markers[method],
         linewidth = linewidths[index],
         markersize = markersizes[index],
-        marker_stride = 8,
+        marker_stride = PAPER_MARKER_STRIDE,
         markerstrokecolor = :black,
-        markerstrokewidth = 0.7,
+        markerstrokewidth = PAPER_MARKER_STROKEWIDTH,
       )
     end
     hlines!(ax, [1e-7]; color = :black, linestyle = :dot, linewidth = 1.2)
@@ -1329,9 +1387,9 @@ function fig17b_semilinear_l_shape_section61()
       markers;
       markersizes = fill(MARKERSIZE, length(primary_methods)),
       colors = primary_colors,
-      linewidths = fill(2.8, length(primary_methods)),
+      linewidths = fill(PAPER_PRIMARY_LINEWIDTH, length(primary_methods)),
       markerstrokecolors = fill(:black, length(primary_methods)),
-      markerstrokewidths = fill(0.7, length(primary_methods)),
+      markerstrokewidths = fill(PAPER_MARKER_STROKEWIDTH, length(primary_methods)),
     ),
     [labels[method] for method in primary_methods];
     orientation = :horizontal,
@@ -1346,16 +1404,16 @@ function fig17b_semilinear_l_shape_section61()
       markersizes = fill(MARKERSIZE, length(reference_methods)),
       colors = reference_colors,
       linestyles = reference_linestyles,
-      linewidths = fill(1.8, length(reference_methods)),
+      linewidths = fill(PAPER_REFERENCE_LINEWIDTH, length(reference_methods)),
       markerstrokecolors = fill(:black, length(reference_methods)),
-      markerstrokewidths = fill(0.7, length(reference_methods)),
+      markerstrokewidths = fill(PAPER_MARKER_STROKEWIDTH, length(reference_methods)),
     ),
     [labels[method] for method in reference_methods];
     orientation = :horizontal,
     nbanks = 1,
     framevisible = true,
   )
-  rowgap!(fig.layout, 8)
+  rowgap!(fig.layout, PAPER_ROW_GAP)
   savefigs(fig, "fig17b_semilinear_l_shape_section61")
 end
 

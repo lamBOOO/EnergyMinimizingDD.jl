@@ -151,8 +151,10 @@ function var_dd_linear_history(K, b, dofs; maxiter, tol, x_sol=nothing, kwargs..
   )
 end
 
-function run_study8_problem(file, label, setup)
-  if !needs_run(file)
+function run_study8_problem(file, solution_file, label, setup)
+  curves_needed = needs_run(file)
+  solution_needed = needs_run(solution_file)
+  if !curves_needed && !solution_needed
     println("study8 $label: cached, skipping")
     return
   end
@@ -167,6 +169,7 @@ function run_study8_problem(file, label, setup)
     method=String[], m=Int[], solves=Int[], resnorm=Float64[],
     relative_residual=Float64[], relative_error=Float64[],
   )
+  solution_rows = (N=Int[], idx=Int[], value=Float64[])
   function record(method, m, history)
     initial = first(history)[2]
     for (solves, residual, error) in history
@@ -179,10 +182,19 @@ function run_study8_problem(file, label, setup)
     end
   end
   for m in ms
+    !curves_needed && m != first(ms) && continue
     K, _, b, dofs, _, core = setup(
       N, m, overlap; cell_owners=owners[m], return_core_partition=true
     )
     solution = K \ b
+    if solution_needed && m == first(ms)
+      for index in eachindex(solution)
+        push!(solution_rows.N, N)
+        push!(solution_rows.idx, index)
+        push!(solution_rows.value, solution[index])
+      end
+    end
+    curves_needed || continue
     schwarz = schwarz_setup(K, dofs; core_dofs=core)
     tolerance = relative_tolerance * norm(b - K * ones(length(b)))
     record("var_dd_additive", m, var_dd_linear_history(
@@ -203,7 +215,8 @@ function run_study8_problem(file, label, setup)
     ))
     println("  $label m = $m done")
   end
-  savetable(file, rows)
+  curves_needed && savetable(file, rows)
+  solution_needed && savetable(solution_file, solution_rows)
 end
 
 function write_study8_partitions()
@@ -227,10 +240,12 @@ end
 
 function run_study8()
   run_study8_problem(
-    "study8_linear_cmp_poisson.csv", "Poisson", laplace_setup
+    "study8_linear_cmp_poisson.csv", "study8_linear_solution_poisson.csv",
+    "Poisson", laplace_setup,
   )
   run_study8_problem(
-    "study8_linear_cmp_sign_changing.csv", "variable diffusion",
+    "study8_linear_cmp_sign_changing.csv",
+    "study8_linear_solution_sign_changing.csv", "variable diffusion",
     study8_sign_changing_problem_setup,
   )
   write_study8_partitions()
