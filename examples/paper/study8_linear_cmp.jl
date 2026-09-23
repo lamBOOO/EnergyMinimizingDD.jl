@@ -55,76 +55,65 @@ function ras_stationary(K, b, schwarz; maxsweeps, tol, x_sol)
   return history
 end
 
+function iterative_solver_history(x, x0, initial_residual, residuals, m, x_sol)
+  if isnothing(x_sol)
+    return vcat(
+      [(0, initial_residual)],
+      [(iteration * m, residual) for
+       (iteration, residual) in enumerate(residuals)],
+    )
+  end
+
+  relative_error(y) = norm(y - x_sol) / norm(x_sol)
+  final_iteration = length(residuals)
+  # IterativeSolvers exposes every residual, but GMRES updates its solution
+  # only at the end of an unrestarted cycle. Retain the exact endpoint errors
+  # used by the study and mark unavailable intermediate errors explicitly.
+  return vcat(
+    [(0, initial_residual, relative_error(x0))],
+    [(iteration * m, residual,
+      iteration == final_iteration ? relative_error(x) : NaN) for
+     (iteration, residual) in enumerate(residuals)],
+  )
+end
+
 function pcg_as(K, b, schwarz; maxiter, tol, x_sol=nothing)
   m = nsub(schwarz)
-  x = ones(size(K, 1))
-  r = b - K * x
-  relative_error(x) = norm(x - x_sol) / norm(x_sol)
-  history = isnothing(x_sol) ?
-            [(0, norm(r))] : [(0, norm(r), relative_error(x))]
-  z = apply_AS(schwarz, r)
-  p = copy(z)
-  rz = dot(r, z)
-  for iteration = 1:maxiter
-    Kp = K * p
-    alpha = rz / dot(p, Kp)
-    x .+= alpha .* p
-    r .-= alpha .* Kp
-    if isnothing(x_sol)
-      push!(history, (iteration * m, norm(r)))
-    else
-      push!(history, (iteration * m, norm(r), relative_error(x)))
-    end
-    norm(r) < tol && break
-    z = apply_AS(schwarz, r)
-    rz_new = dot(r, z)
-    p .= z .+ (rz_new / rz) .* p
-    rz = rz_new
-  end
-  return history
+  x0 = ones(size(K, 1))
+  x = copy(x0)
+  initial_residual = norm(b - K * x)
+  _, convergence = cg!(
+    x, K, b;
+    Pl=ASPreconditioner(schwarz),
+    maxiter,
+    abstol=tol,
+    reltol=0.0,
+    log=true,
+  )
+  return iterative_solver_history(
+    x, x0, initial_residual, convergence[:resnorm], m, x_sol,
+  )
 end
 
 "Unrestarted right-preconditioned GMRES with the RAS preconditioner."
 function gmres_ras(K, b, schwarz; maxiter, tol, x_sol=nothing)
-  n = length(b)
   m = nsub(schwarz)
-  x0 = ones(n)
-  r0 = b - K * x0
-  beta = norm(r0)
-  relative_error(x) = norm(x - x_sol) / norm(x_sol)
-  history = isnothing(x_sol) ? [(0, beta)] : [(0, beta, relative_error(x0))]
-  beta < tol && return history
-
-  V = zeros(n, maxiter + 1)
-  Z = zeros(n, maxiter)
-  H = zeros(maxiter + 1, maxiter)
-  V[:, 1] .= r0 ./ beta
-  rhs = zeros(maxiter + 1)
-  rhs[1] = beta
-  for iteration = 1:maxiter
-    Z[:, iteration] .= apply_RAS(schwarz, view(V, :, iteration))
-    w = K * view(Z, :, iteration)
-    for _ = 1:2, j = 1:iteration
-      coefficient = dot(view(V, :, j), w)
-      H[j, iteration] += coefficient
-      w .-= coefficient .* view(V, :, j)
-    end
-    H[iteration+1, iteration] = norm(w)
-    H[iteration+1, iteration] > eps(beta) &&
-      (V[:, iteration+1] .= w ./ H[iteration+1, iteration])
-    reduced_H = view(H, 1:iteration+1, 1:iteration)
-    reduced_rhs = view(rhs, 1:iteration+1)
-    coefficients = reduced_H \ reduced_rhs
-    residual = norm(reduced_rhs - reduced_H * coefficients)
-    if isnothing(x_sol)
-      push!(history, (iteration * m, residual))
-    else
-      x = x0 + view(Z, :, 1:iteration) * coefficients
-      push!(history, (iteration * m, residual, relative_error(x)))
-    end
-    (residual < tol || H[iteration+1, iteration] <= eps(beta)) && break
-  end
-  return history
+  x0 = ones(length(b))
+  x = copy(x0)
+  initial_residual = norm(b - K * x)
+  _, convergence = gmres!(
+    x, K, b;
+    Pr=RASPreconditioner(schwarz),
+    restart=maxiter,
+    maxiter,
+    abstol=tol,
+    reltol=0.0,
+    orth_meth=DGKS(),
+    log=true,
+  )
+  return iterative_solver_history(
+    x, x0, initial_residual, convergence[:resnorm], m, x_sol,
+  )
 end
 
 function var_dd_linear_history(K, b, dofs; maxiter, tol, x_sol=nothing, kwargs...)
