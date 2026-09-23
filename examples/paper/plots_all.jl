@@ -951,10 +951,10 @@ function fig14b_gp_convergence_paper()
     "gp_projected_qemdd_history" => "qEMDD (q = 2)",
     # "gfdn_pcg_as_1" => "GFDN-PCG(AS, 1)",
     # "gfdn_pcg_as_2" => "GFDN-PCG(AS, 2)",
-    "gfdn_pcg_as_4" => "GFDN-PCG(AS, 4)",
-    "cg_gfdn_pcg_as_1" => "CG-GFDN-PCG(AS, 1)",
-    "cg_gfdn_pcg_as_2" => "CG-GFDN-PCG(AS, 2)",
-    "cg_gfdn_pcg_as_4" => "CG-GFDN-PCG(AS, 4)",
+    "gfdn_pcg_as_4" => "GFDN(aᵤ)-PCG(AS, 4)",
+    "cg_gfdn_pcg_as_1" => "CG-GFDN(aᵤ)-PCG(AS, 1)",
+    "cg_gfdn_pcg_as_2" => "CG-GFDN(aᵤ)-PCG(AS, 2)",
+    "cg_gfdn_pcg_as_4" => "CG-GFDN(aᵤ)-PCG(AS, 4)",
   )
   markers = Dict(
     "gp_additive" => :circle,
