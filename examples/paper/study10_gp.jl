@@ -76,31 +76,47 @@ function gp_gfdn_exact(e, density_matrix, u0; maxiter)
   return u
 end
 
-function gp_fixed_pcg_as(A, rhs, dofs, iterations)
+function gp_fixed_pcg_as(
+  A, rhs, dofs, iterations;
+  initial=zeros(eltype(rhs), length(rhs)),
+)
   schwarz = schwarz_setup(A, dofs)
-  x = zeros(eltype(rhs), length(rhs))
-  r = copy(rhs)
-  z = apply_AS(schwarz, r)
-  p = copy(z)
-  rz = dot(r, z)
-  for iteration = 1:iterations
-    Ap = A * p
-    denominator = dot(p, Ap)
-    (!isfinite(denominator) || denominator <= 0) && break
-    alpha = rz / denominator
-    x .+= alpha .* p
-    r .-= alpha .* Ap
-    iteration == iterations && break
-    z = apply_AS(schwarz, r)
-    rz_new = dot(r, z)
-    (!isfinite(rz_new) || rz_new <= 0) && break
-    p .= z .+ (rz_new / rz) .* p
-    rz = rz_new
-  end
+  x = copy(initial)
+  cg!(
+    x, A, rhs;
+    Pl=ASPreconditioner(schwarz),
+    maxiter=iterations,
+    abstol=0.0,
+    reltol=0.0,
+  )
   return x
 end
 
-"GFDN and Fletcher--Reeves CG-GFDN with fixed PCG(AS) metric work."
+"Minimize the GP energy on the retracted ray R_M(u + tau*d), tau >= 0."
+function gp_retracted_line_search(e, u, direction)
+  # theta in [0, pi/2] parametrizes the complete ray tau = tan(theta),
+  # including its limit as tau tends to infinity.
+  trial(theta) = cos(theta) .* u .+ sin(theta) .* direction
+  objective(theta) = Energies.energy(e, trial(theta))
+  search = Optim.optimize(
+    objective, 0.0, pi / 2, Optim.Brent(); abs_tol=1e-12, rel_tol=1e-12,
+  )
+  next = trial(Optim.minimizer(search))
+  Energies.normalize_M!(next, e.M)
+  return next
+end
+
+"""
+Paper GFDN(a_u) and Fletcher--Reeves CG-GFDN(a_u), with PCG(AS) metric
+solves. In matrix notation, `A` represents the current inner product `a_u`,
+`M` represents the L2 inner product, and `metric_inverse_u` approximates the
+paper's `A_u^(-1)u`, i.e. the solution of `A*w = M*u`.
+
+Implemented with assistance from ChatGPT 5.6 Sol, following P. Henning and
+E. Jarlebring, "The Gross--Pitaevskii Equation and Eigenvector Nonlinearities:
+Numerical Methods and Algorithms," SIAM Review 67(2), 256--317 (2025),
+Definition 5.12, Remark 5.14, and equations (5.40)--(5.42).
+"""
 function gp_gfdn_pcg_as_history(
   e, density_matrix, dofs, u0;
   conjugate, inner_iterations, maxiter, tol,
@@ -110,27 +126,42 @@ function gp_gfdn_pcg_as_history(
   Energies.normalize_M!(u, e.M)
   history = [gp_history_entry(e, u, 0)]
   previous_direction = nothing
-  previous_gradient_norm = 0.0
+  previous_gradient_norm_squared = 0.0
   for iteration = 1:maxiter
     A = sparse(e.K + e.beta .* density_matrix(u))
     lambda = dot(u, A * u)
-    residual = A * u .- lambda .* (e.M * u)
-    preconditioned = gp_fixed_pcg_as(A, residual, dofs, inner_iterations)
-    projected = preconditioned .- u .* dot(u, e.M * preconditioned)
-    gradient_norm = dot(residual, projected)
-    gradient_norm > 0 || break
-    direction = -projected
-    if conjugate && !isnothing(previous_direction)
-      transported = previous_direction .- u .* dot(u, e.M * previous_direction)
-      direction .+= (gradient_norm / previous_gradient_norm) .* transported
-      dot(residual, direction) < 0 || (direction .= -projected)
-    end
-    next = Solvers.combine_step(
-      e, hcat(u, direction); initial=u, maxiter=100, tol=1e-10
+
+    # The paper uses the exact solution of A*w=M*u and Remark 5.14 permits a
+    # few linear-solver steps. We use fixed PCG(AS) work and warm-start with
+    # u/lambda; its initial residual is the GP residual scaled by -1/lambda.
+    metric_inverse_u = gp_fixed_pcg_as(
+      A, e.M * u, dofs, inner_iterations; initial=u ./ lambda,
     )
-    dot(u, e.M * next) < 0 && (next .*= -1)
+    normalization = dot(u, e.M * metric_inverse_u)
+    isfinite(normalization) && normalization > 0 || break
+
+    # For an exact metric solve, u'M*w = w'A*w, so this is both Definition
+    # 5.12 and the projection in (5.40). With truncated warm-started PCG these
+    # scalars can differ; we retain u'M*w, as required by the tangent projector.
+    gradient = u .- metric_inverse_u ./ normalization
+
+    # Equations (5.40)--(5.41): a_u-orthogonal transport and the
+    # Fletcher--Reeves quotient in the changing a_u metric.
+    gradient_norm_squared = dot(gradient, A * gradient)
+    isfinite(gradient_norm_squared) && gradient_norm_squared > 0 || break
+    direction = -gradient
+    if conjugate && !isnothing(previous_direction)
+      beta = gradient_norm_squared / previous_gradient_norm_squared
+      candidate = beta .* previous_direction .- u
+      direction = candidate .- metric_inverse_u .* (
+        dot(u, e.M * candidate) / normalization
+      )
+    end
+
+    # Equation (5.42): optimal energy step along the normalized search ray.
+    next = gp_retracted_line_search(e, u, direction)
     previous_direction = direction
-    previous_gradient_norm = gradient_norm
+    previous_gradient_norm_squared = gradient_norm_squared
     u = next
     push!(history, gp_history_entry(e, u, iteration * m * inner_iterations))
     last(history)[3] < tol && break
