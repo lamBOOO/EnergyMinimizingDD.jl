@@ -284,7 +284,6 @@ function add_linear_solution_inset!(
     field_matrix_with_bc(values, N);
     levels = range(colorrange[1], colorrange[2]; length = 17),
     colormap = signed ? :balance : :viridis,
-    colorrange,
   )
   return sax
 end
