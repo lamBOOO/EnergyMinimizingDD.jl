@@ -22,6 +22,7 @@ using Printf
 using CSV
 using Tables
 using FixedPointAcceleration
+using IterativeSolvers
 using NonlinearSolve
 using Optim
 
@@ -191,6 +192,11 @@ struct ASPreconditioner
   S::SchwarzData
 end
 
+"Restricted additive Schwarz preconditioner wrapper for IterativeSolvers.jl."
+struct RASPreconditioner
+  S::SchwarzData
+end
+
 function LinearAlgebra.ldiv!(y::AbstractVector, P::ASPreconditioner, x::AbstractVector)
   y .= apply_AS(P.S, x)
   return y
@@ -201,4 +207,14 @@ function LinearAlgebra.ldiv!(Y::AbstractMatrix, P::ASPreconditioner, X::Abstract
     ldiv!(view(Y, :, j), P, view(X, :, j))
   end
   return Y
+end
+
+function LinearAlgebra.ldiv!(y::AbstractVector, P::RASPreconditioner, x::AbstractVector)
+  y .= apply_RAS(P.S, x)
+  return y
+end
+
+function LinearAlgebra.ldiv!(P::RASPreconditioner, x::AbstractVector)
+  x .= apply_RAS(P.S, x)
+  return x
 end

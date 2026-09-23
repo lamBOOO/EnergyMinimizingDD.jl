@@ -35,6 +35,12 @@ include(joinpath(@__DIR__, "..", "examples", "paper", "study8_linear_cmp.jl"))
   @test all(diff(last.(history)) .<= 1e-12)
   @test all(first.(history) .== (0:(length(history) - 1)) .* nsub(schwarz))
 
+  cg_history = pcg_as(K, b, schwarz; maxiter=40, tol=1e-11)
+  @test first(cg_history) == (0, norm(b - K * ones(length(b))))
+  @test last(cg_history)[2] < 1e-10
+  @test all(first.(cg_history) .==
+            (0:(length(cg_history) - 1)) .* nsub(schwarz))
+
   x_sol = K \ b
   error_history = gmres_ras(
     K, b, schwarz; maxiter=40, tol=1e-11, x_sol
