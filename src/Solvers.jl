@@ -597,43 +597,48 @@ function nonlinear_enriched_local_minimize(
   )
 end
 
-"""Minimize a nonlinear energy with all exterior degrees of freedom fixed."""
-function nonlinear_local_minimize(
+"""
+    _reduced_minimize(e, z, reconstruct, project, reduced_hessian; kwargs...)
+
+Minimize `e(reconstruct(z))` over a reduced coordinate vector `z`.
+
+`reconstruct(z)` maps reduced coordinates to a global vector, `project(g)`
+maps a global gradient to the reduced space, and `reduced_hessian(u)` returns
+the reduced Hessian at `u`. Analytic sparse Newton with Armijo backtracking is
+used when available; the legacy generic energy constructor, which carries no
+Hessian, remains supported through a reduced L-BFGS fallback.
+
+This is the shared kernel of [`nonlinear_local_minimize`](@ref),
+[`minimize_linear_subspace`](@ref) and [`minimize_affine_corrections`](@ref),
+which differ only in the reduced space they optimize over.
+"""
+function _reduced_minimize(
   e::Energies.NonlinearEnergy{Float64},
-  u_cur::Vector{Float64},
-  idx_sub::AbstractVector;
+  z::Vector{Float64},
+  reconstruct::R,
+  project::P,
+  reduced_hessian::H;
   relative_tolerance::Float64 = 1e-10,
   absolute_tolerance::Float64 = 1e-12,
-  maxiter::Int = 50,
-)
-  active = collect(Int, idx_sub)
-  isempty(active) &&
-    return (u = copy(u_cur), iterations = 0, energy_evaluations = 0)
-  u = copy(u_cur)
-  initial_gradient = Energies.gradient(e, u)[active]
+  maxiter::Int = 30,
+) where {R,P,H}
+  initial_gradient = project(Energies.gradient(e, reconstruct(z)))
   target = max(absolute_tolerance, relative_tolerance * norm(initial_gradient))
   energy_evaluations = 0
 
-  # Analytic sparse Newton is used when available. The legacy generic energy
-  # constructor remains supported through a reduced L-BFGS fallback.
   if isnothing(e.hess_assembler)
-    z0 = copy(u[active])
-    function objective(z)
-      trial = copy(u_cur)
-      trial[active] .= z
+    function objective(coordinates)
       energy_evaluations += 1
-      return Energies.energy(e, trial)
+      return Energies.energy(e, reconstruct(coordinates))
     end
-    function reduced_gradient!(storage, z)
-      trial = copy(u_cur)
-      trial[active] .= z
-      storage .= Energies.gradient(e, trial)[active]
+    function reduced_gradient!(storage, coordinates)
+      storage .= project(Energies.gradient(e, reconstruct(coordinates)))
       return storage
     end
     result = Optim.optimize(
       objective,
       reduced_gradient!,
-      z0,
+      z,
       Optim.LBFGS(),
       Optim.Options(
         iterations = maxiter,
@@ -642,9 +647,8 @@ function nonlinear_local_minimize(
         show_warnings = false,
       ),
     )
-    u[active] .= Optim.minimizer(result)
     return (
-      u = u,
+      u = reconstruct(Optim.minimizer(result)),
       iterations = Optim.iterations(result),
       energy_evaluations = energy_evaluations,
     )
@@ -652,8 +656,8 @@ function nonlinear_local_minimize(
 
   iterations_done = 0
   for iteration = 0:maxiter
-    full_gradient = Energies.gradient(e, u)
-    gradient = full_gradient[active]
+    u = reconstruct(z)
+    gradient = project(Energies.gradient(e, u))
     norm(gradient) <= target && return (
       u = u,
       iterations = iteration,
@@ -662,9 +666,9 @@ function nonlinear_local_minimize(
     iteration == maxiter && break
     iterations_done = iteration + 1
 
-    H = Energies.hessian(e, u)[active, active]
+    hessian = reduced_hessian(u)
     step = try
-      -(H \ gradient)
+      -(hessian \ gradient)
     catch
       -gradient
     end
@@ -677,39 +681,64 @@ function nonlinear_local_minimize(
     slope = dot(gradient, step)
     accepted = false
     step_length = 1.0
-    trial_energy = energy0
     energy_resolution = 100 * eps(Float64) * max(1.0, abs(energy0))
     while step_length >= 2.0^-30
-      trial = copy(u)
-      trial[active] .+= step_length .* step
-      trial_energy = Energies.energy(e, trial)
+      trial_z = z .+ step_length .* step
+      trial_u = reconstruct(trial_z)
+      trial_energy = Energies.energy(e, trial_u)
       energy_evaluations += 1
-      if trial_energy <= energy0 + 1e-4 * step_length * slope
-        u = trial
-        accepted = true
-        break
-      end
       # Close to the minimizer, the predicted energy reduction can be below
       # the resolution of a Float64 energy evaluation even though the
       # projected derivative can still be reduced. In that regime, permit a
       # numerically non-increasing step only when it improves stationarity.
-      if trial_energy <= energy0 + energy_resolution &&
-         norm(Energies.gradient(e, trial)[active]) < norm(gradient)
-        u = trial
+      if trial_energy <= energy0 + 1e-4 * step_length * slope || (
+        trial_energy <= energy0 + energy_resolution &&
+        norm(project(Energies.gradient(e, trial_u))) < norm(gradient)
+      )
+        z = trial_z
         accepted = true
         break
       end
       step_length *= 0.5
     end
     accepted || break
-    if step_length * norm(step) <= 1e-12 * (1 + norm(u[active]))
-      break
-    end
+    step_length * norm(step) <= 1e-12 * (1 + norm(z)) && break
   end
   return (
-    u = u,
+    u = reconstruct(z),
     iterations = iterations_done,
     energy_evaluations = energy_evaluations,
+  )
+end
+
+"""Minimize a nonlinear energy with all exterior degrees of freedom fixed."""
+function nonlinear_local_minimize(
+  e::Energies.NonlinearEnergy{Float64},
+  u_cur::Vector{Float64},
+  idx_sub::AbstractVector;
+  relative_tolerance::Float64 = 1e-10,
+  absolute_tolerance::Float64 = 1e-12,
+  maxiter::Int = 50,
+)
+  active = collect(Int, idx_sub)
+  isempty(active) &&
+    return (u = copy(u_cur), iterations = 0, energy_evaluations = 0)
+
+  function reconstruct(z)
+    u = copy(u_cur)
+    u[active] .= z
+    return u
+  end
+
+  return _reduced_minimize(
+    e,
+    u_cur[active],
+    reconstruct,
+    gradient -> gradient[active],
+    u -> Energies.hessian(e, u)[active, active];
+    relative_tolerance = relative_tolerance,
+    absolute_tolerance = absolute_tolerance,
+    maxiter = maxiter,
   )
 end
 
@@ -1041,88 +1070,15 @@ function minimize_linear_subspace(
   maxiter::Int = 30,
 )
   B = orthonormal_basis(candidates)
-  alpha = B' * initial
-  initial_gradient = B' * Energies.gradient(e, B * alpha)
-  target = max(absolute_tolerance, relative_tolerance * norm(initial_gradient))
-  energy_evaluations = 0
-
-  if isnothing(e.hess_assembler)
-    function objective(coefficients)
-      energy_evaluations += 1
-      return Energies.energy(e, B * coefficients)
-    end
-    function reduced_gradient!(storage, coefficients)
-      storage .= B' * Energies.gradient(e, B * coefficients)
-      return storage
-    end
-    result = Optim.optimize(
-      objective,
-      reduced_gradient!,
-      alpha,
-      Optim.LBFGS(),
-      Optim.Options(
-        iterations = maxiter,
-        g_abstol = target,
-        allow_f_increases = false,
-        show_warnings = false,
-      ),
-    )
-    return (
-      u = B * Optim.minimizer(result),
-      iterations = Optim.iterations(result),
-      energy_evaluations = energy_evaluations,
-    )
-  end
-
-  iterations_done = 0
-  for iteration = 0:maxiter
-    u = B * alpha
-    gradient = B' * Energies.gradient(e, u)
-    norm(gradient) <= target && return (
-      u = u,
-      iterations = iteration,
-      energy_evaluations = energy_evaluations,
-    )
-    iteration == maxiter && break
-    iterations_done = iteration + 1
-    reduced_hessian = Symmetric(B' * Energies.hessian(e, u) * B)
-    step = try
-      -(reduced_hessian \ gradient)
-    catch
-      -gradient
-    end
-    if !all(isfinite, step) || dot(gradient, step) >= 0
-      step = -gradient
-    end
-
-    energy0 = Energies.energy(e, u)
-    energy_evaluations += 1
-    slope = dot(gradient, step)
-    accepted = false
-    step_length = 1.0
-    energy_resolution = 100 * eps(Float64) * max(1.0, abs(energy0))
-    while step_length >= 2.0^-30
-      trial_alpha = alpha .+ step_length .* step
-      trial_u = B * trial_alpha
-      trial_energy = Energies.energy(e, trial_u)
-      energy_evaluations += 1
-      if trial_energy <= energy0 + 1e-4 * step_length * slope || (
-        trial_energy <= energy0 + energy_resolution &&
-        norm(B' * Energies.gradient(e, trial_u)) < norm(gradient)
-      )
-        alpha = trial_alpha
-        accepted = true
-        break
-      end
-      step_length *= 0.5
-    end
-    accepted || break
-    step_length * norm(step) <= 1e-12 * (1 + norm(alpha)) && break
-  end
-  return (
-    u = B * alpha,
-    iterations = iterations_done,
-    energy_evaluations = energy_evaluations,
+  return _reduced_minimize(
+    e,
+    B' * initial,
+    alpha -> B * alpha,
+    gradient -> B' * gradient,
+    u -> Symmetric(B' * Energies.hessian(e, u) * B);
+    relative_tolerance = relative_tolerance,
+    absolute_tolerance = absolute_tolerance,
+    maxiter = maxiter,
   )
 end
 
@@ -1150,94 +1106,15 @@ function minimize_affine_corrections(
     error isa ArgumentError || rethrow()
     return (u = copy(anchor), iterations = 0, energy_evaluations = 0)
   end
-  alpha = zeros(size(B, 2))
-  initial_gradient = B' * Energies.gradient(e, anchor)
-  target = max(absolute_tolerance, relative_tolerance * norm(initial_gradient))
-  energy_evaluations = 0
-
-  if isnothing(e.hess_assembler)
-    function objective(coefficients)
-      energy_evaluations += 1
-      return Energies.energy(e, anchor + B * coefficients)
-    end
-    function reduced_gradient!(storage, coefficients)
-      storage .= B' * Energies.gradient(e, anchor + B * coefficients)
-      return storage
-    end
-    result = Optim.optimize(
-      objective,
-      reduced_gradient!,
-      alpha,
-      Optim.LBFGS(),
-      Optim.Options(
-        iterations = maxiter,
-        g_abstol = target,
-        allow_f_increases = false,
-        show_warnings = false,
-      ),
-    )
-    return (
-      u = anchor + B * Optim.minimizer(result),
-      iterations = Optim.iterations(result),
-      energy_evaluations = energy_evaluations,
-    )
-  end
-
-  iterations_done = 0
-  for iteration = 0:maxiter
-    u = anchor + B * alpha
-    gradient = B' * Energies.gradient(e, u)
-    norm(gradient) <= target && return (
-      u = u,
-      iterations = iteration,
-      energy_evaluations = energy_evaluations,
-    )
-    iteration == maxiter && break
-    iterations_done = iteration + 1
-    reduced_hessian = Symmetric(B' * Energies.hessian(e, u) * B)
-    step = try
-      -(reduced_hessian \ gradient)
-    catch
-      -gradient
-    end
-    if !all(isfinite, step) || dot(gradient, step) >= 0
-      step = -gradient
-    end
-
-    energy0 = Energies.energy(e, u)
-    energy_evaluations += 1
-    slope = dot(gradient, step)
-    accepted = false
-    step_length = 1.0
-    trial_energy = energy0
-    energy_resolution = 100 * eps(Float64) * max(1.0, abs(energy0))
-    while step_length >= 2.0^-30
-      trial_alpha = alpha .+ step_length .* step
-      trial_u = anchor + B * trial_alpha
-      trial_energy = Energies.energy(e, trial_u)
-      energy_evaluations += 1
-      if trial_energy <= energy0 + 1e-4 * step_length * slope
-        alpha = trial_alpha
-        accepted = true
-        break
-      end
-      if trial_energy <= energy0 + energy_resolution &&
-         norm(B' * Energies.gradient(e, trial_u)) < norm(gradient)
-        alpha = trial_alpha
-        accepted = true
-        break
-      end
-      step_length *= 0.5
-    end
-    accepted || break
-    if step_length * norm(step) <= 1e-12 * (1 + norm(alpha))
-      break
-    end
-  end
-  return (
-    u = anchor + B * alpha,
-    iterations = iterations_done,
-    energy_evaluations = energy_evaluations,
+  return _reduced_minimize(
+    e,
+    zeros(size(B, 2)),
+    alpha -> anchor + B * alpha,
+    gradient -> B' * gradient,
+    u -> Symmetric(B' * Energies.hessian(e, u) * B);
+    relative_tolerance = relative_tolerance,
+    absolute_tolerance = absolute_tolerance,
+    maxiter = maxiter,
   )
 end
 
@@ -1270,7 +1147,50 @@ function reconstruct_implicit!(
 end
 
 """
-    var_dd(e, subdomain_dofs; maxiter=50, tol=1e-8, ...)
+    VarDDResult
+
+Result of [`var_dd`](@ref).
+
+# Fields
+- `u::Vector{Float64}`: final iterate
+- `energy::Float64`: energy of `u`
+- `energy_history::Vector{Float64}`: energies of `u_0, ..., u_k`, so its length
+  is `iterations + 1`
+- `iterate_history::Vector{Vector{Float64}}`: the iterates `u_0, ..., u_k`
+- `residual_history::Vector{Float64}`: residual norms of `u_1, ..., u_k`, so
+  its length is `iterations`
+- `local_update_history::Union{Nothing,Vector{Vector{Vector{Float64}}}}`: for
+  each sweep, the local increments `u_i - u_cur` of every subdomain. This is
+  `nothing` unless `var_dd` was called with `save_local_updates=true`
+- `converged::Bool`: whether the residual tolerance was reached
+- `iterations::Int`: number of outer sweeps performed
+"""
+struct VarDDResult
+  u::Vector{Float64}
+  energy::Float64
+  energy_history::Vector{Float64}
+  iterate_history::Vector{Vector{Float64}}
+  residual_history::Vector{Float64}
+  local_update_history::Union{Nothing,Vector{Vector{Vector{Float64}}}}
+  converged::Bool
+  iterations::Int
+end
+
+function Base.show(io::IO, result::VarDDResult)
+  status = result.converged ? "converged" : "not converged"
+  @printf(
+    io,
+    "VarDDResult(%s after %d iterations, energy = %.6e, residual = %.6e)",
+    status,
+    result.iterations,
+    result.energy,
+    isempty(result.residual_history) ? NaN : last(result.residual_history),
+  )
+  return nothing
+end
+
+"""
+    var_dd(e, subdomain_dofs; maxiter=50, tol=1e-8, ...) -> VarDDResult
 
 Variational domain decomposition algorithm for solving various energy minimization problems.
 
@@ -1304,6 +1224,10 @@ Variational domain decomposition algorithm for solving various energy minimizati
   nonlinear energies it records the reduced dimension, L-BFGS iterations,
   convergence, projected residual, and energy evaluations.
 - `verbose::Bool=true`: Print per-iteration convergence information
+
+# Returns
+A [`VarDDResult`](@ref) holding the final iterate, its energy, the energy,
+iterate and residual histories, and the convergence status.
 """
 function var_dd(
   e::Energies.AbstractEnergy{Float64},
@@ -1319,8 +1243,6 @@ function var_dd(
   local_solve_callback = nothing,
   verbose::Bool = true,
 )
-  # TODO: Make local updates and other returns more elgant with info struct?
-
   history_depth >= 0 ||
     throw(ArgumentError("history_depth must be nonnegative"))
   quadratic_model + projected_gp_model <= 1 || throw(
@@ -1416,11 +1338,16 @@ function var_dd(
     push!(sol_hist, copy(u_new))
     if resnorm < tol
       verbose && println("Converged at iteration $n with energy e = $e_new")
-      if save_local_updates
-        return u_new, e_new, e_hist, sol_hist, resnorm_hist, local_update_hist
-      else
-        return u_new, e_new, e_hist, sol_hist, resnorm_hist
-      end
+      return VarDDResult(
+        u_new,
+        e_new,
+        e_hist,
+        sol_hist,
+        resnorm_hist,
+        save_local_updates ? local_update_hist : nothing,
+        true,
+        n,
+      )
     end
 
     if history_depth > 0
@@ -1432,11 +1359,16 @@ function var_dd(
   end
 
   @warn "Reached maxiter=$maxiter with energy ≈ $e_cur"
-  if save_local_updates
-    return u_cur, e_cur, e_hist, sol_hist, resnorm_hist, local_update_hist
-  else
-    return u_cur, e_cur, e_hist, sol_hist, resnorm_hist
-  end
+  return VarDDResult(
+    u_cur,
+    e_cur,
+    e_hist,
+    sol_hist,
+    resnorm_hist,
+    save_local_updates ? local_update_hist : nothing,
+    false,
+    maxiter,
+  )
 end
 
 end # module

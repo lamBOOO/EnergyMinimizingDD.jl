@@ -43,14 +43,17 @@ A, _, b, subdomains, _ = FEM.FEM_Schroedinger(
     partitioning=:cartesian,
 )
 energy = E.QuadraticEnergy(A, b)
-u, _, _, _, residuals = S.var_dd(
-    energy, subdomains; maxiter=50, tol=1e-8, verbose=false,
-)
+result = S.var_dd(energy, subdomains; maxiter=50, tol=1e-8, verbose=false)
 
-@show length(residuals) norm(A * u - b)
-# length(residuals) = 28
-# norm(A * u - b) = 5.337471100984455e-9
+@show result.converged result.iterations norm(A * result.u - b)
+# result.converged = true
+# result.iterations = 28
+# norm(A * result.u - b) = 5.337471100984455e-9
 ```
+
+`var_dd` returns a `VarDDResult` holding the final iterate `u`, its `energy`,
+the `energy_history`, `iterate_history` and `residual_history`, and the
+`converged` / `iterations` status.
 
 ## Development notice
 

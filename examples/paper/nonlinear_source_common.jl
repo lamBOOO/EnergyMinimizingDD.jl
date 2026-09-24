@@ -180,11 +180,13 @@ function nonlinear_source_vardd(
   quadratic_model=false,
 )
   initial = norm(Energies.gradient(energy, u0))
-  u, _, energies, _, residuals = Solvers.var_dd(
+  result = Solvers.var_dd(
     energy, subdomains;
     u0, maxiter, tol=tolerance * initial, history_depth,
     quadratic_model, verbose=false,
   )
+  u, energies, residuals = result.u, result.energy_history,
+    result.residual_history
   batches = length(energies) - 1
   work = NonlinearSourceWork(
     nonlinear_local_batches=quadratic_model ? 0 : batches,
