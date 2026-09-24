@@ -1,0 +1,29 @@
+cff-version: 1.2.0
+title: "EnergyMinimizingDD.jl: Energy-minimizing domain decomposition for finite-element problems in Julia "
+version: 0.1.1
+license: "MIT"
+type: software
+abstract: "EnergyMinimizingDD.jl implements energy-minimizing domain-decomposition methods for finite-element problems. Each iteration solves independent variational problems on overlapping local spaces and then recombines the resulting candidates through a small global minimization. A common solver interface supports quadratic source problems, generalized eigenproblems, semilinear energies, and Gross-Pitaevskii models."
+authors:
+  - given-names: Lambert
+    family-names: Theisen
+    affiliation: RWTH Aachen University
+    orcid: "https://orcid.org/0000-0001-5460-5425"
+  - given-names: Stamm
+    family-names: Benjamin
+    affiliation: University of Stuttgart
+    orcid: "https://orcid.org/0000-0003-3375-483X"
+  - given-names: Muhammad
+    family-names: Hassan
+    affiliation: Technical University of Munich
+    orcid: "https://orcid.org/0000-0002-7582-6670"
+  - given-names: Baraniak
+    family-names: Jedrzej
+    affiliation: RWTH Aachen University
+keywords:
+  - "Julia"
+  - "finite element method"
+  - "domain decomposition method"
+  - "source problems"
+  - "eigenvalue problems"
+repository-code: "https://github.com/lamBOOO/GeMotion.jl"
